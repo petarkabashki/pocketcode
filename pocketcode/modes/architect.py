@@ -10,6 +10,31 @@ from pocketcode.core.memory_bank import MemoryBankManager # Added import
 
 logger = logging.getLogger(__name__)
 
+# %% Added: Helper function to format CLI context (copied from code.py for now)
+# TODO: Consider moving this to a shared utility module
+def _format_cli_context(cli_context_data: Dict[str, Any]) -> Optional[str]:
+    """Formats the CLI context dictionary into a string for LLM prompts."""
+    if not cli_context_data or not any(cli_context_data.values()):
+        return None # Return None if context is empty
+
+    lines = ["--- CLI Context ---"]
+    if cli_context_data.get("files"):
+        lines.append("Files:")
+        for item in sorted(list(cli_context_data["files"])): lines.append(f"- {item}")
+    if cli_context_data.get("folders"):
+        lines.append("Folders:")
+        for item in sorted(list(cli_context_data["folders"])): lines.append(f"- {item}")
+    if cli_context_data.get("urls"):
+        lines.append("URLs:")
+        for item in sorted(list(cli_context_data["urls"])): lines.append(f"- {item}")
+    if cli_context_data.get("snippets"):
+        lines.append("Snippets:")
+        for name, content in sorted(cli_context_data["snippets"].items()):
+            lines.append(f"- {name}: {content}")
+    lines.append("-------------------")
+    return "\n".join(lines)
+
+
 class ArchitectMode(BaseMode):
     """
     Mode for planning, designing system architecture, and documentation using PocketFlow.
@@ -91,12 +116,27 @@ class ArchitectMode(BaseMode):
 
         Args:
             request: The user's request payload.
-            context: Additional context (e.g., session info, history).
+            context: Additional context (e.g., session info, history, cli_context).
 
         Returns:
             The result produced by the PocketFlow execution.
         """
         logger.info(f"ArchitectMode processing request: {request}")
+        logger.debug(f"ArchitectMode received context keys: {list(context.keys())}") # Log received context keys
+
+        # %% Added: Format CLI context if present
+        formatted_cli_context = None
+        cli_context_data = context.get('cli_context')
+        if cli_context_data:
+            logger.debug(f"CLI context received: {cli_context_data}")
+            formatted_cli_context = _format_cli_context(cli_context_data)
+            if formatted_cli_context:
+                logger.info("Formatted CLI context will be passed to the flow.")
+                # logger.debug(f"Formatted CLI context:\n{formatted_cli_context}") # Optional: log the formatted string
+            else:
+                 logger.info("CLI context received but was empty.")
+        else:
+             logger.info("No CLI context found in the received context dictionary.")
 
         # Example: Access memory bank content if needed before calling flow
         if self._memory_manager:
@@ -115,18 +155,25 @@ class ArchitectMode(BaseMode):
         # Initialize the shared store for the flow run
         shared_store = {
             "initial_request": request,
-            "context": context,
+            "context": context, # Pass original context
             "mode_config": self._config, # Make mode config available to nodes
+            # %% Added: Pass formatted CLI context to the flow's shared store
+            "formatted_cli_context": formatted_cli_context,
             # "memory_manager": self._memory_manager, # Optionally pass manager directly to flow store
             "results": {} # Placeholder for flow outputs
         }
+
+        # The flow nodes (especially the one preparing the LLM prompt)
+        # should now look for shared_store["formatted_cli_context"]
+        # and prepend it to the user request or system prompt if it's not None.
 
         try:
             # Assuming a synchronous flow for now. Adapt if async needed.
             # flow.run(shared_store) # Replace with actual PocketFlow run method
             logger.warning("PocketFlow execution (`flow.run()`) is currently a placeholder.")
-            # Placeholder result
-            final_result = f"ArchitectMode processed request '{request}' using flow. Final state (placeholder): {shared_store.get('results')}"
+            # Placeholder result - demonstrating context usage
+            cli_info = "\n(CLI context was provided)" if formatted_cli_context else ""
+            final_result = f"ArchitectMode processed request '{request}' using flow.{cli_info} Final state (placeholder): {shared_store.get('results')}"
             shared_store["results"]["final_output"] = final_result # Simulate flow output
 
             logger.info("ArchitectMode PocketFlow execution completed (placeholder).")

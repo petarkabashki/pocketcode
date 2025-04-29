@@ -4,6 +4,7 @@ core:
   require_tool_confirmation: true # Added: Global flag to require user confirmation before executing tools
   enable_memory_bank: true        # Added: Toggle for memory bank functionality
   memory_bank_dir: pocketcode_docs # Name of the directory in CWD
+  allow_mode_switching: true      # Added: Toggle for allowing mode switching
   memory_bank_files:              # List of required files (used if enabled)
     - productContext.md
     - activeContext.md
@@ -103,3 +104,12 @@ modes:
 # Add other sections as needed (API keys, etc.)
 # api_keys:
 #   openai: ${OPENAI_API_KEY} # Example using environment variables
+
+# %% Added: Watch Mode Configuration
+watch_mode:
+  enabled_by_default: false # Requires /watch start command
+  trigger_string: "AI!"
+  instruction_source: after_trigger # Options: after_trigger, full_line
+  ask_confirmation: true # Ask user before processing detected instruction
+  watch_recursive: true # Watch subdirectories for paths added via /watch start
+  queue_changes: true # Queue multiple detected changes sequentially

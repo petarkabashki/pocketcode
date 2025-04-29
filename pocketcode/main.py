@@ -4,12 +4,15 @@ import json
 import argparse # Added for CLI argument parsing
 import logging
 import os # Added for CWD and path operations
+import queue # %% Added for watcher queue
+import time # %% Added for potential delays/timing
 
 # Updated imports
 from pocketcode.config.loader import load_settings
 from pocketcode.core.registration import register_components
 # Removed MemoryBankIncompleteError import, kept MemoryBankManager
 from pocketcode.core.memory_bank import MemoryBankManager
+from pocketcode.core.watcher import FileWatcher # %% Added watcher import
 
 # --- Global State (Placeholder) ---
 current_mode_instance = None
@@ -17,6 +20,17 @@ registered_components = {} # To store modes and tools globally for commands
 # Refactored: Nested structure for global and per-mode auto-approval
 auto_allowed_tools = {"__global__": {"__all__": False}}
 memory_manager = None # Global placeholder for memory manager instance
+global_allow_mode_switching = True # Default value, will be updated from config
+# %% Added: Global dictionary for CLI-managed context
+cli_context = {
+    "files": set(),
+    "folders": set(),
+    "urls": set(),
+    "snippets": {}
+}
+# %% Added: Watcher globals
+instruction_queue = None
+file_watcher = None
 
 # Basic logging setup
 # Ensure log level respects config later if needed
@@ -25,10 +39,98 @@ logging.basicConfig(level=getattr(logging, log_level_str, logging.INFO),
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# %% Added: Helper function to process watcher queue items
+def process_watcher_queue(instruction_queue, config, current_mode_instance, cli_context):
+    """Checks the watcher queue and processes one instruction if available."""
+    try:
+        event_data = instruction_queue.get_nowait()
+        logger.info(f"Processing event from watcher queue: {event_data.get('type')}")
+
+        if event_data.get("type") == "instruction":
+            filepath = event_data["filepath"]
+            instruction = event_data["instruction"]
+            watch_config = config.get('watch_mode', {})
+            ask_confirmation = watch_config.get('ask_confirmation', True)
+
+            proceed = False
+            if ask_confirmation:
+                # Temporarily log confirmation request instead of blocking input here
+                # Proper async input handling would be needed for a seamless experience
+                logger.info(f"Confirmation needed for watched instruction in '{filepath}': '{instruction}'")
+                # For now, let's assume 'y' for testing, replace with actual input if possible non-blockingly
+                # confirm = input(f"Detected 'AI!' instruction in '{filepath}': '{instruction}'. Process? (y/n) ").lower()
+                print(f"\n[Watcher] Detected 'AI!' instruction in '{filepath}': '{instruction}'.")
+                confirm = input(f"[Watcher] Process? (y/n) > ").strip().lower()
+                if confirm == 'y':
+                    proceed = True
+                else:
+                    logger.info("User declined processing watched instruction.")
+                    print("[Watcher] Instruction processing declined.")
+            else:
+                proceed = True # Process automatically if confirmation not required
+                print(f"\n[Watcher] Auto-processing instruction from '{filepath}': '{instruction}'")
+
+
+            if proceed and current_mode_instance:
+                logger.info(f"Processing watched instruction from {filepath}...")
+                try:
+                    # Read the *current* content
+                    # Add a small delay in case the file is still being written
+                    time.sleep(0.1)
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        file_content = f.read()
+
+                    # Prepare context
+                    context = {
+                        "user_id": "cli_user",
+                        "session_id": "cli_session",
+                        "cli_context": cli_context, # Pass original context dict
+                        "watched_file_path": filepath,
+                        "watched_file_content": file_content
+                    }
+
+                    # Process the request
+                    print(f"[Watcher] Sending instruction to {current_mode_instance.display_name}...")
+                    result = current_mode_instance.process_request(instruction, context)
+                    logger.info(f"Response from {current_mode_instance.display_name} (triggered by watch):")
+                    # Print clearly marked output
+                    print(f"\n--- Watch Trigger Result ({os.path.basename(filepath)}) ---")
+                    print(result)
+                    print("--- End Watch Trigger Result ---")
+
+                except FileNotFoundError:
+                    logger.error(f"File not found when trying to process watched instruction: {filepath}")
+                    print(f"[Watcher Error] File not found: {filepath}")
+                except Exception as e:
+                    logger.error(f"Error processing watched instruction from {filepath}: {e}", exc_info=True)
+                    print(f"[Watcher Error] Error processing instruction from {filepath}. See logs.")
+
+        # Mark task as done *after* processing attempt
+        instruction_queue.task_done()
+        return True # Indicate an item was processed
+
+    except queue.Empty:
+        # No items in the queue, continue normally
+        return False
+    except Exception as e:
+        # Catch other potential errors during queue processing
+        logger.error(f"Error processing watcher queue: {e}", exc_info=True)
+        print("[Watcher Error] An unexpected error occurred processing the queue. See logs.")
+        # Attempt to mark task done even if there was an error during processing
+        try:
+             instruction_queue.task_done()
+        except ValueError: # If task_done() called when queue is empty/no pending task
+             pass
+        return False # Indicate no item successfully processed
+
+
 def run():
     """Main entry point for Pocketcode."""
     logger.info("--- Starting Pocketcode ---")
     global memory_manager # Declare intent to modify global
+    # %% Added watcher globals modification
+    global instruction_queue
+    global file_watcher
 
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="Pocketcode AI Assistant CLI")
@@ -50,6 +152,10 @@ def run():
              logger.info(f"Logging level set to {log_level_config}")
         else:
              logger.warning(f"Invalid log level '{log_level_config}' in config. Using default.")
+# Read mode switching setting
+        global global_allow_mode_switching
+        global_allow_mode_switching = core_config_temp.get('allow_mode_switching', True) # Default to True if missing
+        logger.info(f"Mode switching allowed: {global_allow_mode_switching}")
 
     except FileNotFoundError as e:
          logger.error(f"Configuration file not found: {e}. Exiting.")
@@ -90,6 +196,15 @@ def run():
         logger.error("Proceeding without memory bank due to initialization error.")
         memory_manager = None # Ensure manager is None if setup failed
     # --- End Memory Bank Section ---
+
+    # %% --- Watcher Initialization ---
+    watch_mode_config = config.get('watch_mode', {})
+    instruction_queue = queue.Queue()
+    file_watcher = FileWatcher(instruction_queue, watch_mode_config)
+    # Note: Watcher is not started here by default based on plan. Use /watch start.
+    logger.info("File watcher initialized.")
+    # %% --- End Watcher Initialization ---
+
 
     logger.info("Registering Components...")
     try:
@@ -142,22 +257,47 @@ def run():
     # --- Interactive CLI Loop ---
     logger.info("\n--- Pocketcode Ready. Enter your request or a command (starting with /). ---")
     while True:
+        processed_queue_item = False
         try:
+            # %% Check watcher queue before prompting for input
+            # Keep checking queue until it's empty or an error occurs
+            while True:
+                 item_processed_this_cycle = process_watcher_queue(instruction_queue, config, current_mode_instance, cli_context)
+                 if item_processed_this_cycle:
+                     processed_queue_item = True # Mark that we did something from the queue
+                 else:
+                     break # Queue is empty or error occurred, break inner loop
+
+            # If we processed an item, show the prompt again without waiting for input immediately
+            # This provides a chance to see the output before the next input prompt blocks
+            if processed_queue_item:
+                 print(f"\n({getattr(current_mode_instance, 'display_name', 'unknown')}) > ", end='', flush=True)
+                 # We could potentially add a small sleep here if needed, but let's try without first.
+                 # time.sleep(0.1)
+
+
             if not current_mode_instance:
                  logger.error("Critical error: No active mode instance. Exiting.")
                  break
             # Use display_name if available, otherwise slug
             mode_prompt_name = getattr(current_mode_instance, 'display_name', getattr(current_mode_instance, 'name', 'unknown'))
+
+            # Get user input (this will block)
             user_input = input(f"({mode_prompt_name}) > ")
             if not user_input:
                 continue
 
             if user_input.startswith('/'):
-                # Pass memory_manager (could be None) to handle_command
-                handle_command(user_input, config, memory_manager)
+                # %% Pass file_watcher to handle_command
+                handle_command(user_input, config, memory_manager, file_watcher)
             elif current_mode_instance:
                 logger.info(f"Processing request with {current_mode_instance.display_name}...")
-                context = {"user_id": "cli_user", "session_id": "cli_session"}
+                # %% Modified: Include cli_context in the context passed to the mode
+                context = {
+                    "user_id": "cli_user",
+                    "session_id": "cli_session",
+                    "cli_context": cli_context # Pass the managed context
+                }
                 result = current_mode_instance.process_request(user_input, context)
                 logger.info(f"Response from {current_mode_instance.display_name}:")
                 print(result)
@@ -165,10 +305,18 @@ def run():
                 logger.error("No active mode to process the request.")
 
         except KeyboardInterrupt:
-            logger.info("\nExiting Pocketcode.")
+            logger.info("\nStopping watcher...")
+            if file_watcher and file_watcher.is_running():
+                file_watcher.stop() # %% Ensure watcher stops on exit
+            logger.info("Exiting Pocketcode.")
             break
         except Exception as e:
             logger.error(f"An unexpected error occurred in the main loop: {e}", exc_info=True)
+            # %% Ensure watcher stops on unexpected exit too
+            logger.info("\nStopping watcher due to error...")
+            if file_watcher and file_watcher.is_running():
+                file_watcher.stop()
+            break # Exit loop on error
 
 # --- Helper Function for Auto-Allow Check ---
 def is_tool_auto_allowed(tool_name, mode_slug=None):
@@ -193,8 +341,8 @@ def is_tool_auto_allowed(tool_name, mode_slug=None):
     return global_settings.get("__all__", False)
 
 # --- Command Handling ---
-# Signature remains the same, memory_manager can be None
-def handle_command(command_input, config, memory_manager):
+# %% Modified signature to accept file_watcher
+def handle_command(command_input, config, memory_manager, file_watcher):
     """Parses and executes CLI commands."""
     parts = command_input.strip().split()
     command = parts[0].lower()
@@ -205,6 +353,10 @@ def handle_command(command_input, config, memory_manager):
     global current_mode_instance
     global registered_components
     global auto_allowed_tools
+    # %% Added: Make cli_context accessible
+    global cli_context
+    # Access the global mode switching setting
+    global global_allow_mode_switching
 
     registered_modes = registered_components.get('modes', {})
     registered_tools = registered_components.get('tools', {})
@@ -245,6 +397,12 @@ def handle_command(command_input, config, memory_manager):
 
 
     elif command == "/mode":
+        # Check if mode switching is allowed globally
+        if not global_allow_mode_switching:
+            print("Mode switching is currently disabled by configuration.")
+            logger.warning("Attempted /mode command while mode switching is disabled.")
+            return
+
         if not args:
             logger.warning("Usage: /mode <mode_slug>")
             print("Please specify a mode slug. Available modes:", list(registered_modes.keys()))
@@ -381,6 +539,228 @@ def handle_command(command_input, config, memory_manager):
                 print(f"{action_str} tools for scope: {scope}.")
                 logger.info(f"Set auto-allow __all__={allow_action} for scope '{scope}'")
 
+    # %% Added: /context command handling
+    elif command == "/context":
+        if not args:
+            print("Usage: /context <show|add|remove|clear> [options...]")
+            print("Run '/context help' for more details.")
+            return
+
+        subcommand = args[0].lower()
+        sub_args = args[1:]
+
+        if subcommand == "help":
+             print_context_help()
+
+        elif subcommand == "show":
+            show_type = sub_args[0].lower() if sub_args else "all"
+            print("--- Current CLI Context ---")
+            if show_type in ["all", "files"] and cli_context["files"]:
+                print("Files:")
+                for item in sorted(list(cli_context["files"])): print(f"  - {item}")
+            if show_type in ["all", "folders"] and cli_context["folders"]:
+                print("Folders:")
+                for item in sorted(list(cli_context["folders"])): print(f"  - {item}")
+            if show_type in ["all", "urls"] and cli_context["urls"]:
+                print("URLs:")
+                for item in sorted(list(cli_context["urls"])): print(f"  - {item}")
+            if show_type in ["all", "snippets"] and cli_context["snippets"]:
+                print("Snippets:")
+                for name, content in sorted(cli_context["snippets"].items()):
+                    print(f"  - {name}: '{content[:50]}{'...' if len(content) > 50 else ''}'")
+            if not cli_context["files"] and not cli_context["folders"] and \
+               not cli_context["urls"] and not cli_context["snippets"]:
+                print("(Context is empty)")
+            print("---------------------------")
+
+        elif subcommand == "add":
+            if len(sub_args) < 2:
+                print(f"Usage: /context add <file|folder|url|snippet> <value...>")
+                return
+            add_type = sub_args[0].lower()
+            value = sub_args[1:] # Remaining parts form the value/content
+
+            if add_type == "file":
+                file_path = value[0]
+                # Basic validation: check if file exists (optional, can be noisy)
+                # if not os.path.isfile(file_path):
+                #     print(f"Warning: File not found at '{file_path}'. Adding anyway.")
+                cli_context["files"].add(file_path)
+                print(f"Added file context: {file_path}")
+            elif add_type == "folder":
+                folder_path = value[0]
+                # Basic validation: check if folder exists (optional)
+                # if not os.path.isdir(folder_path):
+                #     print(f"Warning: Folder not found at '{folder_path}'. Adding anyway.")
+                cli_context["folders"].add(folder_path)
+                print(f"Added folder context: {folder_path}")
+            elif add_type == "url":
+                url = value[0]
+                # Basic validation could be added here (e.g., regex)
+                cli_context["urls"].add(url)
+                print(f"Added URL context: {url}")
+            elif add_type == "snippet":
+                if len(value) < 2:
+                    print("Usage: /context add snippet <name> <content...>")
+                    return
+                snippet_name = value[0]
+                snippet_content = " ".join(value[1:])
+                cli_context["snippets"][snippet_name] = snippet_content
+                print(f"Added snippet context: '{snippet_name}'")
+            else:
+                print(f"Unknown context type to add: '{add_type}'. Use file, folder, url, or snippet.")
+
+        elif subcommand == "remove":
+            if len(sub_args) < 2:
+                print(f"Usage: /context remove <file|folder|url|snippet> <value_or_name>")
+                return
+            remove_type = sub_args[0].lower()
+            identifier = sub_args[1] # Path, URL, or snippet name
+
+            item_removed = False
+            if remove_type == "file":
+                if identifier in cli_context["files"]:
+                    cli_context["files"].remove(identifier)
+                    item_removed = True
+            elif remove_type == "folder":
+                 if identifier in cli_context["folders"]:
+                    cli_context["folders"].remove(identifier)
+                    item_removed = True
+            elif remove_type == "url":
+                 if identifier in cli_context["urls"]:
+                    cli_context["urls"].remove(identifier)
+                    item_removed = True
+            elif remove_type == "snippet":
+                 if identifier in cli_context["snippets"]:
+                    del cli_context["snippets"][identifier]
+                    item_removed = True
+            else:
+                print(f"Unknown context type to remove: '{remove_type}'. Use file, folder, url, or snippet.")
+                return
+
+            if item_removed:
+                print(f"Removed {remove_type} context: {identifier}")
+            else:
+                print(f"{remove_type.capitalize()} context not found: {identifier}")
+
+        elif subcommand == "clear":
+            clear_type = sub_args[0].lower() if sub_args else "all"
+
+            cleared_something = False
+            if clear_type in ["all", "files"]:
+                if cli_context["files"]:
+                    cli_context["files"].clear()
+                    print("Cleared file context.")
+                    cleared_something = True
+            if clear_type in ["all", "folders"]:
+                 if cli_context["folders"]:
+                    cli_context["folders"].clear()
+                    print("Cleared folder context.")
+                    cleared_something = True
+            if clear_type in ["all", "urls"]:
+                 if cli_context["urls"]:
+                    cli_context["urls"].clear()
+                    print("Cleared URL context.")
+                    cleared_something = True
+            if clear_type in ["all", "snippets"]:
+                 if cli_context["snippets"]:
+                    cli_context["snippets"].clear()
+                    print("Cleared snippet context.")
+                    cleared_something = True
+
+            if not cleared_something and clear_type != "all":
+                 print(f"No {clear_type} context found to clear.")
+            elif clear_type == "all" and not cleared_something:
+                 print("Context was already empty.")
+            elif clear_type not in ["all", "files", "folders", "urls", "snippets"]:
+                 print(f"Unknown context type to clear: '{clear_type}'. Use file, folder, url, snippet, or all.")
+
+        else:
+            print(f"Unknown /context subcommand: '{subcommand}'. Use show, add, remove, clear, or help.")
+
+    # %% Added: Mode switching status command
+    elif command == "/mode-switch-status":
+        status = "enabled" if global_allow_mode_switching else "disabled"
+        print(f"Mode switching is currently {status} (based on configuration).")
+
+    # %% Added: /watch command handling
+    elif command == "/watch":
+        if not file_watcher:
+            print("Error: File watcher is not initialized.")
+            logger.error("Attempted /watch command but file_watcher is None.")
+            return
+
+        if not args:
+            print("Usage: /watch <start|stop|status> [paths...]")
+            return
+
+        subcommand = args[0].lower()
+        watch_args = args[1:]
+
+        if subcommand == "start":
+            if not watch_args:
+                print("Usage: /watch start <path1> [path2...]")
+                return
+            added_count = 0
+            for path in watch_args:
+                if file_watcher.add_watch(path):
+                    added_count += 1
+            print(f"Added {added_count} path(s) to watcher.")
+            if not file_watcher.is_running() and added_count > 0:
+                 print("Starting watcher thread...")
+                 file_watcher.start()
+            elif not file_watcher.is_running() and added_count == 0:
+                 print("No valid paths added, watcher not started.")
+            elif file_watcher.is_running():
+                 print("Watcher is already running.")
+
+        elif subcommand == "stop":
+            if not watch_args:
+                # Stop watching all paths and stop the thread
+                print("Stopping watcher and clearing all watched paths...")
+                watched = file_watcher.get_watched_paths()
+                removed_count = 0
+                for path in list(watched): # Iterate over a copy
+                    if file_watcher.remove_watch(path):
+                        removed_count += 1
+                if file_watcher.is_running():
+                    file_watcher.stop()
+                print(f"Removed {removed_count} path(s). Watcher stopped.")
+            else:
+                # Stop watching specific paths
+                removed_count = 0
+                for path in watch_args:
+                    if file_watcher.remove_watch(path):
+                        removed_count += 1
+                print(f"Removed {removed_count} path(s) from watcher.")
+                # Optionally stop the thread if no paths are left?
+                if not file_watcher.get_watched_paths() and file_watcher.is_running():
+                     print("No paths left to watch. Stopping watcher thread...")
+                     file_watcher.stop()
+
+        elif subcommand == "status":
+            if file_watcher.is_running():
+                print("Watcher status: Running")
+                watched = file_watcher.get_watched_paths()
+                if watched:
+                    print("Watching paths:")
+                    for path in sorted(list(watched)):
+                        print(f"  - {path}")
+                else:
+                    print("Watching paths: (None)")
+            else:
+                print("Watcher status: Stopped")
+                # Still show paths that *would* be watched if started
+                watched = file_watcher.get_watched_paths()
+                if watched:
+                     print("Paths configured for watching (if started):")
+                     for path in sorted(list(watched)):
+                         print(f"  - {path}")
+
+        else:
+            print(f"Unknown /watch subcommand: '{subcommand}'. Use start, stop, or status.")
+
+
     else:
         logger.warning(f"Unknown command: {command}")
         print(f"Unknown command: {command}")
@@ -388,11 +768,11 @@ def handle_command(command_input, config, memory_manager):
 
 def print_help():
     """Prints the available CLI commands."""
-    # Updated help text
+    # %% Modified: Added /watch commands to help
     help_text = """
 Pocketcode Commands:
   /help                    Show this help message.
-  /mode <mode_slug>        Switch to the specified mode.
+  /mode <mode_slug>        Switch to the specified mode (if enabled).
   /modes [<m1> <m2> ...]   List allowed tools for specified modes (or all modes).
   /tools [--all]           List tools for current mode (or all registered tools).
                            Shows (allowed) status based on auto-approval settings.
@@ -400,13 +780,50 @@ Pocketcode Commands:
                            Applies globally or only to specified modes <m> if --mode is used.
   /disallow [<t>] [--mode <m>] Disallow auto-approval for tool <t> (or all tools if <t> omitted).
                            Applies globally or only to specified modes <m> if --mode is used.
+  /context <cmd> [opts]    Manage CLI context (files, folders, urls, snippets). Run '/context help'.
+  /watch start <p1> [<p2>..] Start watching specified file(s) or directorie(s).
+  /watch stop [<p1> <p2>..] Stop watching specified path(s), or all paths if none given.
+  /watch status            Show if the watcher is running and list watched paths.
   /create-memory-bank    Create the memory bank directory and required empty files (if configured).
+  /mode-switch-status    Show if mode switching is currently enabled or disabled by configuration.
   Ctrl+C                   Exit Pocketcode.
 
 Note: Auto-allow status controls whether tool execution requires confirmation (if enabled globally).
       It does not change the fundamental list of tools a mode *can* use, defined in settings.
+Watch mode triggers on lines containing 'AI!' (configurable) in modified watched files.
 """
     print(help_text)
+
+# %% Added: Helper function for /context help
+def print_context_help():
+    """Prints help specific to the /context command."""
+    context_help = """
+/context Commands:
+  /context show [files|folders|urls|snippets|all]
+                           Show current context items (default: all).
+  /context add file <path>
+                           Add a file path to the context.
+  /context add folder <path>
+                           Add a folder path to the context.
+  /context add url <url>
+                           Add a URL to the context.
+  /context add snippet <name> <content...>
+                           Add a named text snippet to the context.
+  /context remove file <path>
+                           Remove a file path from the context.
+  /context remove folder <path>
+                           Remove a folder path from the context.
+  /context remove url <url>
+                           Remove a URL from the context.
+  /context remove snippet <name>
+                           Remove a named snippet from the context.
+  /context clear [files|folders|urls|snippets|all]
+                           Clear context items (default: all).
+  /context help            Show this context command help.
+
+Note: This context is currently managed per-session and passed to the active mode.
+"""
+    print(context_help)
 
 
 if __name__ == "__main__":
