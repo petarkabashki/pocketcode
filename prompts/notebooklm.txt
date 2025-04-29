@@ -1,0 +1,4 @@
+I want to create an open extendable ai coding assistant that has the features of <Claude Code> and <Aider>. I want it created using python and the pocketflow framework. I want it to beasily extendable by new workflows and agentic modes (coder, designer, architect, orchestrator etc). I want to be able to easily add tools via python functions and MCP Functions. Also I want the workflows of the AI coding assistant to be easily embedable into other external workflows.
+Please outline an overall plan and a detailed instruction prompt that I can feed into an ai coder  to implement.
+
+

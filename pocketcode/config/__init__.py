@@ -1,0 +1,1 @@
+# This file makes 'pocketcode.config' a Python package.

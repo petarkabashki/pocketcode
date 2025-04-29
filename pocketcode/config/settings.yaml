@@ -1,0 +1,105 @@
+# pocketcode/config/settings.yaml
+core:
+  log_level: INFO
+  require_tool_confirmation: true # Added: Global flag to require user confirmation before executing tools
+  enable_memory_bank: true        # Added: Toggle for memory bank functionality
+  memory_bank_dir: pocketcode_docs # Name of the directory in CWD
+  memory_bank_files:              # List of required files (used if enabled)
+    - productContext.md
+    - activeContext.md
+    - systemPatterns.md
+    - techContext.md
+    - progress.md
+
+defaults:
+  llm_config:
+    provider: google # Default provider
+    model: gemini-1.5-pro-latest # Default model
+    parameters:
+      temperature: 0.7
+  allowed_tools: # Default tools available to all modes unless overridden
+    - read_file
+    - write_to_file
+    - list_files
+  # Add other potential defaults (e.g., default prompt path)
+
+tools: # Register all available tools
+  read_file: pocketcode.tools.filesystem.ReadFileTool
+  write_to_file: pocketcode.tools.filesystem.WriteToFileTool
+  list_files: pocketcode.tools.filesystem.ListFilesTool
+  create_directory: pocketcode.tools.filesystem.CreateDirectoryTool # Added
+  glob_files: pocketcode.tools.filesystem.GlobFilesTool         # Added
+  search_code: pocketcode.tools.search.SearchCodeTool # Updated registration
+  execute_command: pocketcode.tools.system.ExecuteCommandTool
+  # Register the new specific Git tools
+  git_status: pocketcode.tools.git.GitStatusTool
+  git_diff: pocketcode.tools.git.GitDiffTool
+  git_add: pocketcode.tools.git.GitAddTool
+  git_commit: pocketcode.tools.git.GitCommitTool
+  git_pull: pocketcode.tools.git.GitPullTool
+  git_push: pocketcode.tools.git.GitPushTool
+  # Removed old generic git_command:
+  # git_command: pocketcode.tools.git.GitCommandTool
+
+modes:
+  code: # Mode Slug
+    name: "💻 Code" # User-friendly display name
+    description: "Mode specialized for writing and modifying code using a PocketFlow." # Purpose
+    module: pocketcode.modes.code.CodeMode # Path to the BaseMode subclass implementation
+    flow_module: pocketcode.flows.code.create_code_flow # Path to the function that creates the PocketFlow instance
+    prompt_template_path: prompts/code_mode_system.txt # (Optional) Path to main system prompt file
+    llm_config: # Overrides default LLM config
+      provider: anthropic
+      model: claude-3-opus-20240229
+      parameters:
+        temperature: 0.5
+    allowed_tools: # List of tool names this mode's LLM can call via YAML
+      - read_file
+      - write_to_file
+      - list_files
+      - search_code # Updated allowed tool
+      - execute_command
+      # Add the new specific Git tools
+      - git_status
+      - git_diff
+      - git_add
+      - git_commit
+      - git_pull
+      - git_push
+      # Removed old generic git_command:
+      # - git_command
+    custom_instructions_path: prompts/code_mode_instructions.txt # (Optional) Path to mode-specific instructions
+
+  architect:
+    name: "🏗️ Architect"
+    description: "Mode for planning, designing system architecture, and documentation."
+    module: pocketcode.modes.architect.ArchitectMode
+    flow_module: pocketcode.flows.architect.create_architect_flow
+    prompt_template_path: prompts/architect_mode_system.txt
+    # Inherits default llm_config
+    allowed_tools: # Defines specific tools for this mode
+      - read_file
+      - write_to_file # Potentially restricted to *.md via implementation logic
+      - list_files
+      - search_code # Updated allowed tool
+    custom_instructions_path: prompts/architect_mode_instructions.txt
+
+  micromanager:
+    name: "🔬 Micromanager" # Updated name as per task
+    description: "Mode for analyzing tasks, breaking them down into subtasks, and delegating execution to other specialized modes."
+    module: pocketcode.modes.micromanager.MicromanagerMode # Points to the class created
+    flow_module: pocketcode.flows.micromanager.create_micromanager_flow # NOTE: This flow needs to be created later
+    # prompt_template_path: prompts/micromanager_system.txt # Optional: Can add later
+    # llm_config: # Inherits default LLM config for now
+    allowed_tools: # Tools needed for analysis and planning
+      - read_file
+      - list_files
+      - search_code # Updated allowed tool
+      # Assuming delegation tools (switch_mode, new_task) and ask_followup_question are handled by the core system or flow implementation
+    # custom_instructions_path: prompts/micromanager_instructions.txt # Optional: Can add later
+
+  # Add other modes (ask, debug, etc.) following the same structure
+
+# Add other sections as needed (API keys, etc.)
+# api_keys:
+#   openai: ${OPENAI_API_KEY} # Example using environment variables
