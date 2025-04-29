@@ -6,4 +6,3 @@ chainlit.db
 .aider*
 logs
 *.pyc
-cline_docs/

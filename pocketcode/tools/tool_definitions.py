@@ -251,6 +251,107 @@ TOOL_DEFINITIONS = {
             },
             "required": ["query"]
         }
+    },
+
+    # --- memory_bank_tools.py ---
+    "read_memory_bank_file": {
+        "name": "read_memory_bank_file",
+        "description": "Reads the entire content of a specified Memory Bank file (e.g., productContext.md).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_name": {
+                    "type": "string",
+                    "description": "The name of the Memory Bank file (e.g., \"productContext.md\")."
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional absolute or relative path to the project root. Defaults to current project."
+                }
+            },
+            "required": ["file_name"]
+        }
+    },
+    "write_memory_bank_file": {
+        "name": "write_memory_bank_file",
+        "description": "Writes content to a specified Memory Bank file, overwriting existing content. Creates the file/directory if needed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_name": {
+                    "type": "string",
+                    "description": "The name of the Memory Bank file to write to."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The new content to write."
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional path to the project root."
+                }
+            },
+            "required": ["file_name", "content"]
+        }
+    },
+    "append_to_memory_bank_file": {
+        "name": "append_to_memory_bank_file",
+        "description": "Appends content to a specified Memory Bank file. Creates the file/directory if needed. Adds a newline before appending if necessary.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_name": {
+                    "type": "string",
+                    "description": "The name of the Memory Bank file to append to."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The content to append."
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional path to the project root."
+                }
+            },
+            "required": ["file_name", "content"]
+        }
+    },
+    "get_memory_bank_summary": {
+        "name": "get_memory_bank_summary",
+        "description": "Retrieves a summary by concatenating the content of specified Memory Bank files (or all by default).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of Memory Bank file names to summarize. Defaults to all standard files."
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Optional specific topic or question (currently ignored)."
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional path to the project root."
+                }
+            },
+            "required": []
+        }
+    },
+    "check_memory_bank_status": {
+        "name": "check_memory_bank_status",
+        "description": "Verifies the existence and basic validity (non-empty) of standard Memory Bank files.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional path to the project root."
+                }
+            },
+            "required": []
+        }
     }
 }
 

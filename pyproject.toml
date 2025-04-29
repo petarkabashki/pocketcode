@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pocketcode"
+version = "0.1.0"
+authors = [
+  { name="Petar Kabashki", email="peter.kabashky@gmail.com" },
+]
+description = "PocketCode AI Assistant Framework" # You might want to refine this description
+readme = "readme.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha", # Adjust as appropriate
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "pocketflow",
+    "PyYAML",
+    "watchdog",
+]
+
+# If you have command-line scripts later, add them here:
+[project.scripts]
+pocketcode = "pocketcode.main:run"
+
+[tool.setuptools.packages.find]
+where = ["."] # Assumes pocketcode is directly under the root
+include = ["pocketcode*"]
+exclude = ["tests*", "docs*", "prompts*", "projects*"] # Exclude non-package directories

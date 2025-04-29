@@ -1,7 +1,15 @@
 # pocketcode/config/settings.yaml
+# %% Added: Centralized provider API keys
+providers:
+  gemini: ${GEMINI_API_KEY}
+  anthropic: ${ANTHROPIC_API_KEY}
+  # Add other providers here as needed, e.g.:
+  # openai: ${OPENAI_API_KEY}
+
 core:
   log_level: INFO
   require_tool_confirmation: true # Added: Global flag to require user confirmation before executing tools
+  auto_approved_tools: []       # Added: List of tool names to auto-approve if require_tool_confirmation is true
   enable_memory_bank: true        # Added: Toggle for memory bank functionality
   memory_bank_dir: pocketcode_docs # Name of the directory in CWD
   allow_mode_switching: true      # Added: Toggle for allowing mode switching
@@ -14,14 +22,21 @@ core:
 
 defaults:
   llm_config:
-    provider: google # Default provider
-    model: gemini-1.5-pro-latest # Default model
+    provider: gemini # Default provider
+    model: gemini-2.5-pro-preview-02-25 # Default model
+    # api_key: ${GOOGLE_API_KEY} # Removed: API key now fetched from 'providers' section
     parameters:
-      temperature: 0.7
+      temperature: 0.5
   allowed_tools: # Default tools available to all modes unless overridden
     - read_file
     - write_to_file
     - list_files
+    # Added Memory Bank Tools to defaults
+    - read_memory_bank_file
+    - write_memory_bank_file
+    - append_to_memory_bank_file
+    - get_memory_bank_summary
+    - check_memory_bank_status
   # Add other potential defaults (e.g., default prompt path)
 
 tools: # Register all available tools
@@ -41,6 +56,13 @@ tools: # Register all available tools
   git_push: pocketcode.tools.git.GitPushTool
   # Removed old generic git_command:
   # git_command: pocketcode.tools.git.GitCommandTool
+  # Register the new Memory Bank tools
+  read_memory_bank_file: pocketcode.tools.memory_bank_tools.read_memory_bank_file
+  write_memory_bank_file: pocketcode.tools.memory_bank_tools.write_memory_bank_file
+  append_to_memory_bank_file: pocketcode.tools.memory_bank_tools.append_to_memory_bank_file
+  get_memory_bank_summary: pocketcode.tools.memory_bank_tools.get_memory_bank_summary
+  check_memory_bank_status: pocketcode.tools.memory_bank_tools.check_memory_bank_status
+
 
 modes:
   code: # Mode Slug
@@ -52,12 +74,11 @@ modes:
     llm_config: # Overrides default LLM config
       provider: anthropic
       model: claude-3-opus-20240229
+      # api_key: ${ANTHROPIC_API_KEY} # Removed: API key now fetched from 'providers' section
       parameters:
         temperature: 0.5
-    allowed_tools: # List of tool names this mode's LLM can call via YAML
-      - read_file
-      - write_to_file
-      - list_files
+    allowed_tools: # List of tool names this mode's LLM can call via YAML (inherits defaults + adds specific)
+      # Inherits defaults: read_file, write_to_file, list_files, memory bank tools
       - search_code # Updated allowed tool
       - execute_command
       # Add the new specific Git tools
@@ -77,12 +98,11 @@ modes:
     module: pocketcode.modes.architect.ArchitectMode
     flow_module: pocketcode.flows.architect.create_architect_flow
     prompt_template_path: prompts/architect_mode_system.txt
-    # Inherits default llm_config
-    allowed_tools: # Defines specific tools for this mode
-      - read_file
-      - write_to_file # Potentially restricted to *.md via implementation logic
-      - list_files
+    # Inherits default llm_config (provider/model). API key will be fetched from 'providers' section based on the default provider ('google').
+    allowed_tools: # Defines specific tools for this mode (inherits defaults)
+      # Inherits defaults: read_file, write_to_file, list_files, memory bank tools
       - search_code # Updated allowed tool
+      # Note: write_to_file restriction to *.md would need to be handled in the mode/flow logic, not just config.
     custom_instructions_path: prompts/architect_mode_instructions.txt
 
   micromanager:
@@ -91,19 +111,16 @@ modes:
     module: pocketcode.modes.micromanager.MicromanagerMode # Points to the class created
     flow_module: pocketcode.flows.micromanager.create_micromanager_flow # NOTE: This flow needs to be created later
     # prompt_template_path: prompts/micromanager_system.txt # Optional: Can add later
-    # llm_config: # Inherits default LLM config for now
-    allowed_tools: # Tools needed for analysis and planning
-      - read_file
-      - list_files
+    # Inherits default llm_config (provider/model). API key will be fetched from 'providers' section based on the default provider ('google').
+    allowed_tools: # Tools needed for analysis and planning (inherits defaults)
+      # Inherits defaults: read_file, list_files, memory bank tools
       - search_code # Updated allowed tool
       # Assuming delegation tools (switch_mode, new_task) and ask_followup_question are handled by the core system or flow implementation
     # custom_instructions_path: prompts/micromanager_instructions.txt # Optional: Can add later
 
   # Add other modes (ask, debug, etc.) following the same structure
 
-# Add other sections as needed (API keys, etc.)
-# api_keys:
-#   openai: ${OPENAI_API_KEY} # Example using environment variables
+# Add other sections as needed
 
 # %% Added: Watch Mode Configuration
 watch_mode:

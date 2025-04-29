@@ -1,0 +1,2 @@
+[console_scripts]
+pocketcode = pocketcode.main:run

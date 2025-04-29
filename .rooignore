@@ -1,3 +1,6 @@
 .env
 stuff.*
 .venv
+
+cline_docs/
+readme.md
