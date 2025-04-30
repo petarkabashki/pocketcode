@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 # Import BaseTool
 from pocketcode.core.interfaces import BaseTool
 # Assuming system.py is in the same directory
-from .system import execute_shell_command
+from pocketcode.tools.system import execute_shell_command
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

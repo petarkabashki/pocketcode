@@ -54,7 +54,7 @@ modes:
   code: # Mode Slug
     name: "💻 Code" # User-friendly display name
     description: "Mode specialized for writing and modifying code using a PocketFlow." # Purpose
-    mode_module: pocketcode.modes.code.CodeMode # Path to the BaseMode subclass implementation
+    mode_module: pocketcode.modes.code.KoderMode # Path to the BaseMode subclass implementation
     flow_module: pocketcode.flows.code.create_code_flow # Path to the function that creates the PocketFlow instance
     prompt_template_path: prompts/code_mode_system.txt # (Optional) Path to main system prompt file
     llm_config: # Overrides default LLM config
@@ -73,7 +73,7 @@ modes:
   architect:
     name: "🏗️ Architect"
     description: "Mode for planning, designing system architecture, and documentation."
-    mode_module: pocketcode.modes.architect.ArchitectMode
+    mode_module: pocketcode.modes.architect.ArkitektMode
     flow_module: pocketcode.flows.architect.create_architect_flow
     prompt_template_path: prompts/architect_mode_system.txt
     # Inherits default llm_config

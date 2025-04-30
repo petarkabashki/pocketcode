@@ -67,7 +67,7 @@ class PlaceholderFlow:
 # --- End of reused Placeholder definitions ---
 
 
-def create_architect_flow(mode_config: Dict[str, Any]):
+def create_arkitekt_flow():
     """
     Creates the PocketFlow instance specifically for the Architect Mode.
 

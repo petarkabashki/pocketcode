@@ -1,3 +1,5 @@
 pocketflow
 PyYAML
 watchdog
+prompt_toolkit
+google-genai

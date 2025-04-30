@@ -265,14 +265,14 @@ class CreateDirectoryTool(BaseTool):
     @property
     def description(self) -> str:
         # Fetch description from centralized definitions
-        from .tool_definitions import get_tool_definition
+        from pocketcode.tools.tool_definitions import get_tool_definition
         definition = get_tool_definition(self.name)
         return definition.get("description", "Creates a directory, including parents.") if definition else "Creates a directory, including parents."
 
     @property
     def schema(self) -> Dict:
         # Fetch schema from centralized definitions
-        from .tool_definitions import get_tool_definition
+        from pocketcode.tools.tool_definitions import get_tool_definition
         definition = get_tool_definition(self.name)
         return definition.get("parameters", {}) if definition else {}
 
@@ -300,14 +300,14 @@ class GlobFilesTool(BaseTool):
     @property
     def description(self) -> str:
         # Fetch description from centralized definitions
-        from .tool_definitions import get_tool_definition
+        from pocketcode.tools.tool_definitions import get_tool_definition
         definition = get_tool_definition(self.name)
         return definition.get("description", "Finds files/directories matching a glob pattern.") if definition else "Finds files/directories matching a glob pattern."
 
     @property
     def schema(self) -> Dict:
         # Fetch schema from centralized definitions
-        from .tool_definitions import get_tool_definition
+        from pocketcode.tools.tool_definitions import get_tool_definition
         definition = get_tool_definition(self.name)
         return definition.get("parameters", {}) if definition else {}
 

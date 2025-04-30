@@ -1,8 +1,8 @@
-#%%
+# %%
 # pocketcode/tools/memory_bank_tools.py
 import os
 import logging
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Any # Added Any
 
 # Assuming MemoryBankManager is accessible, either via import and instantiation
 # or passed through context. For now, we'll import and instantiate as needed.
@@ -11,6 +11,8 @@ from pocketcode.core.memory_bank import MemoryBankManager
 # Assuming core_config and default project_root are somehow available in the execution context.
 # This is a placeholder - the actual way to get config/root needs clarification.
 from pocketcode.config.loader import load_settings # Example: How config might be loaded
+# Import BaseTool for wrapper classes
+from pocketcode.core.interfaces import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +101,7 @@ def _get_full_path(manager: MemoryBankManager, file_name: str) -> str:
     _validate_file_name(manager, file_name)
     return os.path.join(manager.get_memory_bank_path(), file_name)
 
-# --- Tool Implementations ---
+# --- Tool Function Implementations ---
 
 def read_memory_bank_file(file_name: str, project_path: Optional[str] = None) -> str:
     """
@@ -365,3 +367,110 @@ def check_memory_bank_status(project_path: Optional[str] = None) -> Dict[str, st
         # Or return partial results? Let's return what we have + an error marker.
         status["_GENERAL_ERROR_"] = str(e)
         return status
+
+
+# --- Tool Wrapper Classes ---
+
+class ReadMemoryBankFileTool(BaseTool):
+    """Tool wrapper for reading a Memory Bank file."""
+    name = "read_memory_bank_file"
+    description = "Reads the entire content of a specified Memory Bank file (e.g., productContext.md)."
+    # Define args based on the function signature
+    args_schema: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "file_name": {"type": "string", "description": "The name of the Memory Bank file (e.g., 'productContext.md')."},
+            "project_path": {"type": ["string", "null"], "description": "Absolute or relative path to the project root. Defaults to current project."}
+        },
+        "required": ["file_name"]
+    }
+
+    def run(self, file_name: str, project_path: Optional[str] = None) -> str:
+        try:
+            return read_memory_bank_file(file_name=file_name, project_path=project_path)
+        except MemoryBankToolError as e:
+            logger.error(f"Error executing {self.name}: {e}")
+            # Re-raise or return an error message string? For now, re-raise.
+            raise e # Or return f"Error: {e}"
+
+class WriteMemoryBankFileTool(BaseTool):
+    """Tool wrapper for writing to a Memory Bank file (overwrites)."""
+    name = "write_memory_bank_file"
+    description = "Writes content to a specified Memory Bank file, overwriting existing content. Creates the directory/file if needed."
+    args_schema: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "file_name": {"type": "string", "description": "The name of the Memory Bank file to write to."},
+            "content": {"type": "string", "description": "The new content to write."},
+            "project_path": {"type": ["string", "null"], "description": "Path to the project root."}
+        },
+        "required": ["file_name", "content"]
+    }
+
+    def run(self, file_name: str, content: str, project_path: Optional[str] = None) -> bool:
+        try:
+            return write_memory_bank_file(file_name=file_name, content=content, project_path=project_path)
+        except MemoryBankToolError as e:
+            logger.error(f"Error executing {self.name}: {e}")
+            raise e # Or return False / error message
+
+class AppendToMemoryBankFileTool(BaseTool):
+    """Tool wrapper for appending to a Memory Bank file."""
+    name = "append_to_memory_bank_file"
+    description = "Appends content to a specified Memory Bank file. Creates the file/directory if needed. Adds a newline before appending if necessary."
+    args_schema: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "file_name": {"type": "string", "description": "The name of the Memory Bank file to append to."},
+            "content": {"type": "string", "description": "The content to append."},
+            "project_path": {"type": ["string", "null"], "description": "Path to the project root."}
+        },
+        "required": ["file_name", "content"]
+    }
+
+    def run(self, file_name: str, content: str, project_path: Optional[str] = None) -> bool:
+        try:
+            return append_to_memory_bank_file(file_name=file_name, content=content, project_path=project_path)
+        except MemoryBankToolError as e:
+            logger.error(f"Error executing {self.name}: {e}")
+            raise e # Or return False / error message
+
+class GetMemoryBankSummaryTool(BaseTool):
+    """Tool wrapper for getting a summary (concatenation) of Memory Bank files."""
+    name = "get_memory_bank_summary"
+    description = "Retrieves a concise summary by concatenating the content of specified Memory Bank files."
+    args_schema: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "file_names": {"type": ["array", "null"], "items": {"type": "string"}, "description": "List of Memory Bank file names to include. Defaults to all if null."},
+            "topic": {"type": ["string", "null"], "description": "Specific topic (currently ignored)."},
+            "project_path": {"type": ["string", "null"], "description": "Path to the project root."}
+        },
+        "required": [] # All args are optional
+    }
+
+    def run(self, file_names: Optional[List[str]] = None, topic: Optional[str] = None, project_path: Optional[str] = None) -> str:
+        try:
+            return get_memory_bank_summary(file_names=file_names, topic=topic, project_path=project_path)
+        except MemoryBankToolError as e:
+            logger.error(f"Error executing {self.name}: {e}")
+            raise e # Or return f"Error: {e}"
+
+class CheckMemoryBankStatusTool(BaseTool):
+    """Tool wrapper for checking the status of Memory Bank files."""
+    name = "check_memory_bank_status"
+    description = "Verifies the existence and basic validity (non-empty) of standard Memory Bank files."
+    args_schema: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "project_path": {"type": ["string", "null"], "description": "Path to the project root."}
+        },
+        "required": [] # Optional arg
+    }
+
+    def run(self, project_path: Optional[str] = None) -> Dict[str, str]:
+        try:
+            return check_memory_bank_status(project_path=project_path)
+        except MemoryBankToolError as e:
+            logger.error(f"Error executing {self.name}: {e}")
+            raise e # Or return {"_ERROR_": str(e)}

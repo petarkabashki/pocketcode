@@ -1,14 +1,16 @@
-#%% pocketcode/cli/command_handler.py
+# pocketcode/cli/command_handler.py
 import logging
 import os
-from typing import Dict, Optional, Any, TYPE_CHECKING
+from typing import Dict, Optional, Any, TYPE_CHECKING, Union, Type
 
-# Use TYPE_CHECKING to avoid circular imports for type hints if necessary
-# These imports might need adjustment based on actual project structure/availability
+# Use TYPE_CHECKING to avoid circular imports for type hints
 if TYPE_CHECKING:
     from pocketcode.core.memory_bank import MemoryBankManager
     from pocketcode.core.watcher import FileWatcher
-    from pocketcode.core.interfaces import BaseMode
+    # Import ModeManager for type hinting
+    from pocketcode.core.mode_manager import ModeManager
+    # BaseMode is no longer directly used here
+    # from pocketcode.core.interfaces import BaseMode
 
 logger = logging.getLogger(__name__)
 
@@ -16,29 +18,33 @@ logger = logging.getLogger(__name__)
 def handle_command(
     command_input: str,
     config: Dict[str, Any],
-    memory_manager: Optional['MemoryBankManager'], # Use string literal for forward ref if needed
-    file_watcher: Optional['FileWatcher'],       # Use string literal for forward ref if needed
-    current_mode_instance: Optional['BaseMode'], # Use string literal for forward ref if needed
-    registered_components: Dict[str, Dict],
+    memory_manager: Optional['MemoryBankManager'],
+    file_watcher: Optional['FileWatcher'],
+    # --- Updated arguments ---
+    mode_manager: Optional['ModeManager'], # Pass the manager instance
+    current_mode_slug: Optional[str],      # Pass the current mode's slug
+    # --- End Updated arguments ---
+    registered_components: Dict[str, Dict[str, Union[str, Type]]], # Contains tool classes now
     cli_context: Dict[str, Any],
     global_allow_mode_switching: bool
-) -> Optional['BaseMode']: # Return the potentially updated mode instance
+) -> Optional[str]: # Return the potentially updated mode SLUG
     """
-    Parses and executes CLI commands.
+    Parses and executes CLI commands, interacting with ModeManager.
 
     Args:
-        command_input: The raw command string from the user (e.g., "/mode code").
+        command_input: The raw command string from the user.
         config: The global configuration dictionary.
         memory_manager: The MemoryBankManager instance (or None).
         file_watcher: The FileWatcher instance (or None).
-        current_mode_instance: The currently active mode instance (or None).
-        registered_components: Dictionary containing registered modes and tools.
-        cli_context: The dictionary holding CLI-managed context (files, folders, etc.).
+        mode_manager: The ModeManager instance (or None).
+        current_mode_slug: The slug of the currently active mode (or None).
+        registered_components: Dictionary containing registered tools (classes).
+                               'modes' key is likely unused here now.
+        cli_context: The dictionary holding CLI-managed context.
         global_allow_mode_switching: Boolean indicating if mode switching is globally enabled.
 
     Returns:
-        The potentially updated current_mode_instance if a mode switch occurred, otherwise None.
-        Returning the instance allows the main loop to update its reference.
+        The slug of the new mode if a switch occurred and was successful, otherwise None.
     """
     parts = command_input.strip().split()
     command = parts[0].lower()
@@ -46,150 +52,118 @@ def handle_command(
 
     logger.debug(f"Handling command: {command} with args: {args}")
 
-    # Removed global declarations - using passed arguments instead
-    # global current_mode_instance -> use current_mode_instance parameter
-    # global registered_components -> use registered_components parameter
-    # global cli_context -> use cli_context parameter
-    # global global_allow_mode_switching -> use global_allow_mode_switching parameter
+    if not mode_manager:
+        logger.error("ModeManager not provided to handle_command. Cannot process most commands.")
+        print("[Error] Internal error: ModeManager unavailable.")
+        return None # Cannot proceed without manager
 
-    registered_modes = registered_components.get('modes', {})
-    registered_tools = registered_components.get('tools', {})
+    # Get available modes and tools from manager and components dict
+    available_modes = mode_manager.get_available_modes() # Dict[slug, mode_config]
+    registered_tools = registered_components.get('tools', {}) # Dict[name, ToolClass]
 
-    new_mode_instance = None # Variable to hold the new instance if mode changes
+    new_mode_slug = None # Variable to hold the new slug if mode changes
 
     if command == "/help":
         print_help()
-    elif command == "/create-memory-bank": # Added command
+    elif command == "/create-memory-bank":
+        # (Logic unchanged)
         if memory_manager:
             print(f"Attempting to create memory bank structure in: {memory_manager.get_memory_bank_path()}")
             success = memory_manager.create_memory_bank_structure()
-            if success:
-                print("Memory bank structure created successfully (or already existed).")
-            else:
-                print("Failed to create memory bank structure. Check logs for details.")
+            if success: print("Memory bank structure created successfully (or already existed).")
+            else: print("Failed to create memory bank structure. Check logs.")
         else:
-            print("Memory bank is not configured or enabled in settings. Cannot create structure.")
-            logger.warning("Attempted /create-memory-bank command, but memory bank is not configured/enabled.")
+            print("Memory bank is not configured or enabled. Cannot create structure.")
+            logger.warning("Attempted /create-memory-bank, but memory bank is not configured/enabled.")
 
-    elif command == "/modes": # New command implementation
-        target_modes = args if args else sorted(registered_modes.keys())
-        print("Modes and Allowed Tools:")
+    elif command == "/modes":
+        target_modes = args if args else sorted(available_modes.keys())
+        print("Modes and Allowed Tools (from config):")
         found_any = False
         for mode_slug in target_modes:
-            if mode_slug in registered_modes:
+            mode_config = available_modes.get(mode_slug) # Get config from manager's loaded configs
+            if mode_config and isinstance(mode_config, dict): # Check if config exists and is a dict
                 found_any = True
-                mode_config = config.get('modes', {}).get(mode_slug, {})
                 allowed_tools_list = mode_config.get('allowed_tools', [])
-                print(f"  {mode_slug}:")
+                display_name = mode_config.get('display_name', mode_slug)
+                print(f"  {display_name} ({mode_slug}):")
                 if allowed_tools_list:
                     for tool_name in sorted(allowed_tools_list):
                         print(f"    - {tool_name}")
                 else:
                     print("    (No tools specifically configured)")
             else:
-                print(f"  Warning: Mode '{mode_slug}' requested but not registered.")
+                print(f"  Warning: Mode '{mode_slug}' requested but not found or config invalid.")
         if not found_any and not args:
-             print("  (No modes registered)")
+             print("  (No modes available via ModeManager)")
 
 
     elif command == "/mode":
-        # Check if mode switching is allowed globally
         if not global_allow_mode_switching:
             print("Mode switching is currently disabled by configuration.")
             logger.warning("Attempted /mode command while mode switching is disabled.")
             return None # Indicate no mode change
 
         if not args:
-            logger.warning("Usage: /mode <mode_slug>")
-            print("Please specify a mode slug. Available modes:", list(registered_modes.keys()))
-            return None # Indicate no mode change
+            print("Usage: /mode <mode_slug>")
+            print("Available modes:", list(available_modes.keys()))
+            return None
+
         target_mode_slug = args[0]
-        # Use slug for comparison
-        current_slug = getattr(current_mode_instance, 'slug', None)
-        if current_slug and target_mode_slug == current_slug:
+
+        if current_mode_slug and target_mode_slug == current_mode_slug:
              print(f"Already in mode '{target_mode_slug}'.")
-             return None # Indicate no mode change
-        if target_mode_slug in registered_modes:
-            ModeClass = registered_modes[target_mode_slug]
-            mode_config = config.get('modes', {}).get(target_mode_slug, {})
-            if not mode_config:
-                logger.error(f"Configuration for mode '{target_mode_slug}' not found.")
-                print(f"Error: Configuration missing for mode '{target_mode_slug}'.")
-                return None # Indicate no mode change
-            try:
-                mode_config['slug'] = target_mode_slug # Ensure slug is in config for the instance
-                # Pass memory_manager, global_config, tool_registry when switching modes
-                # Store the new instance in a local variable
-                new_mode_instance_local = ModeClass(
-                    config=mode_config,
-                    memory_manager=memory_manager,
-                    global_config=config,
-                    tool_registry=registered_tools
-                )
-                logger.info(f"Switched to mode: {new_mode_instance_local.display_name}")
-                print(f"Switched to mode: {new_mode_instance_local.display_name}")
-                new_mode_instance = new_mode_instance_local # Assign to return variable
-            except TypeError as e:
-                 # Handle cases where ModeClass doesn't accept new args yet
-                 if 'global_config' in str(e) or 'tool_registry' in str(e):
-                      logger.warning(f"Mode '{target_mode_slug}' does not seem to accept 'global_config' or 'tool_registry'. Instantiating without them. Error: {e}")
-                      new_mode_instance_local = ModeClass(config=mode_config, memory_manager=memory_manager) # Fallback
-                      logger.info(f"Switched to mode (fallback): {new_mode_instance_local.display_name}")
-                      print(f"Switched to mode (fallback): {new_mode_instance_local.display_name}")
-                      new_mode_instance = new_mode_instance_local # Assign to return variable
-                 elif 'memory_manager' in str(e):
-                      logger.warning(f"Mode '{target_mode_slug}' does not seem to accept 'memory_manager' argument. Instantiating without it. Error: {e}")
-                      new_mode_instance_local = ModeClass(config=mode_config) # Fallback
-                      logger.info(f"Switched to mode (without memory manager): {new_mode_instance_local.display_name}")
-                      print(f"Switched to mode (without memory manager): {new_mode_instance_local.display_name}")
-                      new_mode_instance = new_mode_instance_local # Assign to return variable
-                 else:
-                      logger.error(f"Error switching to mode '{target_mode_slug}': {e}", exc_info=True)
-                      print(f"Error switching to mode '{target_mode_slug}'.")
-            except Exception as e:
-                logger.error(f"Error switching to mode '{target_mode_slug}': {e}", exc_info=True)
-                print(f"Error switching to mode '{target_mode_slug}'.")
+             return None # No change
+
+        if target_mode_slug in available_modes:
+            # Mode exists, signal the main loop to switch by returning the slug
+            target_mode_config = available_modes[target_mode_slug]
+            # Ensure config is dict before getting display name
+            if isinstance(target_mode_config, dict):
+                 display_name = target_mode_config.get('display_name', target_mode_slug)
+            else:
+                 display_name = target_mode_slug
+                 logger.warning(f"Mode config for '{target_mode_slug}' is not a dictionary.")
+
+            logger.info(f"Requesting switch to mode: {display_name} ({target_mode_slug})")
+            print(f"Switching to mode: {display_name}")
+            new_mode_slug = target_mode_slug # Set slug to be returned
         else:
             logger.warning(f"Mode '{target_mode_slug}' not found.")
-            print(f"Unknown mode: '{target_mode_slug}'. Available modes:", list(registered_modes.keys()))
+            print(f"Unknown mode: '{target_mode_slug}'. Available modes:", list(available_modes.keys()))
 
-    elif command == "/tools": # MODIFIED: Removed auto-allow status check/display
+    elif command == "/tools":
         show_all = "--all" in args
-        current_slug = getattr(current_mode_instance, 'slug', None)
 
         if show_all:
             print("All Registered Tools:")
             if registered_tools:
                 for tool_name in sorted(registered_tools.keys()):
-                    # REMOVED: allowed = is_tool_auto_allowed(tool_name)
-                    # REMOVED: status = "(allowed)" if allowed else ""
-                    print(f"  - {tool_name}") # Just print the name
+                    print(f"  - {tool_name}")
             else:
                 print("  (No tools registered)")
-        elif current_mode_instance and current_slug:
-            print(f"Tools available for current mode ({current_mode_instance.display_name}):")
-            try:
-                mode_config = getattr(current_mode_instance, 'config', {})
-                mode_tools = mode_config.get('allowed_tools', []) # Use allowed_tools from config
+        elif current_mode_slug:
+            # Get current mode's config from the manager's loaded configs
+            current_mode_config = available_modes.get(current_mode_slug)
+            if current_mode_config and isinstance(current_mode_config, dict):
+                display_name = current_mode_config.get('display_name', current_mode_slug)
+                print(f"Tools available for current mode ({display_name}):")
+                mode_tools = current_mode_config.get('allowed_tools', [])
                 if mode_tools:
                      for tool_name in sorted(mode_tools):
                          if tool_name in registered_tools:
-                             # REMOVED: allowed = is_tool_auto_allowed(tool_name, current_slug)
-                             # REMOVED: status = "(allowed)" if allowed else ""
-                             print(f"  - {tool_name}") # Just print the name
+                             print(f"  - {tool_name}")
                          else:
                              print(f"  - {tool_name} (Warning: Configured but not registered)")
                 else:
                     print("  (No tools specifically configured for this mode)")
-            except AttributeError:
-                 logger.error(f"Could not retrieve tool list from mode {current_mode_instance.display_name}. Does it have a 'config' attribute with a 'allowed_tools' key?")
-                 print("  (Error retrieving tool list for this mode)")
+            else:
+                 logger.error(f"Could not retrieve valid config for current mode '{current_mode_slug}'.")
+                 print(f"  (Error retrieving tool list for mode '{current_mode_slug}')")
         else:
              print("Error: No active mode to list tools for.")
 
-    # REMOVED: /allow and /disallow command handling logic
-
-    # %% Added: /context command handling
+    # %% /context command handling (Unchanged logic)
     elif command == "/context":
         if not args:
             print("Usage: /context <show|add|remove|clear> [options...]")
@@ -226,33 +200,26 @@ def handle_command(
         elif subcommand == "add":
             if len(sub_args) < 2:
                 print(f"Usage: /context add <file|folder|url|snippet> <value...>")
-                return None # Indicate no mode change
+                return None
             add_type = sub_args[0].lower()
-            value = sub_args[1:] # Remaining parts form the value/content
+            value = sub_args[1:]
 
             if add_type == "file":
                 file_path = value[0]
-                # Basic validation: check if file exists (optional, can be noisy)
-                # if not os.path.isfile(file_path):
-                #     print(f"Warning: File not found at '{file_path}'. Adding anyway.")
                 cli_context["files"].add(file_path)
                 print(f"Added file context: {file_path}")
             elif add_type == "folder":
                 folder_path = value[0]
-                # Basic validation: check if folder exists (optional)
-                # if not os.path.isdir(folder_path):
-                #     print(f"Warning: Folder not found at '{folder_path}'. Adding anyway.")
                 cli_context["folders"].add(folder_path)
                 print(f"Added folder context: {folder_path}")
             elif add_type == "url":
                 url = value[0]
-                # Basic validation could be added here (e.g., regex)
                 cli_context["urls"].add(url)
                 print(f"Added URL context: {url}")
             elif add_type == "snippet":
                 if len(value) < 2:
                     print("Usage: /context add snippet <name> <content...>")
-                    return None # Indicate no mode change
+                    return None
                 snippet_name = value[0]
                 snippet_content = " ".join(value[1:])
                 cli_context["snippets"][snippet_name] = snippet_content
@@ -263,149 +230,97 @@ def handle_command(
         elif subcommand == "remove":
             if len(sub_args) < 2:
                 print(f"Usage: /context remove <file|folder|url|snippet> <value_or_name>")
-                return None # Indicate no mode change
+                return None
             remove_type = sub_args[0].lower()
-            identifier = sub_args[1] # Path, URL, or snippet name
+            identifier = sub_args[1]
 
             item_removed = False
             if remove_type == "file":
-                if identifier in cli_context["files"]:
-                    cli_context["files"].remove(identifier)
-                    item_removed = True
+                if identifier in cli_context["files"]: cli_context["files"].remove(identifier); item_removed = True
             elif remove_type == "folder":
-                 if identifier in cli_context["folders"]:
-                    cli_context["folders"].remove(identifier)
-                    item_removed = True
+                 if identifier in cli_context["folders"]: cli_context["folders"].remove(identifier); item_removed = True
             elif remove_type == "url":
-                 if identifier in cli_context["urls"]:
-                    cli_context["urls"].remove(identifier)
-                    item_removed = True
+                 if identifier in cli_context["urls"]: cli_context["urls"].remove(identifier); item_removed = True
             elif remove_type == "snippet":
-                 if identifier in cli_context["snippets"]:
-                    del cli_context["snippets"][identifier]
-                    item_removed = True
+                 if identifier in cli_context["snippets"]: del cli_context["snippets"][identifier]; item_removed = True
             else:
-                print(f"Unknown context type to remove: '{remove_type}'. Use file, folder, url, or snippet.")
-                return None # Indicate no mode change
+                print(f"Unknown context type to remove: '{remove_type}'.")
+                return None
 
-            if item_removed:
-                print(f"Removed {remove_type} context: {identifier}")
-            else:
-                print(f"{remove_type.capitalize()} context not found: {identifier}")
+            if item_removed: print(f"Removed {remove_type} context: {identifier}")
+            else: print(f"{remove_type.capitalize()} context not found: {identifier}")
 
         elif subcommand == "clear":
             clear_type = sub_args[0].lower() if sub_args else "all"
-
             cleared_something = False
-            if clear_type in ["all", "files"]:
-                if cli_context["files"]:
-                    cli_context["files"].clear()
-                    print("Cleared file context.")
-                    cleared_something = True
-            if clear_type in ["all", "folders"]:
-                 if cli_context["folders"]:
-                    cli_context["folders"].clear()
-                    print("Cleared folder context.")
-                    cleared_something = True
-            if clear_type in ["all", "urls"]:
-                 if cli_context["urls"]:
-                    cli_context["urls"].clear()
-                    print("Cleared URL context.")
-                    cleared_something = True
-            if clear_type in ["all", "snippets"]:
-                 if cli_context["snippets"]:
-                    cli_context["snippets"].clear()
-                    print("Cleared snippet context.")
-                    cleared_something = True
+            if clear_type in ["all", "files"] and cli_context["files"]: cli_context["files"].clear(); print("Cleared file context."); cleared_something = True
+            if clear_type in ["all", "folders"] and cli_context["folders"]: cli_context["folders"].clear(); print("Cleared folder context."); cleared_something = True
+            if clear_type in ["all", "urls"] and cli_context["urls"]: cli_context["urls"].clear(); print("Cleared URL context."); cleared_something = True
+            if clear_type in ["all", "snippets"] and cli_context["snippets"]: cli_context["snippets"].clear(); print("Cleared snippet context."); cleared_something = True
 
-            if not cleared_something and clear_type != "all":
-                 print(f"No {clear_type} context found to clear.")
-            elif clear_type == "all" and not cleared_something:
-                 print("Context was already empty.")
-            elif clear_type not in ["all", "files", "folders", "urls", "snippets"]:
-                 print(f"Unknown context type to clear: '{clear_type}'. Use file, folder, url, snippet, or all.")
+            if not cleared_something and clear_type != "all": print(f"No {clear_type} context found to clear.")
+            elif clear_type == "all" and not cleared_something: print("Context was already empty.")
+            elif clear_type not in ["all", "files", "folders", "urls", "snippets"]: print(f"Unknown context type to clear: '{clear_type}'.")
 
         else:
             print(f"Unknown /context subcommand: '{subcommand}'. Use show, add, remove, clear, or help.")
 
-    # %% Added: Mode switching status command
+    # %% /mode-switch-status command (Unchanged logic)
     elif command == "/mode-switch-status":
         status = "enabled" if global_allow_mode_switching else "disabled"
         print(f"Mode switching is currently {status} (based on configuration).")
 
-    # %% Added: /watch command handling
+    # %% /watch command handling (Unchanged logic)
     elif command == "/watch":
         if not file_watcher:
             print("Error: File watcher is not initialized.")
             logger.error("Attempted /watch command but file_watcher is None.")
-            return None # Indicate no mode change
+            return None
 
         if not args:
             print("Usage: /watch <start|stop|status> [paths...]")
-            return None # Indicate no mode change
+            return None
 
         subcommand = args[0].lower()
         watch_args = args[1:]
 
         if subcommand == "start":
-            if not watch_args:
-                print("Usage: /watch start <path1> [path2...]")
-                return None # Indicate no mode change
+            if not watch_args: print("Usage: /watch start <path1> [path2...]"); return None
             added_count = 0
             for path in watch_args:
-                if file_watcher.add_watch(path):
-                    added_count += 1
+                if file_watcher.add_watch(path): added_count += 1
             print(f"Added {added_count} path(s) to watcher.")
-            if not file_watcher.is_running() and added_count > 0:
-                 print("Starting watcher thread...")
-                 file_watcher.start()
-            elif not file_watcher.is_running() and added_count == 0:
-                 print("No valid paths added, watcher not started.")
-            elif file_watcher.is_running():
-                 print("Watcher is already running.")
+            if not file_watcher.is_running() and added_count > 0: print("Starting watcher thread..."); file_watcher.start()
+            elif not file_watcher.is_running() and added_count == 0: print("No valid paths added, watcher not started.")
+            elif file_watcher.is_running(): print("Watcher is already running.")
 
         elif subcommand == "stop":
             if not watch_args:
-                # Stop watching all paths and stop the thread
                 print("Stopping watcher and clearing all watched paths...")
                 watched = file_watcher.get_watched_paths()
                 removed_count = 0
-                for path in list(watched): # Iterate over a copy
-                    if file_watcher.remove_watch(path):
-                        removed_count += 1
-                if file_watcher.is_running():
-                    file_watcher.stop()
+                for path in list(watched):
+                    if file_watcher.remove_watch(path): removed_count += 1
+                if file_watcher.is_running(): file_watcher.stop()
                 print(f"Removed {removed_count} path(s). Watcher stopped.")
             else:
-                # Stop watching specific paths
                 removed_count = 0
                 for path in watch_args:
-                    if file_watcher.remove_watch(path):
-                        removed_count += 1
+                    if file_watcher.remove_watch(path): removed_count += 1
                 print(f"Removed {removed_count} path(s) from watcher.")
-                # Optionally stop the thread if no paths are left?
                 if not file_watcher.get_watched_paths() and file_watcher.is_running():
-                     print("No paths left to watch. Stopping watcher thread...")
-                     file_watcher.stop()
+                     print("No paths left to watch. Stopping watcher thread..."); file_watcher.stop()
 
         elif subcommand == "status":
             if file_watcher.is_running():
                 print("Watcher status: Running")
                 watched = file_watcher.get_watched_paths()
-                if watched:
-                    print("Watching paths:")
-                    for path in sorted(list(watched)):
-                        print(f"  - {path}")
-                else:
-                    print("Watching paths: (None)")
+                if watched: print("Watching paths:"); [print(f"  - {p}") for p in sorted(list(watched))]
+                else: print("Watching paths: (None)")
             else:
                 print("Watcher status: Stopped")
-                # Still show paths that *would* be watched if started
                 watched = file_watcher.get_watched_paths()
-                if watched:
-                     print("Paths configured for watching (if started):")
-                     for path in sorted(list(watched)):
-                         print(f"  - {path}")
+                if watched: print("Paths configured for watching (if started):"); [print(f"  - {p}") for p in sorted(list(watched))]
 
         else:
             print(f"Unknown /watch subcommand: '{subcommand}'. Use start, stop, or status.")
@@ -416,12 +331,12 @@ def handle_command(
         print(f"Unknown command: {command}")
         print_help() # Show help for unknown commands
 
-    return new_mode_instance # Return the new mode instance if switched, else None
+    # Return the slug of the new mode if a switch occurred, otherwise None
+    return new_mode_slug
 
-
+# (print_help and print_context_help remain unchanged)
 def print_help():
     """Prints the available CLI commands."""
-    # MODIFIED: Removed /allow, /disallow and related notes
     help_text = """
 Pocketcode Commands:
   /help                    Show this help message.
@@ -442,7 +357,6 @@ Watch mode triggers on lines containing 'AI!' (configurable) in modified watched
 """
     print(help_text)
 
-# %% Added: Helper function for /context help
 def print_context_help():
     """Prints help specific to the /context command."""
     context_help = """

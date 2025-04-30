@@ -56,47 +56,48 @@ tools: # Register all available tools
   git_push: pocketcode.tools.git.GitPushTool
   # Removed old generic git_command:
   # git_command: pocketcode.tools.git.GitCommandTool
-  # Register the new Memory Bank tools
-  read_memory_bank_file: pocketcode.tools.memory_bank_tools.read_memory_bank_file
-  write_memory_bank_file: pocketcode.tools.memory_bank_tools.write_memory_bank_file
-  append_to_memory_bank_file: pocketcode.tools.memory_bank_tools.append_to_memory_bank_file
-  get_memory_bank_summary: pocketcode.tools.memory_bank_tools.get_memory_bank_summary
-  check_memory_bank_status: pocketcode.tools.memory_bank_tools.check_memory_bank_status
+  # Register the new Memory Bank tools (Updated paths to classes)
+  read_memory_bank_file: pocketcode.tools.memory_bank_tools.ReadMemoryBankFileTool
+  write_memory_bank_file: pocketcode.tools.memory_bank_tools.WriteMemoryBankFileTool
+  append_to_memory_bank_file: pocketcode.tools.memory_bank_tools.AppendToMemoryBankFileTool
+  get_memory_bank_summary: pocketcode.tools.memory_bank_tools.GetMemoryBankSummaryTool
+  check_memory_bank_status: pocketcode.tools.memory_bank_tools.CheckMemoryBankStatusTool
 
 
 modes:
-  code: # Mode Slug
+  koder: # Mode Slug
     name: "💻 Code" # User-friendly display name
     description: "Mode specialized for writing and modifying code using a PocketFlow." # Purpose
-    module: pocketcode.modes.code.CodeMode # Path to the BaseMode subclass implementation
-    flow_module: pocketcode.flows.code.create_code_flow # Path to the function that creates the PocketFlow instance
+    # REMOVED: module: pocketcode.modes.koder.KoderMode
+    # REMOVED: flow_module: pocketcode.flows.koder.create_code_flow # Path to the function that creates the PocketFlow instance
     prompt_template_path: prompts/code_mode_system.txt # (Optional) Path to main system prompt file
     llm_config: # Overrides default LLM config
-      provider: anthropic
-      model: claude-3-opus-20240229
+      # provider: anthropic
+      # model: claude-3-opus-20240229
       # api_key: ${ANTHROPIC_API_KEY} # Removed: API key now fetched from 'providers' section
       parameters:
         temperature: 0.5
-    allowed_tools: # List of tool names this mode's LLM can call via YAML (inherits defaults + adds specific)
-      # Inherits defaults: read_file, write_to_file, list_files, memory bank tools
-      - search_code # Updated allowed tool
+    allowed_tools: # Combined list: Specific + Filesystem
+      - create_directory
       - execute_command
-      # Add the new specific Git tools
-      - git_status
-      - git_diff
       - git_add
       - git_commit
+      - git_diff
       - git_pull
       - git_push
-      # Removed old generic git_command:
-      # - git_command
+      - git_status
+      - glob_files
+      - search_code
+      - read_file      # Added Filesystem Tool
+      - write_to_file  # Added Filesystem Tool
+      - list_files     # Added Filesystem Tool
     custom_instructions_path: prompts/code_mode_instructions.txt # (Optional) Path to mode-specific instructions
 
-  architect:
+  arkitekt:
     name: "🏗️ Architect"
     description: "Mode for planning, designing system architecture, and documentation."
-    module: pocketcode.modes.architect.ArchitectMode
-    flow_module: pocketcode.flows.architect.create_architect_flow
+    # REMOVED: module: pocketcode.modes.arkitekt.ArkitektMode
+    # REMOVED: flow_module: pocketcode.flows.arkitekt.create_architect_flow
     prompt_template_path: prompts/architect_mode_system.txt
     # Inherits default llm_config (provider/model). API key will be fetched from 'providers' section based on the default provider ('google').
     allowed_tools: # Defines specific tools for this mode (inherits defaults)
@@ -108,8 +109,8 @@ modes:
   micromanager:
     name: "🔬 Micromanager" # Updated name as per task
     description: "Mode for analyzing tasks, breaking them down into subtasks, and delegating execution to other specialized modes."
-    module: pocketcode.modes.micromanager.MicromanagerMode # Points to the class created
-    flow_module: pocketcode.flows.micromanager.create_micromanager_flow # NOTE: This flow needs to be created later
+    # REMOVED: module: pocketcode.modes.micromanager.MicromanagerMode
+    # REMOVED: flow_module: pocketcode.flows.micromanager.create_micromanager_flow # NOTE: This flow needs to be created later
     # prompt_template_path: prompts/micromanager_system.txt # Optional: Can add later
     # Inherits default llm_config (provider/model). API key will be fetched from 'providers' section based on the default provider ('google').
     allowed_tools: # Tools needed for analysis and planning (inherits defaults)
@@ -119,6 +120,20 @@ modes:
     # custom_instructions_path: prompts/micromanager_instructions.txt # Optional: Can add later
 
   # Add other modes (ask, debug, etc.) following the same structure
+  asker:
+    name: "❓ Asker"
+    description: "Mode specialized for answering questions using file system and search tools."
+    # REMOVED: flow_module: pocketcode.flows.asker.create_asker_flow # Points to the new flow function
+    # Inherits default llm_config (provider/model/parameters)
+    allowed_tools: # Specify tools for this mode
+      - read_file
+      - list_files
+      - glob_files    # Tool for pattern matching files
+      - search_code   # Tool for searching within files
+      # Note: Default memory bank tools are also implicitly available if enabled globally
+    # Optional: Define specific prompts later if needed
+    # prompt_template_path: prompts/asker_mode_system.txt
+    # custom_instructions_path: prompts/asker_mode_instructions.txt
 
 # Add other sections as needed
 
