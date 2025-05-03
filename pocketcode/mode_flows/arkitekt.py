@@ -1,111 +1,122 @@
-# pocketcode/flows/architect.py
+#%% pocketcode/mode_flows/arkitekt.py
 import logging
 from typing import Dict, Any
-# Assuming pocketflow is installed and Flow/Node are importable
-# from pocketflow import Flow, Node # Placeholder
+
+from pocketflow import Flow # For type hinting return value
+
+# Import base flow components
+from .base_flow import (
+    BaseStartNode,
+    BaseAgentNode,
+    BaseToolExecutionNode,
+    BaseFormatResponseNode,
+    BaseErrorHandlerNode,
+    BaseEndNode,
+    create_base_flow
+)
 
 logger = logging.getLogger(__name__)
 
-# --- Reusing Placeholder Node/Flow definitions for brevity ---
-# (In a real implementation, these might be imported from a common utility or base class)
-class PlaceholderNode:
-    """Represents a placeholder for an actual PocketFlow Node."""
-    def __init__(self, name="PlaceholderNode"):
-        self.name = name
-        self._transitions = {}
-        logger.debug(f"{self.name} initialized.")
+# --- Arkitekt Specific Nodes (Inheriting from Base Nodes) ---
 
-    def __rshift__(self, other):
-        logger.debug(f"Defining transition: {self.name} >> {getattr(other, 'name', 'Unknown')}")
-        self._transitions["default"] = other
-        return other
+class StartArkitektTask(BaseStartNode):
+    """Arkitekt specific start node."""
+    pass # Inherits base behavior
 
-    def __sub__(self, action_name):
-        class TransitionBuilder:
-            def __init__(self, source_node, action):
-                self._source = source_node
-                self._action = action
-            def __rshift__(self, target_node):
-                logger.debug(f"Defining transition: {self._source.name} - '{self._action}' >> {getattr(target_node, 'name', 'Unknown')}")
-                self._source._transitions[self._action] = target_node
-                return target_node
-        return TransitionBuilder(self, action_name)
+class EndArkitektTask(BaseEndNode):
+    """Arkitekt specific end node."""
+    pass # Inherits base behavior
 
-    def run(self, shared_store):
-        logger.info(f"Running {self.name} (placeholder)...")
-        action = "default"
-        logger.info(f"{self.name} finished, returning action: '{action}'")
-        return action
-
-class PlaceholderFlow:
-    """Represents a placeholder for an actual PocketFlow Flow."""
-    def __init__(self, start_node):
-        self.start_node = start_node
-        logger.debug(f"PlaceholderFlow initialized with start node: {getattr(start_node, 'name', 'Unknown')}")
-
-    def run(self, shared_store: Dict[str, Any]):
-        logger.info(f"Running PlaceholderFlow starting from {getattr(self.start_node, 'name', 'Unknown')}...")
-        current_node = self.start_node
-        step = 0
-        max_steps = 10
-
-        while current_node and step < max_steps:
-            logger.info(f"--- Flow Step {step + 1} ---")
-            action = "default" # Simulate action
-            logger.info(f"Node '{getattr(current_node, 'name', 'Unknown')}' returned action: '{action}'")
-            next_node = getattr(current_node, '_transitions', {}).get(action)
-            if next_node:
-                logger.info(f"Transitioning via action '{action}' to node: {getattr(next_node, 'name', 'Unknown')}")
-                current_node = next_node
-            else:
-                logger.info(f"No transition defined for action '{action}' from node '{getattr(current_node, 'name', 'Unknown')}'. Flow ending.")
-                current_node = None
-            step += 1
-        if step >= max_steps:
-             logger.warning("PlaceholderFlow reached max steps limit.")
-        logger.info("PlaceholderFlow finished.")
-# --- End of reused Placeholder definitions ---
-
-
-def create_arkitekt_flow():
+class ArkitektAgentNode(BaseAgentNode):
     """
-    Creates the PocketFlow instance specifically for the Architect Mode.
-
-    Args:
-        mode_config: The configuration dictionary for the Architect Mode.
-
-    Returns:
-        An instance of a PocketFlow Flow (or a placeholder).
+    Arkitekt specific Agent Node.
+    Overrides _build_prompt for architectural planning and documentation tasks.
     """
-    logger.info("Creating PocketFlow for Architect Mode (placeholder implementation)...")
-    # TODO: Replace placeholders with actual PocketFlow Nodes and Flow
-    # TODO: Implement nodes for:
-    #   - Understanding requirements
-    #   - Design generation/refinement
-    #   - Documentation writing/updating (using tools like write_to_file)
-    #   - LLM interaction (Agent Node for tool calling - read/write/search files)
-    #   - Formatting final output (e.g., markdown documents)
+    def _build_prompt(self, shared_store: Dict[str, Any]) -> str:
+        """Builds the prompt specifically for the Arkitekt mode."""
+        logger.debug(f"Building prompt using {self.name}._build_prompt...")
 
-    # Example placeholder nodes and flow structure
-    start_node = PlaceholderNode("StartArchitectureTask")
-    understand_req_node = PlaceholderNode("UnderstandRequirements")
-    design_node = PlaceholderNode("GenerateDesign")
-    doc_agent_node = PlaceholderNode("DocumentationAgentLLM") # Agent for read/write/search
-    format_doc_node = PlaceholderNode("FormatDocumentation")
-    end_node = PlaceholderNode("EndArchitectureTask")
+        user_request = shared_store.get("initial_request", "No user request provided.")
+        formatted_cli_context = shared_store.get("formatted_cli_context", "None provided.")
+        tool_registry = self._get_tool_registry(shared_store)
+        # Filter tools relevant to architecture/documentation if needed, or list all
+        available_tools = list(tool_registry.keys())
+        memory_bank_content = shared_store.get("memory_bank_content", "N/A")
+        previous_tool_result = shared_store.get('tool_result', 'N/A')
+        mode_name = shared_store.get('mode_name', 'Arkitekt')
 
-    # Define placeholder flow transitions
-    start_node >> understand_req_node
-    understand_req_node >> design_node
-    design_node >> doc_agent_node # Start documentation/tool interaction
-    # Agent decides to write/update a file
-    doc_agent_node - "call_tool" >> doc_agent_node # Loop back after tool use (simplified)
-    # Agent decides task is complete
-    doc_agent_node - "task_complete" >> format_doc_node
-    format_doc_node >> end_node
+        # Arkitekt-specific prompt
+        prompt_lines = [
+            f"You are in '{mode_name}' mode. Your goal is to analyze requirements, design software architecture, plan implementation steps, and generate/update documentation (like markdown files).",
+            f"User Request: {user_request}",
+            "\nContext:",
+            f"  CLI Context: {formatted_cli_context}",
+            f"  Memory Bank Summary:\n{memory_bank_content}", # Display potentially multi-line summary
+            f"  Previous Tool Result: {previous_tool_result}",
+            f"\nAvailable Tools: {available_tools}", # Focus on filesystem (read/write/search), memory bank tools
+            "\nTask:",
+            "Based on the user request, context, memory bank, available tools, and previous results, determine the next step for architectural planning or documentation.",
+            "Think step-by-step. Break down complex tasks.",
+            "Prioritize creating or updating documentation files (e.g., `.md`) using tools.",
+            "Respond ONLY with a JSON object containing the action and its arguments.",
+            "Possible actions:",
+            "  - 'call_tool': If a tool (like read_file, write_to_file, search_files, list_files, memory bank tools) needs to be executed.",
+            "    Required keys: 'action', 'tool_name', 'arguments' (object).",
+            "  - 'final_answer': If the architectural task or documentation update is complete.",
+            "    Required keys: 'action', 'answer' (string, often summarizing the work done or the final document state).",
+            "  - 'ask_question': If you need clarification on requirements or design.",
+            "    Required keys: 'action', 'question' (string).",
+            "\nJSON Response:",
+        ]
+        prompt = "\n".join(prompt_lines)
+        logger.debug(f"Built Arkitekt-specific LLM prompt:\n{prompt}")
+        return prompt
 
-    # Create the placeholder flow
-    architect_flow = PlaceholderFlow(start_node=start_node)
+    # Inherits run(), _parse_llm_response(), etc. from BaseAgentNode
 
-    logger.info("Architect Mode PocketFlow (placeholder) created.")
-    return architect_flow
+class ArkitektToolExecutionNode(BaseToolExecutionNode):
+    """Arkitekt specific tool execution node."""
+    # For now, identical to base. Could add specific logic later if needed.
+    pass # Inherits base behavior
+
+class FormatArkitektResponse(BaseFormatResponseNode):
+    """Arkitekt specific response formatting node."""
+    # Could be customized later to better format markdown output summaries.
+    pass # Inherits base behavior
+
+class ArkitektErrorHandler(BaseErrorHandlerNode):
+    """Arkitekt specific error handling node."""
+    pass # Inherits base behavior
+
+
+# --- Arkitekt Flow Creation Function ---
+
+def create_arkitekt_flow() -> Flow:
+    """
+    Creates the PocketFlow instance for the Arkitekt Mode using base components.
+    Dependencies are injected into the shared_store by the ModeManager.
+    """
+    logger.info("Creating PocketFlow for Arkitekt Mode using base flow structure...")
+
+    # 1. Instantiate Arkitekt-specific nodes
+    start_node = StartArkitektTask(name="StartArkitektTask")
+    agent_node = ArkitektAgentNode(name="ArkitektAgent") # Uses overridden _build_prompt
+    tool_execution_node = ArkitektToolExecutionNode(name="ArkitektExecuteTool")
+    format_response_node = FormatArkitektResponse(name="FormatArkitektResponse")
+    error_handler_node = ArkitektErrorHandler(name="ArkitektErrorHandler")
+    end_node = EndArkitektTask(name="EndArkitektTask")
+
+    # 2. Use the base flow wiring function
+    arkitekt_flow = create_base_flow(
+        start_node=start_node,
+        agent_node=agent_node,
+        tool_node=tool_execution_node,
+        format_node=format_response_node,
+        error_node=error_handler_node,
+        end_node=end_node
+    )
+
+    logger.info("Arkitekt Mode PocketFlow structure created using base flow.")
+    return arkitekt_flow
+
+# --- End create_arkitekt_flow ---

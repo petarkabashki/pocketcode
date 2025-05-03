@@ -8,6 +8,9 @@ import queue
 import time
 import typing # Added for Optional type hint
 
+# --- Import dotenv ---
+from dotenv import load_dotenv
+
 from prompt_toolkit import prompt
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -35,11 +38,27 @@ cli_context = { "files": set(), "folders": set(), "urls": set(), "snippets": {} 
 instruction_queue = None
 file_watcher = None
 
+# --- Load .env file ---
+# Load environment variables from .env file, if it exists.
+# This should be done early, before accessing env vars for logging or config.
+load_dotenv()
+logger_init = logging.getLogger(__name__ + "_init") # Use a temp logger for early messages
+logger_init.info(".env file loaded (if found).")
+
+
 # Basic logging setup
+# Now access env vars after dotenv has potentially loaded them
 log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, log_level_str, logging.INFO),
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # Main application logger
+logger.setLevel(logging.DEBUG) # ADDED: Explicitly set main logger level to DEBUG
+
+# --- Explicitly set mode flows logger level to DEBUG --- # ADDED
+logging.getLogger('pocketcode.mode_flows').setLevel(logging.DEBUG)
+logger.debug("Explicitly set 'pocketcode.mode_flows' logger level to DEBUG.")
+# --- End explicit logger setup --- # ADDED
+
 
 # %% Helper function to process watcher queue items (Modified to use ModeManager)
 def process_watcher_queue(instruction_queue, config, current_mode_slug, mode_manager, cli_context):
@@ -143,6 +162,13 @@ class SnippetRemoveCompleter(Completer):
 
 def run():
     """Main entry point for Pocketcode."""
+    # --- Load .env file EARLY ---
+    # Load environment variables from .env file, if it exists.
+    # This should be done before accessing env vars for logging or config.
+    load_dotenv()
+    # Use a basic print or temp logger if needed before full logging setup
+    print("Attempted to load .env file.")
+
     logger.info("--- Starting Pocketcode ---")
     # Declare globals
     global memory_manager, instruction_queue, file_watcher, global_allow_mode_switching
@@ -154,13 +180,15 @@ def run():
     args = parser.parse_args()
 
     # --- Load Configuration ---
+    # Configuration loading happens AFTER dotenv load, so env vars are available
     try:
         config = load_settings()
         if not config:
             logger.error("Failed to load configuration. Exiting.")
             sys.exit(1)
         core_config_temp = config.get('core', {})
-        log_level_config = core_config_temp.get('log_level', 'INFO').upper()
+        # Logging level might now come from .env via os.environ
+        log_level_config = core_config_temp.get('log_level', os.environ.get("LOG_LEVEL", "INFO")).upper()
         numeric_level = getattr(logging, log_level_config, None)
         if isinstance(numeric_level, int):
              logging.getLogger().setLevel(numeric_level)
@@ -191,6 +219,12 @@ def run():
         logger.error(f"Memory bank initialization error: {e}", exc_info=True)
         logger.error("Proceeding without memory bank.")
         memory_manager = None
+    
+    # --- Explicitly set mode flows logger level to DEBUG --- # ADDED
+    logging.getLogger('pocketcode.mode_flows').setLevel(logging.DEBUG)
+    logger.debug("Explicitly set 'pocketcode.mode_flows' logger level to DEBUG.")
+    # --- End explicit logger setup --- # ADDED
+
 
     # --- Watcher Initialization --- (Unchanged logic)
     watch_mode_config = config.get('watch_mode', {})
@@ -290,9 +324,9 @@ def run():
                  # Pass mode_manager to watcher processor
                  item_processed_this_cycle = process_watcher_queue(instruction_queue, config, current_mode_slug, mode_manager, cli_context)
                  if item_processed_this_cycle:
-                     processed_queue_item = True
+                      processed_queue_item = True
                  else:
-                     break
+                      break
 
             # Get current mode display name for prompt
             if not current_mode_slug or not mode_manager:
@@ -361,9 +395,11 @@ def run():
                 shared_store = mode_manager.prepare_initial_store(current_mode_slug, initial_context)
                 flow_structure = mode_manager.get_flow_structure(current_mode_slug)
 
+                logger.debug(f"Checking flow_structure ({flow_structure is not None}) and shared_store ({shared_store is not None}) before running flow.") # ADDED
                 if flow_structure and shared_store:
                     try:
                         # Run the flow
+                        logger.debug(">>> Attempting to run flow...") # ADDED with correct indentation
                         flow_structure.run(shared_store)
                         # Get result from store
                         result = shared_store.get("final_output", "[Error] Flow finished but no final_output was set.")

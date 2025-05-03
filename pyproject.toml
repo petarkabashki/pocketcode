@@ -24,6 +24,7 @@ dependencies = [
     "pocketflow",
     "PyYAML",
     "watchdog",
+    "python-dotenv", # Added dependency
 ]
 
 # If you have command-line scripts later, add them here:

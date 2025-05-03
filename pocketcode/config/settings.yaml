@@ -7,7 +7,7 @@ providers:
   # openai: ${OPENAI_API_KEY}
 
 core:
-  log_level: INFO
+  log_level: DEBUG
   require_tool_confirmation: true # Added: Global flag to require user confirmation before executing tools
   auto_approved_tools: []       # Added: List of tool names to auto-approve if require_tool_confirmation is true
   enable_memory_bank: true        # Added: Toggle for memory bank functionality
