@@ -6,3 +6,4 @@ chainlit.db
 .aider*
 logs
 *.pyc
+STUFF/

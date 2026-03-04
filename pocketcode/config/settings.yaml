@@ -1,147 +1,65 @@
-# pocketcode/config/settings.yaml
-# %% Added: Centralized provider API keys
-providers:
-  gemini: ${GEMINI_API_KEY}
-  anthropic: ${ANTHROPIC_API_KEY}
-  # Add other providers here as needed, e.g.:
-  # openai: ${OPENAI_API_KEY}
+llm:
+  providers:
+    gemini:
+      api_key: ${GEMINI_API_KEY}
+      use_vertexai: false
+      # Vertex AI mode (OAuth/ADC) example:
+      # use_vertexai: true
+      # project: your-gcp-project-id
+      # location: global
+    # OpenAI-compatible providers:
+    # - string value: API key only
+    # - object value: { api_key: "...", base_url: "https://..." }
+    openai: ""
+    openrouter: ""
+    xai: ""
+    requesty: ""
 
-core:
-  log_level: DEBUG
-  require_tool_confirmation: true # Added: Global flag to require user confirmation before executing tools
-  auto_approved_tools: []       # Added: List of tool names to auto-approve if require_tool_confirmation is true
-  enable_memory_bank: true        # Added: Toggle for memory bank functionality
-  memory_bank_dir: pocketcode_docs # Name of the directory in CWD
-  allow_mode_switching: true      # Added: Toggle for allowing mode switching
-  memory_bank_files:              # List of required files (used if enabled)
-    - productContext.md
-    - activeContext.md
-    - systemPatterns.md
-    - techContext.md
-    - progress.md
-
-defaults:
-  llm_config:
-    provider: gemini # Default provider
-    model: gemini-2.5-pro-preview-02-25 # Default model
-    # api_key: ${GOOGLE_API_KEY} # Removed: API key now fetched from 'providers' section
-    parameters:
-      temperature: 0.5
-  allowed_tools: # Default tools available to all modes unless overridden
-    - read_file
-    - write_to_file
-    - list_files
-    # Added Memory Bank Tools to defaults
-    - read_memory_bank_file
-    - write_memory_bank_file
-    - append_to_memory_bank_file
-    - get_memory_bank_summary
-    - check_memory_bank_status
-  # Add other potential defaults (e.g., default prompt path)
-
-tools: # Register all available tools
-  read_file: pocketcode.tools.filesystem.ReadFileTool
-  write_to_file: pocketcode.tools.filesystem.WriteToFileTool
-  list_files: pocketcode.tools.filesystem.ListFilesTool
-  create_directory: pocketcode.tools.filesystem.CreateDirectoryTool # Added
-  glob_files: pocketcode.tools.filesystem.GlobFilesTool         # Added
-  search_code: pocketcode.tools.search.SearchCodeTool # Updated registration
-  execute_command: pocketcode.tools.system.ExecuteCommandTool
-  # Register the new specific Git tools
-  git_status: pocketcode.tools.git.GitStatusTool
-  git_diff: pocketcode.tools.git.GitDiffTool
-  git_add: pocketcode.tools.git.GitAddTool
-  git_commit: pocketcode.tools.git.GitCommitTool
-  git_pull: pocketcode.tools.git.GitPullTool
-  git_push: pocketcode.tools.git.GitPushTool
-  # Removed old generic git_command:
-  # git_command: pocketcode.tools.git.GitCommandTool
-  # Register the new Memory Bank tools (Updated paths to classes)
-  read_memory_bank_file: pocketcode.tools.memory_bank_tools.ReadMemoryBankFileTool
-  write_memory_bank_file: pocketcode.tools.memory_bank_tools.WriteMemoryBankFileTool
-  append_to_memory_bank_file: pocketcode.tools.memory_bank_tools.AppendToMemoryBankFileTool
-  get_memory_bank_summary: pocketcode.tools.memory_bank_tools.GetMemoryBankSummaryTool
-  check_memory_bank_status: pocketcode.tools.memory_bank_tools.CheckMemoryBankStatusTool
-
-
-modes:
-  koder: # Mode Slug
-    name: "💻 Code" # User-friendly display name
-    description: "Mode specialized for writing and modifying code using a PocketFlow." # Purpose
-    # REMOVED: module: pocketcode.modes.koder.KoderMode
-    # REMOVED: flow_module: pocketcode.flows.koder.create_code_flow # Path to the function that creates the PocketFlow instance
-    prompt_template_path: prompts/code_mode_system.txt # (Optional) Path to main system prompt file
-    llm_config: # Overrides default LLM config
-      # provider: anthropic
-      # model: claude-3-opus-20240229
-      # api_key: ${ANTHROPIC_API_KEY} # Removed: API key now fetched from 'providers' section
+  profiles:
+    gemini_default:
+      provider: gemini
+      model: gemini-2.5-pro-preview-02-25
       parameters:
-        temperature: 0.5
-    allowed_tools: # Combined list: Specific + Filesystem
-      - create_directory
-      - execute_command
-      - git_add
-      - git_commit
-      - git_diff
-      - git_pull
-      - git_push
-      - git_status
-      - glob_files
-      - search_code
-      - read_file      # Added Filesystem Tool
-      - write_to_file  # Added Filesystem Tool
-      - list_files     # Added Filesystem Tool
-    custom_instructions_path: prompts/code_mode_instructions.txt # (Optional) Path to mode-specific instructions
+        temperature: 0.4
+        max_output_tokens: 4096
 
-  arkitekt:
-    name: "🏗️ Architect"
-    description: "Mode for planning, designing system architecture, and documentation."
-    # REMOVED: module: pocketcode.modes.arkitekt.ArkitektMode
-    # REMOVED: flow_module: pocketcode.flows.arkitekt.create_architect_flow
-    prompt_template_path: prompts/architect_mode_system.txt
-    # Inherits default llm_config (provider/model). API key will be fetched from 'providers' section based on the default provider ('google').
-    allowed_tools: # Defines specific tools for this mode (inherits defaults)
-      # Inherits defaults: read_file, write_to_file, list_files, memory bank tools
-      - search_code # Updated allowed tool
-      # Note: write_to_file restriction to *.md would need to be handled in the mode/flow logic, not just config.
-    custom_instructions_path: prompts/architect_mode_instructions.txt
+    gemini_pro:
+      provider: gemini
+      model: gemini-2.5-pro-preview-02-25
+      parameters:
+        temperature: 0.4
+        max_output_tokens: 4096
 
-  micromanager:
-    name: "🔬 Micromanager" # Updated name as per task
-    description: "Mode for analyzing tasks, breaking them down into subtasks, and delegating execution to other specialized modes."
-    # REMOVED: module: pocketcode.modes.micromanager.MicromanagerMode
-    # REMOVED: flow_module: pocketcode.flows.micromanager.create_micromanager_flow # NOTE: This flow needs to be created later
-    # prompt_template_path: prompts/micromanager_system.txt # Optional: Can add later
-    # Inherits default llm_config (provider/model). API key will be fetched from 'providers' section based on the default provider ('google').
-    allowed_tools: # Tools needed for analysis and planning (inherits defaults)
-      # Inherits defaults: read_file, list_files, memory bank tools
-      - search_code # Updated allowed tool
-      # Assuming delegation tools (switch_mode, new_task) and ask_followup_question are handled by the core system or flow implementation
-    # custom_instructions_path: prompts/micromanager_instructions.txt # Optional: Can add later
+    gemini_fast:
+      provider: gemini
+      model: gemini-2.5-flash
+      parameters:
+        temperature: 0.2
+        max_output_tokens: 3072
 
-  # Add other modes (ask, debug, etc.) following the same structure
-  asker:
-    name: "❓ Asker"
-    description: "Mode specialized for answering questions using file system and search tools."
-    # REMOVED: flow_module: pocketcode.flows.asker.create_asker_flow # Points to the new flow function
-    # Inherits default llm_config (provider/model/parameters)
-    allowed_tools: # Specify tools for this mode
-      - read_file
-      - list_files
-      - glob_files    # Tool for pattern matching files
-      - search_code   # Tool for searching within files
-      # Note: Default memory bank tools are also implicitly available if enabled globally
-    # Optional: Define specific prompts later if needed
-    # prompt_template_path: prompts/asker_mode_system.txt
-    # custom_instructions_path: prompts/asker_mode_instructions.txt
+  default_profile: gemini_default
 
-# Add other sections as needed
+runtime:
+  log_level: INFO
+  default_workflow: orchestrator
+  default_agent: asker
+  llm_overrides:
+    agents: {}
+    nodes: {}
+    handoffs: {}
+  llm_pricing: {}
 
-# %% Added: Watch Mode Configuration
-watch_mode:
-  enabled_by_default: false # Requires /watch start command
-  trigger_string: "AI!"
-  instruction_source: after_trigger # Options: after_trigger, full_line
-  ask_confirmation: true # Ask user before processing detected instruction
-  watch_recursive: true # Watch subdirectories for paths added via /watch start
-  queue_changes: true # Queue multiple detected changes sequentially
+  # Relative paths are resolved from the current workspace directory.
+  # Each path can be either:
+  # 1) a folder containing plugin subfolders, or
+  # 2) a direct plugin folder with plugin.yaml
+  plugin_paths:
+    - .pocketcode/plugins
+
+  require_tool_confirmation: true
+  auto_approved_tools: []
+  auto_confirm_tools: false
+  tool_confirmation:
+    default_policy: confirm
+    tool_policies: {}
+    agent_policies: {}

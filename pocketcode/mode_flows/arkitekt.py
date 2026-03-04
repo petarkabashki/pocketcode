@@ -1,4 +1,4 @@
-#%% pocketcode/mode_flows/arkitekt.py
+# %% pocketcode/mode_flows/arkitekt.py
 import logging
 from typing import Dict, Any
 
@@ -12,7 +12,7 @@ from .base_flow import (
     BaseFormatResponseNode,
     BaseErrorHandlerNode,
     BaseEndNode,
-    create_base_flow
+    create_base_flow_flow # Corrected import name
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ class ArkitektAgentNode(BaseAgentNode):
         tool_registry = self._get_tool_registry(shared_store)
         # Filter tools relevant to architecture/documentation if needed, or list all
         available_tools = list(tool_registry.keys())
-        memory_bank_content = shared_store.get("memory_bank_content", "N/A")
+        context_memory_store_content = shared_store.get("context_memory_store_content", "N/A")
         previous_tool_result = shared_store.get('tool_result', 'N/A')
         mode_name = shared_store.get('mode_name', 'Arkitekt')
 
@@ -51,7 +51,7 @@ class ArkitektAgentNode(BaseAgentNode):
             f"User Request: {user_request}",
             "\nContext:",
             f"  CLI Context: {formatted_cli_context}",
-            f"  Memory Bank Summary:\n{memory_bank_content}", # Display potentially multi-line summary
+            f"  Memory Bank Summary:\n{context_memory_store_content}",
             f"  Previous Tool Result: {previous_tool_result}",
             f"\nAvailable Tools: {available_tools}", # Focus on filesystem (read/write/search), memory bank tools
             "\nTask:",
@@ -107,7 +107,7 @@ def create_arkitekt_flow() -> Flow:
     end_node = EndArkitektTask(name="EndArkitektTask")
 
     # 2. Use the base flow wiring function
-    arkitekt_flow = create_base_flow(
+    arkitekt_flow = create_base_flow_flow( # Corrected function call
         start_node=start_node,
         agent_node=agent_node,
         tool_node=tool_execution_node,

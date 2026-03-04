@@ -12,7 +12,7 @@ from .base_flow import (
     BaseFormatResponseNode,
     BaseErrorHandlerNode,
     BaseEndNode,
-    create_base_flow
+    create_base_flow_flow # Corrected import name
 )
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ def create_micromanager_flow() -> Flow:
     end_node = EndMicromanageTask(name="EndMicromanageTask")
 
     # 2. Use the base flow wiring function
-    micromanager_flow = create_base_flow(
+    micromanager_flow = create_base_flow_flow( # Corrected function call
         start_node=start_node,
         agent_node=agent_node,
         tool_node=tool_execution_node,

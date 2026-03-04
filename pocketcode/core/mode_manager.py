@@ -1,8 +1,8 @@
 # %% pocketcode/core/mode_manager.py
 import logging
 import importlib
-import os  # Added
-import pathlib # Added
+import os
+import pathlib
 from typing import Dict, Any, Optional
 
 from pocketflow import Flow # Assuming Flow is importable
@@ -10,7 +10,7 @@ from pocketflow import Flow # Assuming Flow is importable
 # Assuming these are the correct paths for your interfaces and components
 from pocketcode.core.interfaces import BaseLlmClient
 from pocketcode.core.llm_factory import create_llm_client
-from pocketcode.core.memory_bank import MemoryBankManager # Assuming this exists
+from pocketcode.core.context_elephant_store import ContextElephantStoreManager # Assuming this exists
 
 logger = logging.getLogger(__name__)
 
@@ -19,27 +19,31 @@ class ModeManager:
     Manages the loading, configuration, and retrieval of PocketFlow-based modes.
     Centralizes LLM client initialization and dependency injection for flows.
     Dynamically discovers modes from the 'mode_flows' directory and validates against configuration.
+    Caches the active mode's flow instance for reuse.
     """
     def __init__(self,
                  global_config: Dict[str, Any],
-                 tool_registry: Dict[str, str],
-                 memory_manager: Optional[MemoryBankManager] = None):
+                 tool_registry: Dict[str, Any],
+                 memory_manager: Optional[ContextElephantStoreManager] = None):
         """
         Initializes the ModeManager.
 
         Args:
             global_config: The overall application configuration (settings).
-            tool_registry: Dictionary mapping tool names to their implementation paths.
-            memory_manager: An optional instance of MemoryBankManager.
+            tool_registry: Dictionary mapping tool names to registered tool classes.
+            memory_manager: An optional instance of ContextElephantStoreManager.
 
         Raises:
-            ValueError: If configuration/discovery mismatches are found (modes configured but not found, or vice-versa).
+            ValueError: If configuration/discovery mismatches are found (modes configured but not found).
             FileNotFoundError: If the mode_flows directory doesn't exist.
         """
         self._global_config = global_config
         self._tool_registry = tool_registry
         self._memory_manager = memory_manager
         self._llm_clients: Dict[str, BaseLlmClient] = {} # Cache for LLM clients
+
+        # Cache flow instances by mode slug.
+        self._flow_cache: Dict[str, Flow] = {}
 
         static_mode_configs = self._load_mode_configs()
 
@@ -59,10 +63,16 @@ class ModeManager:
 
         missing_configs = discovered_slugs - configured_slugs
         if missing_configs:
-            raise ValueError(f"Discovered mode flows lack configuration in settings.yaml: {sorted(list(missing_configs))}")
+            # Modified to log a warning instead of raising an error
+            logger.warning(
+                "Discovered mode flows lack configuration and will be ignored: %s",
+                sorted(list(missing_configs)),
+            )
+            # Do NOT raise ValueError here
 
         missing_flows = configured_slugs - discovered_slugs
         if missing_flows:
+            # Keep this check as configured modes must have a corresponding flow
             raise ValueError(f"Configured modes lack corresponding flow files/functions in '{flows_dir.name}/': {sorted(list(missing_flows))}")
 
         # Process only modes that are both configured and discovered
@@ -143,11 +153,9 @@ class ModeManager:
         """
         Gets or initializes the LLM client for a given mode based on its config.
         Uses caching to avoid re-initializing clients.
-        (No changes needed from original)
         """
         mode_config = self._mode_configs.get(mode_name)
         if not mode_config:
-            # This log might be redundant now due to __init__ validation, but safe to keep
             logger.error(f"Attempted to get LLM client for non-validated/missing mode '{mode_name}'.")
             return None
 
@@ -162,7 +170,8 @@ class ModeManager:
         if cache_key not in self._llm_clients:
             logger.info(f"LLM client for '{cache_key}' not found in cache. Initializing...")
             try:
-                providers_config = self._global_config.get('providers', {})
+                llm_section = self._global_config.get("llm", {}) if isinstance(self._global_config, dict) else {}
+                providers_config = llm_section.get('providers', {}) if isinstance(llm_section, dict) else {}
                 client = create_llm_client(llm_config, providers_config)
                 if client:
                     self._llm_clients[cache_key] = client
@@ -183,7 +192,6 @@ class ModeManager:
         """Returns the validated and loaded mode configurations."""
         return self._mode_configs.copy() # Return a copy
 
-    # Helper to get the prepared shared store if needed separately
     def prepare_initial_store(self, mode_name: str, initial_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
          """Prepares the initial shared store with dependencies for a given mode."""
          mode_config = self._mode_configs.get(mode_name)
@@ -198,6 +206,17 @@ class ModeManager:
               return None
 
          shared_store = initial_context if initial_context else {}
+
+         cli_context = shared_store.get("cli_context", {})
+         shared_store["formatted_cli_context"] = self._format_cli_context(cli_context)
+
+         context_content = {}
+         if self._memory_manager:
+             try:
+                 context_content = self._memory_manager.load_content()
+             except Exception as e:
+                 logger.error(f"Failed loading context elephant store content: {e}", exc_info=True)
+         shared_store["context_memory_store_content"] = context_content if context_content else "N/A"
          shared_store.update({
              "mode_name": mode_name,
              "mode_config": mode_config,
@@ -211,44 +230,99 @@ class ModeManager:
          logger.debug(f"Prepared initial shared store for mode '{mode_name}' with keys: {list(shared_store.keys())}")
          return shared_store
 
-    # Refined get_flow to just return the flow structure
+    def _format_cli_context(self, cli_context_data: Dict[str, Any]) -> str:
+         if not cli_context_data or not any(cli_context_data.values()):
+             return "None provided."
+
+         lines = []
+         if cli_context_data.get("files"):
+             lines.append("Files:")
+             lines.extend(f"- {item}" for item in sorted(list(cli_context_data["files"])))
+         if cli_context_data.get("folders"):
+             lines.append("Folders:")
+             lines.extend(f"- {item}" for item in sorted(list(cli_context_data["folders"])))
+         if cli_context_data.get("urls"):
+             lines.append("URLs:")
+             lines.extend(f"- {item}" for item in sorted(list(cli_context_data["urls"])))
+         if cli_context_data.get("snippets"):
+             lines.append("Snippets:")
+             for name, content in sorted(cli_context_data["snippets"].items()):
+                 lines.append(f"- {name}: {content}")
+         return "\n".join(lines) if lines else "None provided."
+
+    def get_or_create_flow(self, mode_name: str) -> Optional[Flow]:
+        """
+        Gets a cached flow instance for the mode, or creates and caches it.
+        """
+        logger.info(f"Requesting flow for mode: '{mode_name}'")
+
+        if mode_name in self._flow_cache:
+            logger.debug(f"Returning cached flow instance for mode: '{mode_name}'")
+            return self._flow_cache[mode_name]
+
+        logger.info(f"No cached flow for '{mode_name}'. Creating new flow instance.")
+
+        mode_config = self._mode_configs.get(mode_name)
+        if not mode_config:
+            logger.error(f"Mode '{mode_name}' not found in validated configuration. Cannot create flow.")
+            return None
+
+        flow_creator_path = mode_config.get('_flow_creator_path')
+        if not flow_creator_path:
+            logger.error(f"Internal Error: Mode '{mode_name}' configuration missing '_flow_creator_path'. Cannot load flow.")
+            return None
+
+        logger.debug(f"Attempting to load flow structure using creator path: {flow_creator_path}")
+        try:
+            module_path, func_name = flow_creator_path.rsplit('.', 1)
+            module = importlib.import_module(module_path)
+            create_flow_func = getattr(module, func_name)
+
+            # Assume create_flow function now takes no arguments
+            flow = create_flow_func()
+
+            if not isinstance(flow, Flow):
+                 logger.error(f"Flow creation function '{func_name}' from '{flow_creator_path}' did not return a PocketFlow Flow instance.")
+                 return None
+
+            logger.info(f"Successfully created and cached flow instance for mode '{mode_name}'.")
+            self._flow_cache[mode_name] = flow
+            return flow
+
+        except (ImportError, AttributeError, ValueError, TypeError) as e:
+            logger.error(f"Failed to load or create flow from {flow_creator_path} for mode '{mode_name}': {e}", exc_info=True)
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error getting flow for mode '{mode_name}' using {flow_creator_path}: {e}", exc_info=True)
+            return None
+
+    # Keep get_flow_structure for potential external use if needed, but internal logic should use get_or_create_flow
     def get_flow_structure(self, mode_name: str) -> Optional[Flow]:
          """
          Gets the basic flow structure for a mode using the dynamically discovered creator function path
-         stored in its configuration.
+         stored in its configuration. This method does NOT cache the flow instance.
+         Internal logic should prefer get_or_create_flow for caching behavior.
          """
-         logger.info(f"Requesting flow structure for mode: '{mode_name}'")
+         logger.warning(f"Using get_flow_structure for mode '{mode_name}'. Consider using get_or_create_flow for caching.")
          mode_config = self._mode_configs.get(mode_name)
          if not mode_config:
              logger.error(f"Mode '{mode_name}' not found in validated configuration.")
              return None
 
-         # Use the dynamically discovered path stored during __init__
          flow_creator_path = mode_config.get('_flow_creator_path')
          if not flow_creator_path:
-             # This should not happen if __init__ validation passed, but check defensively
              logger.error(f"Internal Error: Mode '{mode_name}' configuration missing '_flow_creator_path'. Cannot load flow.")
              return None
 
-         logger.debug(f"Attempting to load flow structure using creator path: {flow_creator_path}")
          try:
              module_path, func_name = flow_creator_path.rsplit('.', 1)
              module = importlib.import_module(module_path)
              create_flow_func = getattr(module, func_name)
-
-             # Assume create_flow function now takes no arguments
              flow = create_flow_func()
-
              if not isinstance(flow, Flow):
                   logger.error(f"Flow creation function '{func_name}' from '{flow_creator_path}' did not return a PocketFlow Flow instance.")
                   return None
-
-             logger.info(f"Successfully retrieved flow structure for mode '{mode_name}' using '{flow_creator_path}'.")
              return flow
-
-         except (ImportError, AttributeError, ValueError, TypeError) as e:
-             logger.error(f"Failed to load or create flow structure from {flow_creator_path} for mode '{mode_name}': {e}", exc_info=True)
-             return None
          except Exception as e:
-             logger.error(f"Unexpected error getting flow structure for mode '{mode_name}' using {flow_creator_path}: {e}", exc_info=True)
+             logger.error(f"Failed to load or create flow structure from {flow_creator_path} for mode '{mode_name}': {e}", exc_info=True)
              return None

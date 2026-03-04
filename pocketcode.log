@@ -1,0 +1,143 @@
+2025-05-03 18:24:29,915 - __main__ - INFO - --- Starting Pocketcode ---
+2025-05-03 18:24:29,920 - __main__ - INFO - Logging level set to DEBUG
+2025-05-03 18:24:29,920 - __main__ - INFO - Mode switching allowed: True
+2025-05-03 18:24:29,920 - __main__ - INFO - Configuration Loaded.
+2025-05-03 18:24:29,920 - __main__ - INFO - Memory bank is disabled in configuration.
+2025-05-03 18:24:29,920 - __main__ - INFO - File watcher initialized.
+2025-05-03 18:24:29,920 - __main__ - INFO - Registering Components...
+2025-05-03 18:24:29,920 - pocketcode.core.registration - INFO - Starting registration for modes...
+2025-05-03 18:24:29,920 - pocketcode.core.registration - WARNING - Missing or invalid 'flow_module' path string in configuration for mode 'koder'. Skipping.
+2025-05-03 18:24:29,920 - pocketcode.core.registration - WARNING - Missing or invalid 'flow_module' path string in configuration for mode 'arkitekt'. Skipping.
+2025-05-03 18:24:29,920 - pocketcode.core.registration - WARNING - Missing or invalid 'flow_module' path string in configuration for mode 'micromanager'. Skipping.
+2025-05-03 18:24:29,920 - pocketcode.core.registration - WARNING - Missing or invalid 'flow_module' path string in configuration for mode 'asker'. Skipping.
+2025-05-03 18:24:29,920 - pocketcode.core.registration - INFO - Starting registration for tools...
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'read_file' -> pocketcode.tools.filesystem.ReadFileTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'write_to_file' -> pocketcode.tools.filesystem.WriteToFileTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'list_files' -> pocketcode.tools.filesystem.ListFilesTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'create_directory' -> pocketcode.tools.filesystem.CreateDirectoryTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'glob_files' -> pocketcode.tools.filesystem.GlobFilesTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'search_code' -> pocketcode.tools.search.SearchCodeTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'execute_command' -> pocketcode.tools.system.ExecuteCommandTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'git_status' -> pocketcode.tools.git.GitStatusTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'git_diff' -> pocketcode.tools.git.GitDiffTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'git_add' -> pocketcode.tools.git.GitAddTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'git_commit' -> pocketcode.tools.git.GitCommitTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'git_pull' -> pocketcode.tools.git.GitPullTool
+2025-05-03 18:24:29,923 - pocketcode.core.registration - INFO - Registered Tool Class: 'git_push' -> pocketcode.tools.git.GitPushTool
+2025-05-03 18:24:29,924 - pocketcode.core.registration - INFO - Registered Tool Class: 'read_context_elephant_store_file' -> pocketcode.tools.context_elephant_store_tools.ReadContextElephantStoreFileTool
+2025-05-03 18:24:29,924 - pocketcode.core.registration - INFO - Registered Tool Class: 'write_context_elephant_store_file' -> pocketcode.tools.context_elephant_store_tools.WriteContextElephantStoreFileTool
+2025-05-03 18:24:29,924 - pocketcode.core.registration - INFO - Registered Tool Class: 'append_to_context_elephant_store_file' -> pocketcode.tools.context_elephant_store_tools.AppendToContextElephantStoreFileTool
+2025-05-03 18:24:29,924 - pocketcode.core.registration - INFO - Registered Tool Class: 'get_context_elephant_store_summary' -> pocketcode.tools.context_elephant_store_tools.GetContextElephantStoreSummaryTool
+2025-05-03 18:24:29,924 - pocketcode.core.registration - INFO - Registered Tool Class: 'check_context_elephant_store_status' -> pocketcode.tools.context_elephant_store_tools.CheckContextElephantStoreStatusTool
+2025-05-03 18:24:29,924 - pocketcode.core.registration - INFO - Registration complete. Mode Flow Paths registered: 0. Tools registered: 18.
+2025-05-03 18:24:29,924 - pocketcode.core.mode_manager - INFO - Discovering mode flows in: /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/mode_flows
+2025-05-03 18:24:29,927 - pocketcode.core.mode_manager - INFO - Discovery scan complete. Found potential flow creators for: ['arkitekt', 'asker', 'base_flow', 'koder', 'micromanager']
+2025-05-03 18:24:29,927 - pocketcode.core.mode_manager - WARNING - Discovered mode flows lack configuration in settings.yaml and will be ignored: ['base_flow']
+2025-05-03 18:24:29,927 - pocketcode.core.mode_manager - INFO - ModeManager initialized.
+2025-05-03 18:24:29,927 - pocketcode.core.mode_manager - INFO - Successfully loaded and validated modes: ['arkitekt', 'asker', 'koder', 'micromanager']
+2025-05-03 18:24:29,927 - __main__ - INFO - Registered Components Summary:
+2025-05-03 18:24:29,927 - __main__ - INFO -   Mode Flow Paths: ['micromanager', 'asker', 'koder', 'arkitekt']
+2025-05-03 18:24:29,927 - __main__ - INFO -   Tools: ['read_file', 'write_to_file', 'list_files', 'create_directory', 'glob_files', 'search_code', 'execute_command', 'git_status', 'git_diff', 'git_add', 'git_commit', 'git_pull', 'git_push', 'read_context_elephant_store_file', 'write_context_elephant_store_file', 'append_to_context_elephant_store_file', 'get_context_elephant_store_summary', 'check_context_elephant_store_status']
+2025-05-03 18:24:29,927 - __main__ - INFO - 
+--- Attempting to start in 'asker' mode ---
+2025-05-03 18:24:29,927 - __main__ - INFO - Successfully set initial mode to: asker (asker)
+2025-05-03 18:24:29,927 - __main__ - INFO - Setting up prompt_toolkit...
+2025-05-03 18:24:29,927 - __main__ - INFO - Command history will be stored in: /home/mu6mula/.pocketcode_history
+2025-05-03 18:24:29,927 - __main__ - INFO - prompt_toolkit completer created.
+2025-05-03 18:24:29,927 - __main__ - INFO - 
+--- Pocketcode Ready. Enter your request or a command (starting with /). ---
+2025-05-03 18:24:32,932 - __main__ - INFO - Processing request with mode 'asker'...
+2025-05-03 18:24:32,932 - pocketcode.core.mode_manager - INFO - LLM client for 'gemini_gemini-2.5-pro-preview-02-25' not found in cache. Initializing...
+2025-05-03 18:24:32,933 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2025-05-03 18:24:32,933 - pocketcode.core.llm_factory - WARNING - Using API key directly from configuration for provider 'gemini'. Consider using environment variables.
+2025-05-03 18:24:32,933 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2025-05-03 18:24:32,980 - pocketcode.core.llm_factory - INFO - GeminiClientWrapper initialized.
+2025-05-03 18:24:32,981 - pocketcode.core.llm_factory - INFO - Successfully created GeminiClientWrapper.
+2025-05-03 18:24:32,981 - pocketcode.core.mode_manager - INFO - Successfully initialized and cached LLM client for 'gemini_gemini-2.5-pro-preview-02-25'.
+2025-05-03 18:24:32,981 - pocketcode.core.mode_manager - INFO - Requesting flow for mode: 'asker'
+2025-05-03 18:24:32,981 - pocketcode.core.mode_manager - INFO - Mode is changing to 'asker' or no flow cached. Creating new flow instance.
+2025-05-03 18:24:32,981 - pocketcode.mode_flows.asker - INFO - Creating PocketFlow structure for Asker Mode using base flow...
+2025-05-03 18:24:32,981 - pocketcode.mode_flows.base_flow - INFO - Wiring base flow structure...
+2025-05-03 18:24:32,981 - pocketcode.mode_flows.base_flow - INFO - Base flow structure wired successfully.
+2025-05-03 18:24:32,981 - pocketcode.mode_flows.asker - INFO - Asker Mode PocketFlow structure created using base flow.
+2025-05-03 18:24:32,981 - pocketcode.core.mode_manager - INFO - Successfully created and cached flow instance for mode 'asker'.
+2025-05-03 18:24:32,982 - __main__ - INFO - Response from mode 'asker':
+2026-03-04 22:17:58,146 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:17:58,148 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:18:27,786 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:18:27,789 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:18:27,827 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:18:27,830 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:18:47,250 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:18:47,253 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:18:47,284 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:18:47,287 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:18:58,505 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:18:58,508 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:27:34,435 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:27:34,438 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:28:32,513 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:28:32,516 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:39:13,203 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:39:13,206 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:42:37,873 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:42:37,876 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:42:43,711 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:42:43,714 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:43:40,377 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:43:40,386 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:51:21,175 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:51:21,178 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:53:11,761 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:53:11,764 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:56:04,313 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:56:04,316 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:56:04,323 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:56:04,326 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:56:10,596 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:56:10,599 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:56:11,114 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:56:11,117 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:56:11,183 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:56:11,186 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:20:56,259 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:20:56,261 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:37:23,413 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:37:23,416 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:37:57,589 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:37:57,592 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:39:27,396 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:39:27,399 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:39:56,025 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:39:56,028 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:39:59,946 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:39:59,948 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:41:32,131 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:41:32,133 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:42:00,515 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:42:00,518 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:42:38,581 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:42:38,584 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:43:09,081 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': "Unknown LLM profile 'gemini_default'."
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 425, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 461, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 756, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 94, in generate
+    profile = self.resolve_profile_config(profile_name)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 86, in resolve_profile_config
+    raise KeyError(f"Unknown LLM profile '{effective_profile_name}'.")
+KeyError: "Unknown LLM profile 'gemini_default'."
+2026-03-04 23:43:33,441 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 23:43:33,448 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 23:43:33,526 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-04 23:43:33,527 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-04 23:43:33,527 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-04 23:43:37,380 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent "HTTP/1.1 200 OK"

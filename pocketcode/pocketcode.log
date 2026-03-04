@@ -1,0 +1,439 @@
+2026-03-04 22:20:08,394 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:20:08,397 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:21:19,013 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 22:21:19,013 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 22:21:19,013 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2026-03-04 22:21:19,051 - pocketcode.core.llm_factory - INFO - GeminiClientWrapper initialized.
+2026-03-04 22:21:19,051 - pocketcode.core.llm_factory - INFO - Successfully created GeminiClientWrapper.
+2026-03-04 22:21:19,052 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:21:19,052 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 421, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 457, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 736, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 107, in generate
+    return client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:21:44,539 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:21:44,541 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 421, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 457, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 736, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 107, in generate
+    return client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:28:46,122 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:28:46,124 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:29:30,513 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 22:29:30,513 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 22:29:30,513 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2026-03-04 22:29:30,557 - pocketcode.core.llm_factory - INFO - GeminiClientWrapper initialized.
+2026-03-04 22:29:30,557 - pocketcode.core.llm_factory - INFO - Successfully created GeminiClientWrapper.
+2026-03-04 22:29:30,557 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:29:30,558 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 421, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 457, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 736, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 107, in generate
+    return client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:35:01,911 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:35:01,913 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 421, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 457, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 736, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 107, in generate
+    return client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:35:03,444 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:35:03,445 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 421, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 457, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 736, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 107, in generate
+    return client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:35:06,974 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:35:06,974 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 421, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 457, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 736, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 107, in generate
+    return client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:35:22,952 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:35:22,955 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:40:01,156 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:40:01,159 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:44:06,993 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:44:06,996 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:45:12,900 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 22:45:12,901 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 22:45:12,901 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2026-03-04 22:45:12,973 - pocketcode.core.llm_factory - INFO - GeminiClientWrapper initialized.
+2026-03-04 22:45:12,974 - pocketcode.core.llm_factory - INFO - Successfully created GeminiClientWrapper.
+2026-03-04 22:45:12,974 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:45:12,976 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 421, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 457, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 745, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 107, in generate
+    return client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 90, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 22:52:03,118 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:52:03,121 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:54:37,055 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:54:37,058 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 22:58:22,681 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 22:58:22,684 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:05:14,045 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:05:14,048 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:06:21,669 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:06:21,672 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:07:28,416 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 23:07:28,416 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 23:07:28,417 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2026-03-04 23:07:28,529 - pocketcode.core.llm_factory - INFO - GeminiClientWrapper initialized.
+2026-03-04 23:07:28,529 - pocketcode.core.llm_factory - INFO - Successfully created GeminiClientWrapper.
+2026-03-04 23:07:28,529 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 91, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 23:07:28,531 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 425, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 461, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 756, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 124, in generate
+    text = client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 91, in generate
+    response_object = self._client.generate_content( # Use generate_content directly on the client
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 23:09:27,965 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:09:27,970 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:09:45,774 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 23:09:45,774 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 23:09:45,774 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2026-03-04 23:09:45,818 - pocketcode.core.llm_factory - INFO - GeminiClientWrapper initialized.
+2026-03-04 23:09:45,828 - pocketcode.core.llm_factory - INFO - Successfully created GeminiClientWrapper.
+2026-03-04 23:09:45,834 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 91, in generate
+    request_config: Dict[str, Any] = {}
+                  ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 23:09:45,836 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 'Client' object has no attribute 'generate_content'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 425, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 461, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 756, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 124, in generate
+    text = client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 91, in generate
+    request_config: Dict[str, Any] = {}
+                  ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Client' object has no attribute 'generate_content'
+2026-03-04 23:09:54,551 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:09:54,553 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:10:00,402 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 23:10:00,402 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 23:10:00,403 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2026-03-04 23:10:00,498 - pocketcode.core.llm_factory - INFO - GeminiClientWrapper initialized.
+2026-03-04 23:10:00,498 - pocketcode.core.llm_factory - INFO - Successfully created GeminiClientWrapper.
+2026-03-04 23:10:00,499 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-04 23:10:01,101 - httpx - INFO - HTTP Request: POST https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-pro-preview-02-25:generateContent "HTTP/1.1 401 Unauthorized"
+2026-03-04 23:10:01,103 - pocketcode.core.llm_factory - ERROR - Gemini API call failed via wrapper: 401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal. See https://cloud.google.com/docs/authentication', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'CREDENTIALS_MISSING', 'domain': 'googleapis.com', 'metadata': {'service': 'aiplatform.googleapis.com', 'method': 'google.cloud.aiplatform.v1beta1.PredictionService.GenerateContent'}}]}}
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 106, in generate
+    response_object = self._client.models.generate_content(**modern_kwargs)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/models.py", line 5644, in generate_content
+    response = self._generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/models.py", line 4306, in _generate_content
+    response = self._api_client.request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1401, in request
+    response = self._request(http_request, http_options, stream=False)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1237, in _request
+    return self._retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 470, in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 371, in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/mu6mula/miniconda3/envs/py312/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/mu6mula/miniconda3/envs/py312/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 473, in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1214, in _request_once
+    errors.APIError.raise_for_response(response)
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/errors.py", line 134, in raise_for_response
+    cls.raise_error(response.status_code, response_json, response)
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/errors.py", line 159, in raise_error
+    raise ClientError(status_code, response_json, response)
+google.genai.errors.ClientError: 401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal. See https://cloud.google.com/docs/authentication', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'CREDENTIALS_MISSING', 'domain': 'googleapis.com', 'metadata': {'service': 'aiplatform.googleapis.com', 'method': 'google.cloud.aiplatform.v1beta1.PredictionService.GenerateContent'}}]}}
+2026-03-04 23:10:01,109 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal. See https://cloud.google.com/docs/authentication', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'CREDENTIALS_MISSING', 'domain': 'googleapis.com', 'metadata': {'service': 'aiplatform.googleapis.com', 'method': 'google.cloud.aiplatform.v1beta1.PredictionService.GenerateContent'}}]}}
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 425, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 461, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 756, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 124, in generate
+    text = client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_factory.py", line 106, in generate
+    response_object = self._client.models.generate_content(**modern_kwargs)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/models.py", line 5644, in generate_content
+    response = self._generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/models.py", line 4306, in _generate_content
+    response = self._api_client.request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1401, in request
+    response = self._request(http_request, http_options, stream=False)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1237, in _request
+    return self._retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 470, in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 371, in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/mu6mula/miniconda3/envs/py312/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/mu6mula/miniconda3/envs/py312/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 473, in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1214, in _request_once
+    errors.APIError.raise_for_response(response)
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/errors.py", line 134, in raise_for_response
+    cls.raise_error(response.status_code, response_json, response)
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/errors.py", line 159, in raise_error
+    raise ClientError(status_code, response_json, response)
+google.genai.errors.ClientError: 401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal. See https://cloud.google.com/docs/authentication', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'CREDENTIALS_MISSING', 'domain': 'googleapis.com', 'metadata': {'service': 'aiplatform.googleapis.com', 'method': 'google.cloud.aiplatform.v1beta1.PredictionService.GenerateContent'}}]}}
+2026-03-04 23:16:34,388 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:16:34,391 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
+2026-03-04 23:17:49,834 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-04 23:17:49,835 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-04 23:17:49,835 - google_genai._api_client - INFO - The user provided Vertex AI API key will take precedence over the project/location from the environment variables.
+2026-03-04 23:17:49,913 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-04 23:17:49,913 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-04 23:17:49,913 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-04 23:17:50,086 - httpx - INFO - HTTP Request: POST https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-pro-preview-02-25:generateContent "HTTP/1.1 401 Unauthorized"
+2026-03-04 23:17:50,086 - pocketcode.core.workflow_runtime - ERROR - Error while executing workflow 'orchestrator' node 'orchestrate': 401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal. See https://cloud.google.com/docs/authentication', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'CREDENTIALS_MISSING', 'domain': 'googleapis.com', 'metadata': {'method': 'google.cloud.aiplatform.v1beta1.PredictionService.GenerateContent', 'service': 'aiplatform.googleapis.com'}}]}}
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 425, in execute_node
+    core_transition = self._run_core_node(node_definition, shared_store)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 461, in _run_core_node
+    return self._run_agent_node(node_definition, shared_store)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/workflow_runtime.py", line 756, in _run_agent_node
+    response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_router.py", line 124, in generate
+    text = client.generate(prompt=prompt, model=model, **parameters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/llm_providers/gemini.py", line 56, in generate
+    response = self._client.models.generate_content(**request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/models.py", line 5644, in generate_content
+    response = self._generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/models.py", line 4306, in _generate_content
+    response = self._api_client.request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1401, in request
+    response = self._request(http_request, http_options, stream=False)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1237, in _request
+    return self._retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 470, in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 371, in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/mu6mula/miniconda3/envs/py312/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/mu6mula/miniconda3/envs/py312/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 473, in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1214, in _request_once
+    errors.APIError.raise_for_response(response)
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/errors.py", line 134, in raise_for_response
+    cls.raise_error(response.status_code, response_json, response)
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/.venv/lib/python3.12/site-packages/google/genai/errors.py", line 159, in raise_error
+    raise ClientError(status_code, response_json, response)
+google.genai.errors.ClientError: 401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal. See https://cloud.google.com/docs/authentication', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'CREDENTIALS_MISSING', 'domain': 'googleapis.com', 'metadata': {'method': 'google.cloud.aiplatform.v1beta1.PredictionService.GenerateContent', 'service': 'aiplatform.googleapis.com'}}]}}
+2026-03-04 23:32:23,415 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-04 23:32:23,417 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0

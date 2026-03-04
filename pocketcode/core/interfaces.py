@@ -64,19 +64,25 @@ class BaseMode(ABC):
         from pocketcode.core.llm_factory import create_llm_client
 
         try:
-            # Merge default and mode-specific LLM configs
-            default_llm_config = global_config.get('defaults', {}).get('llm_config', {})
+            llm_section = global_config.get("llm", {}) if isinstance(global_config, dict) else {}
+            llm_profiles = llm_section.get("profiles", {}) if isinstance(llm_section, dict) else {}
+            default_profile = llm_section.get("default_profile") if isinstance(llm_section, dict) else None
+            default_llm_config = (
+                llm_profiles.get(default_profile, {})
+                if isinstance(llm_profiles, dict) and default_profile in llm_profiles
+                else {}
+            )
             mode_llm_config = config.get('llm_config', {})
             final_llm_config = default_llm_config.copy()
             final_llm_config.update(mode_llm_config) # Mode config overrides defaults
 
             # Get provider API keys config
-            providers_config = global_config.get('providers', {})
+            providers_config = llm_section.get('providers', {}) if isinstance(llm_section, dict) else {}
 
             if not final_llm_config.get('provider'):
                  logger.warning(f"No LLM provider specified in defaults or mode config for {self.name}. LLM client will not be created.")
             elif not providers_config:
-                 logger.warning("No 'providers' section found in global config. Cannot retrieve API keys for LLM client.")
+                 logger.warning("No 'llm.providers' section found in global config. Cannot retrieve API keys for LLM client.")
             else:
                 logger.info(f"Attempting to create LLM client for mode '{self.name}' using config: {final_llm_config}")
                 # create_llm_client should now return an instance of BaseLlmClient

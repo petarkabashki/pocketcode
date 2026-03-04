@@ -1,4 +1,3 @@
-#%%
 """
 Pocketcode Native Tools Package.
 
@@ -16,37 +15,33 @@ from .filesystem import (
     glob_files
 )
 from .git import (
-    git_status,
-    git_diff,
-    git_add,
-    git_commit,
-    git_pull,
-    git_push
+    GitStatusTool, # Corrected import
+    GitDiffTool,   # Corrected import
+    GitAddTool,    # Corrected import
+    GitCommitTool, # Corrected import
+    GitPullTool,   # Corrected import
+    GitPushTool    # Corrected import
 )
-from .search import search_code, is_ripgrep_installed
+from .search import search_code_func, is_ripgrep_installed
+from .user_input import ask_user_input, ask_user_confirmation, AskUserInputTool, ConfirmUserInputTool
 
-# You might also define an 'all' list if needed for wildcard imports,
-# though explicit imports are generally preferred.
 __all__ = [
-    # system.py
     'execute_shell_command',
-    # filesystem.py
     'read_file',
     'write_file',
     'create_directory',
     'list_directory',
     'glob_files',
-    # git.py
-    'git_status',
-    'git_diff',
-    'git_add',
-    'git_commit',
-    'git_pull',
-    'git_push',
-    # search.py
-    'search_code',
-    'is_ripgrep_installed', # Expose the check function as well
+    'GitStatusTool',
+    'GitDiffTool',
+    'GitAddTool',
+    'GitCommitTool',
+    'GitPullTool',
+    'GitPushTool',
+    'search_code_func',
+    'is_ripgrep_installed',
+    'ask_user_input',
+    'ask_user_confirmation',
+    'AskUserInputTool',
+    'ConfirmUserInputTool',
 ]
-
-# Potential future addition: A function or class here to gather all tool definitions
-# from tool_definitions.py for registration with PocketFlow.

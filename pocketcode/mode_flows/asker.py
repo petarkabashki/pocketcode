@@ -1,4 +1,4 @@
-#%% pocketcode/mode_flows/asker.py
+# %% pocketcode/mode_flows/asker.py
 import logging
 import json
 from typing import Dict, Any, Tuple, Optional
@@ -13,7 +13,7 @@ from .base_flow import (
     BaseFormatResponseNode,
     BaseErrorHandlerNode,
     BaseEndNode,
-    create_base_flow
+    create_base_flow_flow # Corrected import name
 )
 
 logger = logging.getLogger(__name__) # Use current module name
@@ -37,7 +37,7 @@ class AskerAgentNode(BaseAgentNode): # Inherit from BaseAgentNode
         user_request = shared_store.get("initial_request", "No user request provided.")
         formatted_cli_context = shared_store.get("formatted_cli_context", "None provided.")
         tool_registry = self._get_tool_registry(shared_store) # Use helper from base
-        memory_bank_content = shared_store.get("memory_bank_content", "N/A")
+        context_memory_store_content = shared_store.get("context_memory_store_content", "N/A")
         previous_tool_result = shared_store.get('tool_result', 'N/A')
         mode_name = shared_store.get('mode_name', 'Asker') # Default to Asker if not set
 
@@ -58,7 +58,7 @@ class AskerAgentNode(BaseAgentNode): # Inherit from BaseAgentNode
             f"  Mode: {mode_name}",
             f"  CLI Context: {formatted_cli_context}",
             f"  Previous Tool Result: {previous_tool_result}",
-            f"  Memory Bank Summary: {memory_bank_content}",
+            f"  Memory Bank Summary: {context_memory_store_content}",
             f"\nAvailable Tools: {available_tools}", # Use potentially filtered list
             "\nBased on the user request and context, determine the next step to answer the question.",
             "Respond ONLY in JSON format.", # Emphasize JSON only
@@ -66,6 +66,7 @@ class AskerAgentNode(BaseAgentNode): # Inherit from BaseAgentNode
             "If a tool needs to be called, provide 'action': 'call_tool', 'tool_name': <name>, 'arguments': {<args>}.",
             "If the question can be answered directly, provide 'action': 'final_answer', 'answer': <your final answer>.",
             "If you need clarification from the user, provide 'action': 'ask_question', 'question': <question>."
+            ,
             "\nJSON Response:",
         ]
         prompt = "\n".join(prompt_lines)
@@ -128,6 +129,13 @@ class AskerAgentNode(BaseAgentNode): # Inherit from BaseAgentNode
                  raise ValueError(f"Invalid 'action' value received: {action}")
 
             logger.info(f"LLM response parsed as action: '{action}', args: {args}")
+            # Ensure the action is one of the expected transitions
+            if action not in ["call_tool", "final_answer", "ask_question", "error"]:
+                 error_msg = f"Parsed action '{action}' is not a valid transition. Original response: {response}"
+                 logger.error(error_msg)
+                 # Return 'error' action to trigger error handling flow
+                 return "error", {"error_message": error_msg}
+
             return action, args
 
         except json.JSONDecodeError as e:
@@ -164,7 +172,7 @@ def create_asker_flow() -> Flow:
     end_node = BaseEndNode(name="EndAskerProcessing")
 
     # 2. Use the base flow wiring function
-    asker_flow = create_base_flow(
+    asker_flow = create_base_flow_flow( # Corrected function call
         start_node=start_node,
         agent_node=agent_node,
         tool_node=tool_execution_node,

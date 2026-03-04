@@ -11,7 +11,7 @@ authors = [
 description = "PocketCode AI Assistant Framework" # You might want to refine this description
 readme = "readme.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: Apache Software License",
@@ -24,6 +24,9 @@ dependencies = [
     "pocketflow",
     "PyYAML",
     "watchdog",
+    "textual",
+    "google-genai",
+    "openai",
     "python-dotenv", # Added dependency
 ]
 
@@ -35,3 +38,6 @@ pocketcode = "pocketcode.main:run"
 where = ["."] # Assumes pocketcode is directly under the root
 include = ["pocketcode*"]
 exclude = ["tests*", "docs*", "prompts*", "projects*"] # Exclude non-package directories
+
+[tool.setuptools.package-data]
+"pocketcode" = ["plugins/**/*.yaml", "plugins/**/*.md"]

@@ -17,7 +17,23 @@ class WatcherEventHandler(FileSystemEventHandler):
         self.config = config # Watch mode specific config
         self.trigger_string = self.config.get('trigger_string', 'AI!')
         self.instruction_source = self.config.get('instruction_source', 'after_trigger')
+        self.debounce_ms = int(self.config.get("debounce_ms", 500))
+        self._debounce_timers = {}
+        self._lock = threading.Lock()
         logger.debug(f"WatcherEventHandler initialized. Trigger: '{self.trigger_string}', Source: '{self.instruction_source}'")
+
+    def _enqueue_instruction(self, event_data):
+        self.instruction_queue.put(event_data)
+
+    def _debounced_enqueue(self, key: str, event_data):
+        with self._lock:
+            existing = self._debounce_timers.get(key)
+            if existing:
+                existing.cancel()
+            timer = threading.Timer(self.debounce_ms / 1000.0, self._enqueue_instruction, args=(event_data,))
+            self._debounce_timers[key] = timer
+            timer.daemon = True
+            timer.start()
 
     def on_modified(self, event):
         """Called when a file or directory is modified."""
@@ -64,7 +80,8 @@ class WatcherEventHandler(FileSystemEventHandler):
                             "instruction": instruction,
                             "timestamp": time.time()
                         }
-                        self.instruction_queue.put(event_data)
+                        debounce_key = f"{filepath}:{instruction}"
+                        self._debounced_enqueue(debounce_key, event_data)
                         # Process only the first trigger found in the file for now
                         break
                     else:

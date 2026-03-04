@@ -1,5 +1,7 @@
 pocketflow
 PyYAML
 watchdog
-prompt_toolkit
+textual
 google-genai
+openai
+python-dotenv
