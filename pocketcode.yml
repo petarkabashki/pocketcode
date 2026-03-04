@@ -1,0 +1,73 @@
+llm:
+  providers:
+    gemini:
+      api_key: ${GEMINI_API_KEY}
+      use_vertexai: false
+      # Vertex AI mode (OAuth/ADC) example:
+      # use_vertexai: true
+      # project: your-gcp-project-id
+      # location: global
+    # OpenAI-compatible providers:
+    # - string value: API key only
+    # - object value: { api_key: "...", base_url: "https://..." }
+    openai: ""
+    openrouter: ""
+    xai: ""
+    requesty: ""
+
+  profiles:
+    gemini-3.1-flash-lite-preview:
+      provider: gemini
+      model: gemini-3.1-flash-lite-preview
+      parameters:
+        temperature: 0.4
+        max_output_tokens: 4096
+
+    gemini-3.1-pro-preview:
+      provider: gemini
+      model: gemini-3.1-pro-preview
+      parameters:
+        temperature: 0.4
+        max_output_tokens: 4096
+
+    gemini-3-pro-preview:
+      provider: gemini
+      model: gemini-3-pro-preview
+      parameters:
+        temperature: 0.2
+        max_output_tokens: 3072
+
+    gemini-3-flash-preview:
+      provider: gemini
+      model: gemini-3-flash-preview
+      parameters:
+        temperature: 0.2
+        max_output_tokens: 3072
+
+  default_profile: gemini-3.1-pro-preview
+
+
+runtime:
+  log_level: INFO
+  default_workflow: orchestrator
+  default_agent: asker
+  llm_overrides:
+    agents: {}
+    nodes: {}
+    handoffs: {}
+  llm_pricing: {}
+
+  # Relative paths are resolved from the current workspace directory.
+  # Each path can be either:
+  # 1) a folder containing plugin subfolders, or
+  # 2) a direct plugin folder with plugin.yaml
+  plugin_paths:
+    - .pocketcode/plugins
+
+  require_tool_confirmation: true
+  auto_approved_tools: []
+  auto_confirm_tools: false
+  tool_confirmation:
+    default_policy: confirm
+    tool_policies: {}
+    agent_policies: {}

@@ -146,6 +146,7 @@ def glob_files(pattern: str, base_path: str = '.') -> Optional[List[str]]:
 
 
 # --- Tool Classes ---
+# --- Tool Class Definitions ---
 
 class ReadFileTool(BaseTool):
     """Tool to read the content of a file."""
@@ -264,17 +265,17 @@ class CreateDirectoryTool(BaseTool):
 
     @property
     def description(self) -> str:
-        # Fetch description from centralized definitions
-        from pocketcode.tools.tool_definitions import get_tool_definition
-        definition = get_tool_definition(self.name)
-        return definition.get("description", "Creates a directory, including parents.") if definition else "Creates a directory, including parents."
+        return "Creates a directory, including parent directories if needed."
 
     @property
     def schema(self) -> Dict:
-        # Fetch schema from centralized definitions
-        from pocketcode.tools.tool_definitions import get_tool_definition
-        definition = get_tool_definition(self.name)
-        return definition.get("parameters", {}) if definition else {}
+        return {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Relative path of the directory to create."}
+            },
+            "required": ["path"]
+        }
 
     def execute(self, **kwargs) -> Any:
         path = kwargs.get("path")
@@ -299,17 +300,18 @@ class GlobFilesTool(BaseTool):
 
     @property
     def description(self) -> str:
-        # Fetch description from centralized definitions
-        from pocketcode.tools.tool_definitions import get_tool_definition
-        definition = get_tool_definition(self.name)
-        return definition.get("description", "Finds files/directories matching a glob pattern.") if definition else "Finds files/directories matching a glob pattern."
+        return "Finds files and directories matching a glob pattern."
 
     @property
     def schema(self) -> Dict:
-        # Fetch schema from centralized definitions
-        from pocketcode.tools.tool_definitions import get_tool_definition
-        definition = get_tool_definition(self.name)
-        return definition.get("parameters", {}) if definition else {}
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.py', 'src/**/*.md')."},
+                "base_path": {"type": "string", "description": "Base directory for the search.", "default": "."}
+            },
+            "required": ["pattern"]
+        }
 
     def execute(self, **kwargs) -> Any:
         pattern = kwargs.get("pattern")

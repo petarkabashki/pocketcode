@@ -1,10 +1,14 @@
 # pocketcode/config/loader.py
-import yaml
 import os
 import re
-from typing import Dict, Any, Optional
+import logging
+from pathlib import Path
+from typing import Dict, Any
 
-DEFAULT_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), 'settings.yaml')
+import yaml
+
+WORKSPACE_SETTINGS_FILENAME = "pocketcode.yml"
+logger = logging.getLogger(__name__)
 
 # %% Helper function for environment variable substitution
 def _substitute_env_vars(value: Any) -> Any:
@@ -22,15 +26,43 @@ def _substitute_env_vars(value: Any) -> Any:
     else:
         return value
 
+
+def _contains_unresolved_env_vars(value: Any) -> bool:
+    pattern = re.compile(r"\$\{[^}]+\}")
+    if isinstance(value, str):
+        return bool(pattern.search(value))
+    if isinstance(value, dict):
+        return any(_contains_unresolved_env_vars(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_contains_unresolved_env_vars(item) for item in value)
+    return False
+
 # %% Updated load_settings function
-def load_settings(settings_path: str = DEFAULT_SETTINGS_PATH) -> Dict[str, Any]:
+def resolve_settings_path(settings_path: str | None = None, workspace_root: str | None = None) -> str:
     """
-    Loads the application settings from the specified YAML file, resolves
+    Resolves which settings file to load.
+
+    Resolution order:
+    1. `<workspace_root>/pocketcode.yml`.
+    """
+    root = Path(workspace_root or os.getcwd())
+    candidate = root / WORKSPACE_SETTINGS_FILENAME
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"Workspace config file is required at: {candidate}. "
+            "Create pocketcode.yml in the workspace root."
+        )
+    return str(candidate)
+
+
+def load_settings(settings_path: str | None = None, workspace_root: str | None = None) -> Dict[str, Any]:
+    """
+    Loads the application settings from a resolved YAML file, resolves
     environment variables, and processes LLM configurations to inject API keys.
 
     Args:
-        settings_path: The path to the settings YAML file. Defaults to
-                       'settings.yaml' in the same directory as this loader.
+        settings_path: Ignored. Configuration is always loaded from `<workspace_root>/pocketcode.yml`.
+        workspace_root: Workspace root used to locate `pocketcode.yml`.
 
     Returns:
         A dictionary containing the processed settings.
@@ -41,11 +73,13 @@ def load_settings(settings_path: str = DEFAULT_SETTINGS_PATH) -> Dict[str, Any]:
         KeyError: If a required provider key is missing or misconfigured.
         ValueError: If LLM configuration is invalid.
     """
-    if not os.path.exists(settings_path):
-        raise FileNotFoundError(f"Settings file not found at: {settings_path}")
+    resolved_settings_path = resolve_settings_path(settings_path=settings_path, workspace_root=workspace_root)
+
+    if not os.path.exists(resolved_settings_path):
+        raise FileNotFoundError(f"Settings file not found at: {resolved_settings_path}")
 
     try:
-        with open(settings_path, 'r') as f:
+        with open(resolved_settings_path, 'r') as f:
             raw_settings = yaml.safe_load(f)
         if raw_settings is None: # Handle empty file case
             return {}
@@ -53,72 +87,45 @@ def load_settings(settings_path: str = DEFAULT_SETTINGS_PATH) -> Dict[str, Any]:
         # 1. Substitute environment variables globally
         settings = _substitute_env_vars(raw_settings)
 
-        # 2. Process LLM configurations
-        providers = settings.get('providers', {})
-        defaults = settings.get('defaults', {})
-        default_llm_config = defaults.get('llm_config', {})
+        # 2. Validate LLM structure
+        llm = settings.get("llm")
+        if not isinstance(llm, dict):
+            raise ValueError("Configuration must contain an 'llm' mapping.")
 
-        if 'modes' in settings and isinstance(settings['modes'], dict):
-            for mode_slug, mode_config in settings['modes'].items():
-                if not isinstance(mode_config, dict):
-                    continue # Skip invalid mode configs
+        providers = llm.get("providers")
+        profiles = llm.get("profiles")
+        if not isinstance(providers, dict):
+            raise ValueError("Configuration must contain 'llm.providers' as a mapping.")
+        if not isinstance(profiles, dict):
+            raise ValueError("Configuration must contain 'llm.profiles' as a mapping.")
 
-                # Determine effective LLM config (mode override or default)
-                mode_llm_config = mode_config.get('llm_config', {})
-                effective_llm_config = default_llm_config.copy()
-                effective_llm_config.update(mode_llm_config) # Mode settings override defaults
-
-                # Get the provider for this mode
-                provider_name = effective_llm_config.get('provider')
-                if not provider_name:
-                    # If no provider specified even in defaults, skip or raise error
-                    # For now, we assume defaults will have a provider if modes don't
-                    if 'provider' not in default_llm_config:
-                         print(f"Warning: No LLM provider specified for mode '{mode_slug}' or in defaults. Skipping API key injection.")
-                         continue
-                    provider_name = default_llm_config.get('provider')
-
-
-                # Fetch API key from the central providers section
-                api_key = providers.get(provider_name)
-                if not api_key:
-                    # Allow modes without API keys if provider isn't listed (e.g., local models)
-                    # Or raise an error if a key is expected but missing:
-                    # raise KeyError(f"API key for provider '{provider_name}' (used by mode '{mode_slug}') not found in 'providers' section.")
-                    print(f"Warning: API key for provider '{provider_name}' (mode '{mode_slug}') not found in 'providers'. LLM might fail if key is required.")
-                    # Remove any potentially lingering 'api_key' field from previous structure
-                    effective_llm_config.pop('api_key', None)
-                else:
-                    # Inject the API key
-                    effective_llm_config['api_key'] = api_key
-
-                # Update the mode's config with the processed LLM details
-                # Ensure llm_config exists in the mode's dictionary
-                if 'llm_config' not in mode_config:
-                    mode_config['llm_config'] = {}
-                mode_config['llm_config'] = effective_llm_config # Replace/update mode's llm_config
+        if _contains_unresolved_env_vars(settings):
+            raise ValueError(
+                "Configuration contains unresolved environment variable placeholders like ${VAR_NAME}. "
+                "Set required environment variables before starting Pocketcode."
+            )
 
         # TODO: Add potential schema validation here if needed
         return settings
 
     except yaml.YAMLError as e:
-        print(f"Error parsing settings file {settings_path}: {e}")
+        logger.error(f"Error parsing settings file {resolved_settings_path}: {e}")
         raise
     except KeyError as e:
-        print(f"Configuration Error: Missing key - {e}")
+        logger.error(f"Configuration Error: Missing key - {e}")
         raise
     except ValueError as e:
-        print(f"Configuration Error: Invalid value - {e}")
+        logger.error(f"Configuration Error: Invalid value - {e}")
         raise
     except Exception as e:
-        print(f"An unexpected error occurred while loading settings from {settings_path}: {e}")
+        logger.error(f"An unexpected error occurred while loading settings from {resolved_settings_path}: {e}")
         raise
 
 # Example usage (for testing purposes)
 if __name__ == "__main__":
     try:
-        # Assume settings.yaml is in the same directory for testing
-        test_settings_path = os.path.join(os.path.dirname(__file__), 'settings.yaml')
+        # Load the workspace settings file for testing.
+        test_settings_path = os.path.join(os.getcwd(), 'pocketcode.yml')
         # Set dummy env vars for testing
         os.environ['GOOGLE_API_KEY'] = 'TEST_GOOGLE_KEY_123'
         os.environ['ANTHROPIC_API_KEY'] = 'TEST_ANTHROPIC_KEY_456'
