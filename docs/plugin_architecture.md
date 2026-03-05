@@ -1,6 +1,7 @@
 # Pocketcode Plugin Architecture
 
 Pocketcode loads tools plus unified `components` (agents and flows) from `plugin.yaml`.
+Agents are the primary composition unit in the CLI/runtime; flows are internal execution graphs that agents can use.
 
 ## Layout
 
@@ -149,7 +150,7 @@ Handlers may return:
 
 ## Runtime Execution Model
 
-Graph workflows are compiled into PocketFlow `Node` objects at runtime.
+Graph workflows are compiled into PocketFlow `Node` objects at runtime and used as internal execution graphs.
 
 - Each node kind maps to a dedicated runtime node executor (`agent`, `tool`, `handoff`, `flow`, `python`, `output`, `end`, `start`, `noop`).
 - Hook phases (`pre`, `steps`, `post`) are handled consistently by a shared hooked-node base class before and after each node's core behavior.
@@ -175,7 +176,7 @@ At decision time, agents can also emit `handoff_policy` and `context` in the YAM
 
 ## Flow Composition
 
-Use `kind="flow"` with `flow="<workflow_name>"` to nest workflows. Nested workflows can themselves contain other `flow` nodes.
+Use `kind="flow"` with `flow="<workflow_name>"` to nest flows. Nested flows can themselves contain other `flow` nodes.
 
 ## Prompt Files + Include Convention
 
@@ -201,11 +202,12 @@ Legacy `agents:` and `workflows:` sections are still supported, but `components:
 Use the CLI to inspect loaded unified definitions:
 
 - `/list components` lists all loaded components (agents + workflows) with kind and source.
-- `/list agents` and `/list workflows` show filtered views.
+- `/list agents` shows the active selectable runtime units.
+- `/list workflows` is retained for compatibility but workflow selection is internal.
 - `/confirm` manages session-level tool confirmation overrides.
 - `/set llm-agent`, `/set llm-node`, and `/set llm-handoff` manage session LLM override routing.
 
-Legacy aliases (`/components`, `/agents`, `/workflows`, `/llm-agent`, `/llm-node`, `/llm-handoff`) remain supported.
+Legacy aliases (`/components`, `/agents`, `/workflows`, `/workflow`, `/mode`, `/llm-agent`, `/llm-node`, `/llm-handoff`) remain supported.
 
 Textual interactive shortcuts:
 

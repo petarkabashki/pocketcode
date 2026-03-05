@@ -1,0 +1,32 @@
+# Agent Plugin Manifest Template
+# This file defines the identity, assets, and capabilities of the agent.
+
+name: "template-agent"
+description: "A boilerplate template for creating user-supplied agents"
+version: "0.1.0"
+author: "PocketCoder"
+
+# Personality defines the agent's behavior and system-level instructions.
+personality:
+  system_prompt: "prompts/system.md"
+  rules:
+    - "Always be concise."
+    - "Follow standard coding practices."
+
+# Tools that this agent can execute.
+# Assets should be placed in the tools/ directory of the plugin.
+# handler format: "file.py:ClassName"
+tools:
+  - id: "hello_world"
+    handler: "hello.py:HelloTool"
+    description: "A sample tool that prints a greeting"
+
+# Workflows choreographed via pocketflow.py.
+# Assets should be placed in the workflows/ directory of the plugin.
+workflows:
+  - id: "default"
+    file: "main.md"
+
+# Additional prompts (snippets, task-specific, etc.)
+prompts:
+  - "prompts/additional_context.md"

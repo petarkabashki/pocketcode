@@ -49,7 +49,8 @@ llm:
 
 runtime:
   log_level: INFO
-  default_workflow: orchestrator
+  # Internal runtime graph used to execute agent turns.
+  agent_runtime_workflow: single_agent
   default_agent: Ask
   llm_overrides:
     agents: {}

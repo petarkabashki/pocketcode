@@ -39,7 +39,7 @@ def _configure_logging(log_level: str) -> None:
 def _print_startup(engine: PocketCodeEngine) -> None:
     status = engine.status()
     print("Pocketcode plugin runtime ready.")
-    print(f"Workflow: {status['workflow']}")
+    print(f"Runtime flow (internal): {status.get('runtime_workflow')}")
     print(f"Agent: {status['agent'] or 'auto'}")
     print(f"Global LLM override: {status['global_llm_override'] or 'none'}")
 
@@ -49,10 +49,9 @@ def _run_basic_interactive_cli(engine: PocketCodeEngine, cli_context: Dict[str, 
     print("Type /help for commands. Ctrl+C or /exit to quit.")
 
     while True:
-        workflow = engine.get_current_workflow() or "no-workflow"
         agent = engine.get_current_agent() or "auto"
         try:
-            user_input = input(f"({workflow}/{agent}) > ")
+            user_input = input(f"({agent}) > ")
         except (KeyboardInterrupt, EOFError):
             print("\nExiting Pocketcode.")
             return
@@ -89,7 +88,10 @@ def run() -> None:
             "Deprecated. Pocketcode always loads config from ./pocketcode.yml in the workspace root."
         ),
     )
-    parser.add_argument("--workflow", help="Initial workflow name override.")
+    parser.add_argument(
+        "--workflow",
+        help="Deprecated. Workflow selection is internal; use --agent for interactive selection.",
+    )
     parser.add_argument("--agent", help="Initial agent name override.")
     parser.add_argument("--llm", help="Global LLM profile override.")
     parser.add_argument(
@@ -145,7 +147,9 @@ def run() -> None:
 
     try:
         if args.workflow:
-            engine.set_workflow(args.workflow)
+            print(
+                "Ignoring --workflow. Workflow selection is internal; use --agent for runtime control."
+            )
         if args.agent:
             engine.set_agent(None if args.agent.lower() == "auto" else args.agent)
         if args.llm:

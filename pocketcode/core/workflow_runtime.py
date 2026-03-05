@@ -302,7 +302,7 @@ class BaseWorkflowRuntime:
         return "whole"
 
 
-class WorkflowRuntime(BaseWorkflowRuntime):
+class WorkflowRuntime(BaseWorkflowRuntime, Flow):
     def __init__(
         self,
         workflow_definition: WorkflowDefinition,
@@ -312,7 +312,8 @@ class WorkflowRuntime(BaseWorkflowRuntime):
         runtime_config: Dict[str, Any],
         workflow_lookup: Callable[[str], BaseWorkflowRuntime] | None = None,
     ):
-        super().__init__(
+        BaseWorkflowRuntime.__init__(
+            self,
             workflow_definition=workflow_definition,
             plugin_manager=plugin_manager,
             llm_router=llm_router,
@@ -320,11 +321,12 @@ class WorkflowRuntime(BaseWorkflowRuntime):
             runtime_config=runtime_config,
             workflow_lookup=workflow_lookup,
         )
+        Flow.__init__(self)
         self._compiled_nodes: Dict[str, BaseRuntimeNode] = {}
         self._transitions_by_source: Dict[str, List[str]] = defaultdict(list)
-        self._flow = self._compile_flow()
+        self.start_node = self._compile_nodes()
 
-    def _compile_flow(self) -> Flow:
+    def _compile_nodes(self) -> BaseRuntimeNode:
         for node_id, node_definition in self.definition.nodes.items():
             self._compiled_nodes[node_id] = create_runtime_node(
                 node_definition=node_definition,
@@ -334,63 +336,44 @@ class WorkflowRuntime(BaseWorkflowRuntime):
         for edge in self.definition.edges:
             if edge.source not in self._compiled_nodes or edge.target not in self._compiled_nodes:
                 raise ValueError(
-                    (
-                        f"Workflow '{self.definition.name}' has edge referencing unknown node: "
-                        f"{edge.source} -> {edge.target}"
-                    )
+                    f"Workflow '{self.definition.name}' has edge referencing unknown node: {edge.source} -> {edge.target}"
                 )
             self._transitions_by_source[edge.source].append(edge.transition)
-            self._compiled_nodes[edge.source] - edge.transition >> self._compiled_nodes[edge.target]
+            self._compiled_nodes[edge.source].next(self._compiled_nodes[edge.target], edge.transition)
 
         if self.definition.start_node not in self._compiled_nodes:
             raise ValueError(
                 f"Workflow '{self.definition.name}' start node '{self.definition.start_node}' was not compiled."
             )
 
-        return Flow(start=self._compiled_nodes[self.definition.start_node])
+        return self._compiled_nodes[self.definition.start_node]
 
     def run(self, shared_store: Dict[str, Any]) -> str | None:
+        return Flow.run(self, shared_store)
+
+    def prep(self, shared_store: Dict[str, Any]) -> None:
         self._prepare_shared_store(shared_store)
-        prompt_pushed = self._push_workflow_context(shared_store)
-        transition: str | None = None
+        self._push_workflow_context(shared_store)
+        transition, _ = self._run_handler_references(
+            self.definition.pre_handlers,
+            shared_store,
+            phase="workflow:pre"
+        )
+        return {"transition": transition}
 
-        try:
-            transition, pre_halt = self._run_handler_references(
-                self.definition.pre_handlers,
-                shared_store,
-                phase="workflow:pre",
-                transition=transition,
-            )
-            transition, step_halt = self._run_handler_references(
-                self.definition.step_handlers,
-                shared_store,
-                phase="workflow:steps",
-                transition=transition,
-            )
+    def exec(self, prep_res: Dict[str, Any]) -> str | None:
+        # Flow._orch is called after prep
+        return None 
 
-            if not (pre_halt or step_halt):
-                flow_transition = self._flow.run(shared_store)
-                if isinstance(flow_transition, str):
-                    transition = flow_transition
-
-            transition, _ = self._run_handler_references(
-                self.definition.post_handlers,
-                shared_store,
-                phase="workflow:post",
-                transition=transition,
-            )
-            return transition
-        except Exception as exc:
-            logger.error(
-                "Error while executing workflow '%s': %s",
-                self.definition.name,
-                exc,
-                exc_info=True,
-            )
-            shared_store["error_message"] = f"Workflow '{self.definition.name}' failed: {exc}"
-            return "error"
-        finally:
-            self._pop_workflow_context(shared_store, prompt_pushed)
+    def post(self, shared_store: Dict[str, Any], prep_res: Any, exec_res: Any) -> str | None:
+        transition, _ = self._run_handler_references(
+            self.definition.post_handlers,
+            shared_store,
+            phase="workflow:post",
+            transition=exec_res
+        )
+        self._pop_workflow_context(shared_store, True) # TODO: check if prompt pushed
+        return transition
 
     def available_transitions(self, node_id: str) -> List[str]:
         return list(dict.fromkeys(self._transitions_by_source.get(node_id, [])))
@@ -430,6 +413,7 @@ class WorkflowRuntime(BaseWorkflowRuntime):
         node_definition: WorkflowNodeDefinition,
         shared_store: Dict[str, Any],
     ) -> str:
+        # Use pocketflow native transitions for handoff
         source_agent = str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None
         target_agent = (
             shared_store.pop("pending_handoff_agent", None)
