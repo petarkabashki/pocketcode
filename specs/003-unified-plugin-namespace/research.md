@@ -88,8 +88,8 @@ Strict validation at load time gives plugin authors immediate, actionable feedba
 Every agent entry in `agents:` MUST declare:
 ```yaml
 agents:
-  koder:
-    module: agents/koder_agent.py   # relative to plugin root
+  coder:
+    module: agents/coder_agent.py   # relative to plugin root
     entry_fn: create_flow            # zero-arg factory returning PocketFlow Flow
 ```
 `load_manifest()` validates the presence of both fields and raises `ManifestSchemaError` if either is absent from an agent block.
@@ -97,7 +97,7 @@ agents:
 ### Canonical `plugin.yaml` v1 structure
 ```yaml
 schema_version: 1
-name: koder
+name: coder
 description: Expert developer focused on implementation.
 
 tools:
@@ -105,9 +105,9 @@ tools:
   git_diff: tools/git.py:GitDiffTool
 
 agents:
-  koder:
+  coder:
     description: Code implementation specialist.
-    module: agents/koder_agent.py
+    module: agents/coder_agent.py
     entry_fn: create_flow
     llm_profile: gemini_default
     tools:
@@ -159,7 +159,7 @@ from pocketcode.plugins.core.tools.filesystem import (  # noqa: F401
 ### Critical detail: `execute_shell_command`
 `system.py` exports a bare function `execute_shell_command` (not a Tool class) consumed by:
 - `pocketcode/tools/git.py` (intra-package, becomes a wrapper)
-- `pocketcode/plugins/koder/tools/git.py` (cross-plugin import)
+- `pocketcode/plugins/coder/tools/git.py` (cross-plugin import)
 
 The wrapper in `pocketcode/tools/system.py` MUST re-export `execute_shell_command` alongside `ExecuteCommandTool`. The canonical `pocketcode/plugins/core/tools/git.py` must import from `pocketcode.plugins.core.tools.system` (not from the shim) to avoid the implementation depending on its own compatibility layer.
 
@@ -205,7 +205,7 @@ tools:
 |---|---|
 | `pocketcode/core/tool_runtime.py` | `from pocketcode.tools.user_input import ConfirmUserInputTool` |
 | `pocketcode/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` (intra-package) |
-| `pocketcode/plugins/koder/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` |
+| `pocketcode/plugins/coder/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` |
 | `pocketcode/plugins/core/plugin.yaml` | dotted paths: `pocketcode.tools.filesystem.ReadFileTool`, etc. |
 | `tests/integration/` | **No direct imports from `pocketcode.tools.*`** — only `pocketcode.core.*` |
 
@@ -232,7 +232,7 @@ tools:
 
 Option B keeps the core plugin dependent on an external package (`pocketcode.tools`), meaning it cannot operate alone — this directly violates SC-006 ("core plugin is fully self-contained"). Option C is eliminated by the cross-platform constraint; the spec targets Linux/macOS dev workstations but CI runners and Windows contributors would break.
 
-Option A is the only choice where the core plugin's directory contains both the canonical implementation and the registration entry, satisfying SC-006 and FR-002. The `pocketcode/tools/` wrappers are one-liners using `from … import *` or explicit re-exports, so all existing callers (`tool_runtime.py`, `koder/tools/git.py`, and any future code referencing the old path) continue to work with zero changes.
+Option A is the only choice where the core plugin's directory contains both the canonical implementation and the registration entry, satisfying SC-006 and FR-002. The `pocketcode/tools/` wrappers are one-liners using `from … import *` or explicit re-exports, so all existing callers (`tool_runtime.py`, `coder/tools/git.py`, and any future code referencing the old path) continue to work with zero changes.
 
 **One implementation detail requires attention**: the intra-package import inside `pocketcode/tools/git.py` (`from pocketcode.tools.system import execute_shell_command`) becomes a no-op concern once `git.py` is a wrapper — but the new **canonical** `pocketcode/plugins/core/tools/git.py` must update its own import to reference `pocketcode.plugins.core.tools.system` rather than the old path, avoiding a dependency on the compatibility shim from within the implementation itself.
 
@@ -277,7 +277,7 @@ __all__ = [
 """Backward-compatibility re-export. Canonical implementation in pocketcode/plugins/core/tools/system.py."""
 from pocketcode.plugins.core.tools.system import (  # noqa: F401
     ExecuteCommandTool,
-    execute_shell_command,  # consumed by koder/tools/git.py and tool_runtime transitively
+    execute_shell_command,  # consumed by coder/tools/git.py and tool_runtime transitively
 )
 
 __all__ = ["ExecuteCommandTool", "execute_shell_command"]
@@ -294,4 +294,4 @@ The same wrapper pattern applies to `git.py`, `search.py`, and `user_input.py` �
 3. Update `plugin.yaml` tool registrations to use file-relative references (e.g., `tools/filesystem.py:ReadFileTool`) as the target manifest format.
 4. Verify `pocketcode/plugins/core/tools/__init__.py` exists (can be empty) so the directory is a valid package.
 5. Run `pytest tests/integration/` — must pass without modifying test files (SC-001).
-6. Confirm `from pocketcode.tools.system import execute_shell_command` still resolves in a fresh interpreter (backward compat for `koder/tools/git.py`).
+6. Confirm `from pocketcode.tools.system import execute_shell_command` still resolves in a fresh interpreter (backward compat for `coder/tools/git.py`).

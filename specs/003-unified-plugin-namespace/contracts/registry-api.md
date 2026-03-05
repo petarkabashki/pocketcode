@@ -254,7 +254,7 @@ holder.get().tools.resolve("core.read_file")
 ```python
 # RIGHT — snapshot captured once at session start
 registry = holder.get()
-flow = registry.agents.resolve("core.koder").flow_instance
+flow = registry.agents.resolve("core.coder").flow_instance
 flow.run(shared)  # entire session uses frozen `registry`
 ```
 

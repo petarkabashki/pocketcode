@@ -31,8 +31,8 @@ Refactor the generic runtime to be a thin layer over `pocketflow.py`.
 
 **Independent Test**: Verify agent loading via CLI with a test dummy agent folder.
 
-- [ ] T008 [US1] Create `arkitekt` agent plugin in `pocketcode/plugins/arkitekt/` (moving existing assets)
-- [ ] T009 [US1] Create `koder` agent plugin in `pocketcode/plugins/koder/`
+- [ ] T008 [US1] Create `architect` agent plugin in `pocketcode/plugins/architect/` (moving existing assets)
+- [ ] T009 [US1] Create `coder` agent plugin in `pocketcode/plugins/coder/`
 - [ ] T010 [US1] Implement persona loading logic in `pocketcode/core/prompt_loader.py` to resolve local `prompts/`
 - [ ] T011 [P] [US1] Verify agent loading via CLI with a test dummy agent folder
 

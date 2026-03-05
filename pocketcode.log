@@ -570,3 +570,110 @@ TypeError: PluginContext.call_tool() got multiple values for argument 'name'
 2026-03-05 22:29:52,354 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
 2026-03-05 22:29:52,355 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
 2026-03-05 22:29:52,355 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=8, llm_profiles=0
+2026-03-05 22:33:45,413 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 22:33:45,414 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'ask' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:33:45,415 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:33:45,416 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:33:45,417 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:33:45,418 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:33:45,420 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=8, llm_profiles=0
+2026-03-05 22:36:34,628 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 22:36:34,629 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'ask' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:36:34,630 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:36:34,631 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:36:34,632 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:36:34,633 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:36:34,633 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=6, llm_profiles=0
+2026-03-05 22:37:24,823 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 22:37:24,824 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'ask' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:37:24,825 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:37:24,826 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:37:24,827 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:37:24,828 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:37:24,828 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 22:38:37,882 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-05 22:38:37,883 - pocketcode.core.plugin_manager - ERROR - Plugin 'arkitekt' agent 'arkitekt': failed to load flow from 'agents/arkitekt_agent.py:create_flow': [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 533, in _load_agent_flow
+    module = self._load_module_from_file(file_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 155, in _load_module_from_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1132, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1190, in get_data
+FileNotFoundError: [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+2026-03-05 22:38:37,884 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'ask' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:38:37,885 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:38:37,886 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:38:37,889 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:38:37,890 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:38:37,890 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 22:39:30,291 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-05 22:39:30,291 - pocketcode.core.plugin_manager - ERROR - Plugin 'arkitekt' agent 'arkitekt': failed to load flow from 'agents/arkitekt_agent.py:create_flow': [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 533, in _load_agent_flow
+    module = self._load_module_from_file(file_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 155, in _load_module_from_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1132, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1190, in get_data
+FileNotFoundError: [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+2026-03-05 22:39:30,292 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'ask' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:39:30,293 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:39:30,294 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:39:30,295 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:39:30,296 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:39:30,296 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 22:40:23,071 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-05 22:40:23,072 - pocketcode.core.plugin_manager - ERROR - Plugin 'arkitekt' agent 'arkitekt': failed to load flow from 'agents/arkitekt_agent.py:create_flow': [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 533, in _load_agent_flow
+    module = self._load_module_from_file(file_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 155, in _load_module_from_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1132, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1190, in get_data
+FileNotFoundError: [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+2026-03-05 22:40:23,075 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'ask' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:40:23,076 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:40:23,077 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:40:23,078 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:40:23,079 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:40:23,079 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 22:44:06,448 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-05 22:44:06,449 - pocketcode.core.plugin_manager - ERROR - Plugin 'arkitekt' agent 'arkitekt': failed to load flow from 'agents/arkitekt_agent.py:create_flow': [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 533, in _load_agent_flow
+    module = self._load_module_from_file(file_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/plugin_manager.py", line 155, in _load_module_from_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1132, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1190, in get_data
+FileNotFoundError: [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect/agents/arkitekt_agent.py'
+2026-03-05 22:44:06,449 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'ask' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:44:06,450 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:44:06,451 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:44:06,453 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:44:06,453 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:44:06,453 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 23:39:08,240 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-05 23:39:08,241 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 23:39:08,244 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 23:39:08,246 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 23:39:08,248 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 23:39:08,250 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 23:39:08,250 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-05 23:40:41,593 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-05 23:40:41,595 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 23:40:41,596 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-05 23:40:41,598 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 23:40:41,600 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 23:40:41,601 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 23:40:41,601 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0

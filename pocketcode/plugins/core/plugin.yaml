@@ -20,9 +20,11 @@ tools:
   git_push: tools/git.py:GitPushTool
 
 agents:
-  coder:
-    description: Code implementation and editing specialist.
-    module: agents/coder_agent.py
+  react:
+    description: >
+      General-purpose ReAct agent. Reasons, calls core tools, and observes
+      results in a Reason -> Act -> Observe loop until a final answer is reached.
+    module: agents/react_agent.py
     entry_fn: create_flow
     llm_profile: gemini_default
     tools:
@@ -33,40 +35,11 @@ agents:
       - glob_files
       - search_code
       - execute_command
+      - ask_user_input
+      - confirm_user_input
       - git_status
       - git_diff
       - git_add
       - git_commit
       - git_pull
       - git_push
-    handoff_agents:
-      - architect
-      - ask
-
-  architect:
-    description: Architecture and planning specialist.
-    module: agents/architect_agent.py
-    entry_fn: create_flow
-    llm_profile: gemini_default
-    tools:
-      - read_file
-      - list_files
-      - glob_files
-      - search_code
-    handoff_agents:
-      - coder
-      - ask
-
-  ask:
-    description: Repository Q&A specialist.
-    module: agents/ask_agent.py
-    entry_fn: create_flow
-    llm_profile: gemini_fast
-    tools:
-      - read_file
-      - list_files
-      - glob_files
-      - search_code
-    handoff_agents:
-      - coder
-      - architect

@@ -8,6 +8,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-05
 - User-supplied agent folders (001-refactor-plugin-structure)
 - Python 3.10+ + pocketflow, PyYAML, watchdog, textual, google-genai, openai, python-dotenv (003-unified-plugin-namespace)
 - In-memory dicts (NamespaceRegistry snapshots); no persistent DB (003-unified-plugin-namespace)
+- Python 3.12 + pocketflow (custom Flow/Node framework), PyYAML, pytest (004-agents-to-plugins)
+- File-based — plugin directories with `plugin.yaml` manifests and `.py` agent modules (004-agents-to-plugins)
 
 ## Core Patterns
 
@@ -46,9 +48,9 @@ ruff check .
 Python 3.10+: Follow standard conventions, use `pocketflow` for complex agent logic.
 
 ## Recent Changes
+- 004-agents-to-plugins: Added Python 3.12 + pocketflow (custom Flow/Node framework), PyYAML, pytest
 - 003-unified-plugin-namespace: Added Python 3.10+ + pocketflow, PyYAML, watchdog, textual, google-genai, openai, python-dotenv
 - 002-pocketflow-agents: Introduced programmatic PocketFlow agents and `get_plugin` factory registration.
-- 001-refactor-plugin-structure: Added Python 3.10+ + `pocketflow.py` (Core Orchestration), `PyYAML`
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

@@ -8,7 +8,7 @@
 
 ```yaml
 schema_version: 1                 # REQUIRED int; hard error if absent or unknown
-name: koder
+name: coder
 description: Expert developer focused on implementation and coding tasks.
 
 tools:                            # dict: local_name → dotted.import.Path or file.py:ClassName
@@ -16,9 +16,9 @@ tools:                            # dict: local_name → dotted.import.Path or f
   git_diff: tools/git.py:GitDiffTool
 
 agents:                           # dict: agent_name → definition block
-  koder:
+  coder:
     description: Code implementation specialist.
-    module: agents/koder_agent.py  # path relative to plugin root
+    module: agents/coder_agent.py  # path relative to plugin root
     entry_fn: create_flow          # zero-arg factory → returns PocketFlow Flow
     llm_profile: gemini_default
     tools:

@@ -186,7 +186,7 @@ The system will load your `agent.yaml` for one release cycle while emitting a `W
 
 **Example — before (`agent.yaml`)**:
 ```yaml
-name: koder
+name: coder
 personality:
   system_prompt: prompts/system.md
 tools:
@@ -200,15 +200,15 @@ workflows:
 **After (`plugin.yaml`)**:
 ```yaml
 schema_version: 1
-name: koder
+name: coder
 description: Expert developer.
 
 tools:
   write_to_file: tools/filesystem.py:WriteToFileTool
 
 agents:
-  koder:
-    module: agents/koder_agent.py
+  coder:
+    module: agents/coder_agent.py
     entry_fn: create_flow
     llm_profile: gemini_default
     tools:
@@ -243,7 +243,7 @@ print(pm.tools.list_by_plugin("core"))
 tool_impl = pm.tools.resolve("core.read_file")
 
 # All plugins
-print(pm.tools.plugins())           # ['core', 'koder', ...]
+print(pm.tools.plugins())           # ['core', 'coder', ...]
 ```
 
 ---

@@ -170,6 +170,10 @@ class PluginManager:
             if tool_ref == "*":
                 return self.tools.list_all()
 
+            # Normalise :: delimiter so manifests can use either "plugin::tool"
+            # or "plugin.tool" — the registry stores as "plugin.tool".
+            tool_ref = tool_ref.replace("::", ".")
+
             # Determine the qualified name for this tool reference
             if "." in tool_ref:
                 qname = tool_ref  # already qualified

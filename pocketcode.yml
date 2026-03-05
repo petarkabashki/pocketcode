@@ -49,9 +49,7 @@ llm:
 
 runtime:
   log_level: INFO
-  # Internal runtime graph used to execute agent turns.
-  agent_runtime_workflow: single_agent
-  default_agent: Ask
+  default_agent: core::react
   llm_overrides:
     agents: {}
     nodes: {}

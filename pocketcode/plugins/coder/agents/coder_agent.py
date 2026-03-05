@@ -1,9 +1,9 @@
 """
-Arkitekt agent PocketFlow factory.
+coder agent PocketFlow factory.
 
-The Arkitekt agent specialises in architecture and planning tasks: reading
-existing code, listing files, and searching the codebase to produce high-level
-design plans and recommendations.
+The coder agent specialises in coding tasks: writing code, creating files,
+applying git diffs, and debugging. It delegates to the LLM runner via the
+shared store and falls back gracefully when the LLM router is unavailable.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from pocketflow import Flow, Node
 logger = logging.getLogger(__name__)
 
 
-class ArkitektThinkNode(Node):
-    """Think/exec node for the Arkitekt agent."""
+class coderThinkNode(Node):
+    """Think/exec node for the coder agent."""
 
     def prep(self, shared: Dict[str, Any]) -> str:
         return shared.get("initial_request", shared.get("task", ""))
@@ -29,8 +29,8 @@ class ArkitektThinkNode(Node):
         llm_router = shared.get("_llm_router")
         if llm_router is not None:
             return "llm_delegate"
-        logger.debug("ArkitektThinkNode: no _llm_router in shared; skipping LLM call.")
-        shared.setdefault("results", {})["arkitekt"] = {
+        logger.debug("coderThinkNode: no _llm_router in shared; skipping LLM call.")
+        shared.setdefault("results", {})["coder"] = {
             "status": "pending_llm",
             "request": exec_res,
         }
@@ -38,6 +38,6 @@ class ArkitektThinkNode(Node):
 
 
 def create_flow() -> Flow:
-    """Return an Arkitekt agent Flow."""
-    think = ArkitektThinkNode()
+    """Return a coder agent Flow."""
+    think = coderThinkNode()
     return Flow(start=think)

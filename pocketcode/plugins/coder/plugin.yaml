@@ -1,0 +1,34 @@
+schema_version: 1
+name: coder
+description: Expert developer agent that writes code, creates files, and applies patches.
+
+tools:
+  write_to_file: tools/filesystem.py:WriteToFileTool
+  create_directory: tools/filesystem.py:CreateDirectoryTool
+  git_diff: tools/git.py:GitDiffTool
+
+agents:
+  coder:
+    description: Code implementation and editing specialist.
+    module: agents/coder_agent.py
+    entry_fn: create_flow
+    llm_profile: gemini_default
+    tools:
+      - write_to_file
+      - create_directory
+      - git_diff
+      - core::read_file
+      - core::list_files
+      - core::glob_files
+      - core::search_code
+      - core::execute_command
+      - core::git_status
+      - core::git_add
+      - core::git_commit
+      - core::git_pull
+      - core::git_push
+    handoff_agents:
+      - architect::architect
+      - asker::ask
+    prompts:
+      - prompts/system.md

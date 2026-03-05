@@ -422,7 +422,7 @@ class TestPromptRegistry:
     def test_unqualified_two_or_more_owners_raises(self):
         prompts: NamespaceRegistry[str] = NamespaceRegistry()
         prompts.register("core", "system", "prompt A")
-        prompts.register("koder", "system", "prompt B")
+        prompts.register("coder", "system", "prompt B")
 
         with pytest.raises(RegistryError, match="Ambiguous"):
             prompts.resolve("system")
