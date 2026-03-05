@@ -1,39 +1,29 @@
+schema_version: 1
 name: core
 description: Built-in plugin with unified components for agents and workflows.
 
 tools:
-  read_file: pocketcode.tools.filesystem.ReadFileTool
-  write_to_file: pocketcode.tools.filesystem.WriteToFileTool
-  list_files: pocketcode.tools.filesystem.ListFilesTool
-  create_directory: pocketcode.tools.filesystem.CreateDirectoryTool
-  glob_files: pocketcode.tools.filesystem.GlobFilesTool
-  search_code: pocketcode.tools.search.SearchCodeTool
-  execute_command: pocketcode.tools.system.ExecuteCommandTool
-  ask_user_input: pocketcode.tools.user_input.AskUserInputTool
-  confirm_user_input: pocketcode.tools.user_input.ConfirmUserInputTool
-  git_status: pocketcode.tools.git.GitStatusTool
-  git_diff: pocketcode.tools.git.GitDiffTool
-  git_add: pocketcode.tools.git.GitAddTool
-  git_commit: pocketcode.tools.git.GitCommitTool
-  git_pull: pocketcode.tools.git.GitPullTool
-  git_push: pocketcode.tools.git.GitPushTool
+  read_file: tools/filesystem.py:ReadFileTool
+  write_to_file: tools/filesystem.py:WriteToFileTool
+  list_files: tools/filesystem.py:ListFilesTool
+  create_directory: tools/filesystem.py:CreateDirectoryTool
+  glob_files: tools/filesystem.py:GlobFilesTool
+  search_code: tools/search.py:SearchCodeTool
+  execute_command: tools/system.py:ExecuteCommandTool
+  ask_user_input: tools/user_input.py:AskUserInputTool
+  confirm_user_input: tools/user_input.py:ConfirmUserInputTool
+  git_status: tools/git.py:GitStatusTool
+  git_diff: tools/git.py:GitDiffTool
+  git_add: tools/git.py:GitAddTool
+  git_commit: tools/git.py:GitCommitTool
+  git_pull: tools/git.py:GitPullTool
+  git_push: tools/git.py:GitPushTool
 
-node_definitions:
-  default_start:
-    kind: start
-  default_tool:
-    kind: tool
-  default_handoff:
-    kind: handoff
-  default_output:
-    kind: output
-  default_end:
-    kind: end
-
-components:
-  Coder:
-    kind: agent
+agents:
+  coder:
     description: Code implementation and editing specialist.
+    module: agents/coder_agent.py
+    entry_fn: create_flow
     llm_profile: gemini_default
     tools:
       - read_file
@@ -50,13 +40,13 @@ components:
       - git_pull
       - git_push
     handoff_agents:
-      - Architect
-      - Ask
-    prompt_file: prompts/agents/coder.md
+      - architect
+      - ask
 
-  Architect:
-    kind: agent
+  architect:
     description: Architecture and planning specialist.
+    module: agents/architect_agent.py
+    entry_fn: create_flow
     llm_profile: gemini_default
     tools:
       - read_file
@@ -64,13 +54,13 @@ components:
       - glob_files
       - search_code
     handoff_agents:
-      - Coder
-      - Ask
-    prompt_file: prompts/agents/architect.md
+      - coder
+      - ask
 
-  Ask:
-    kind: agent
+  ask:
     description: Repository Q&A specialist.
+    module: agents/ask_agent.py
+    entry_fn: create_flow
     llm_profile: gemini_fast
     tools:
       - read_file
@@ -78,45 +68,5 @@ components:
       - glob_files
       - search_code
     handoff_agents:
-      - Coder
-      - Architect
-    prompt_file: prompts/agents/ask.md
-
-  micromanager:
-    kind: agent
-    description: Orchestrator for delegation and handoffs.
-    llm_profile: gemini_default
-    execution_mode: node
-    tools:
-      - read_file
-      - list_files
-      - glob_files
-      - search_code
-    handoff_agents:
-      - Coder
-      - Architect
-      - Ask
-    default_handoff_policy:
-      context_mode: whole
-      return_to_caller: false
-    handoff_policies:
-      Coder:
-        context_mode: delegated
-        return_to_caller: true
-        return_transition: continue
-      Architect:
-        context_mode: delegated
-        return_to_caller: true
-        return_transition: continue
-      Ask:
-        context_mode: whole
-        return_to_caller: false
-    prompt_file: prompts/agents/micromanager.md
-
-  orchestrator:
-    kind: workflow
-    path: workflows/orchestrator.md
-
-  single_agent:
-    kind: workflow
-    path: workflows/single_agent.md
+      - coder
+      - architect

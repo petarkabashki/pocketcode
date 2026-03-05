@@ -1,0 +1,14 @@
+schema_version: 1
+name: "asker"
+description: "Clarification agent that prompts the user for missing information and feeds answers back into the task context."
+
+tools:
+  ask_user: "tools/user_input.py:AskUserInputTool"
+
+agents:
+  asker:
+    module: "agents/asker_agent.py"
+    entry_fn: "create_flow"
+    description: "Asks the user clarifying questions to fill in missing requirements before other agents proceed."
+    tools: [ask_user]
+    prompts: ["prompts/system.md"]

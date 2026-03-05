@@ -1,37 +1,159 @@
 # Plugin Architecture
 
-Plugins in PocketCoder are modular components that provide tools, prompts, and agents.
+PocketCoder plugins are self-contained directories that declare tools, prompts, and
+agents in a single `plugin.yaml` manifest. Every resource is addressed by a
+two-part qualified name: `plugin_name.resource_name`.
 
-## New Programmatic Structure (Recommended)
+---
 
-As of version 0.2.0, plugins can now be defined programmatically using a factory function and [PocketFlow Agents](pocketflow_agents.md).
+## Unified Plugin Model
 
-### 1. Plugin Directory Structure
+As of the 003-unified-plugin-namespace release, all plugins share one manifest format
+and one namespace. There are no separate workflow YAML files — agent logic is expressed
+as a [PocketFlow](pocketflow_agents.md) `Flow` factory.
+
+### Plugin Directory Layout
+
 ```
 my_plugin/
-├── __init__.py      # Factory function `get_plugin()`
-├── agent.py        # PocketFlow nodes and flows
-├── prompts/        # Markdown prompt templates
-│   └── system.md
-└── tools/          # Python tool implementations
-    └── filesystem.py
+├── plugin.yaml          # Required: unified manifest (schema_version: 1)
+├── agents/
+│   ├── __init__.py      # Empty package init
+│   └── my_agent.py     # PocketFlow Node + Flow factory
+├── prompts/
+│   └── system.md       # Markdown system prompt
+└── tools/
+    └── my_tools.py     # BaseTool subclasses
 ```
 
-### 2. Factory Function (`__init__.py`)
-The `get_plugin()` function is the entry point for the plugin. It returns a `Plugin` object containing all resources.
+---
+
+## Plugin Manifest (`plugin.yaml`)
+
+Every plugin **must** have a `plugin.yaml` with `schema_version: 1` as its first key.
+
+```yaml
+schema_version: 1
+name: my_plugin
+description: "What this plugin does."
+
+tools:
+  my_tool: "tools/my_tools.py:MyTool"
+
+agents:
+  my_agent:
+    module: "agents/my_agent.py"
+    entry_fn: "create_flow"
+    description: "Agent that does X."
+    tools: [my_tool]
+    prompts: ["prompts/system.md"]
+
+prompts:
+  system: "prompts/system.md"
+```
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `schema_version` | ✅ | Must be `1`. |
+| `name` | Optional | Defaults to the directory name. |
+| `description` | Optional | Human-readable summary. |
+| `tools` | Optional | `local_name: "file.py:ClassName"` mappings. |
+| `agents` | Optional | Agent blocks with `module` + `entry_fn`. |
+| `prompts` | Optional | `local_name: "prompts/file.md"` mappings. |
+
+---
+
+## Agent Factory (`agents/my_agent.py`)
+
+Each agent is a zero-argument factory function that returns a PocketFlow `Flow`.
 
 ```python
-from pocketcode.core.interfaces import Plugin
-from .agent import MyAgentFlow
-from .tools.filesystem import read_local_file
+from __future__ import annotations
+from typing import Any, Dict
+from pocketflow import Flow, Node
 
-def get_plugin():
-    return Plugin(
-        name="my-plugin",
-        tools=[read_local_file],
-        agents={"my-agent": MyAgentFlow()}
-    )
+class MyThinkNode(Node):
+    def prep(self, shared: Dict[str, Any]) -> str:
+        return shared.get("task", "")
+
+    def exec(self, task: str) -> str:
+        return task                          # forward to LLM router if wired
+
+    def post(self, shared, prep_res, exec_res) -> str:
+        shared["result"] = exec_res
+        return "continue"
+
+def create_flow() -> Flow:
+    return Flow(start=MyThinkNode())
 ```
 
-## Legacy Configuration (YAML-based)
-Traditional plugins use `agent.yaml` to define tools and workflows. While still supported, programmatic agents are preferred for complex logic.
+Register the factory in `plugin.yaml` under `agents:`:
+
+```yaml
+agents:
+  my_agent:
+    module: "agents/my_agent.py"
+    entry_fn: "create_flow"
+```
+
+---
+
+## Namespace & Qualified Names
+
+Every resource is registered as `{plugin_name}.{local_name}`:
+
+| Local reference | Qualified name | Resolves to |
+|-----------------|----------------|-------------|
+| `my_tool` (from `my_plugin`) | `my_plugin.my_tool` | `MyTool` impl |
+| `my_agent` | `my_plugin.my_agent` | `AgentDefinition` with Flow |
+
+Unqualified bare-name resolution:
+- **Unique owner** → resolved with a `WARNING` suggesting qualification.
+- **Multiple owners** → raises `RegistryError`; caller must qualify the name.
+
+---
+
+## Core Plugin (`pocketcode/plugins/core`)
+
+The built-in `core` plugin ships all standard tools and three base agents:
+
+| Qualified name | Description |
+|----------------|-------------|
+| `core.read_file` | Read a file from the workspace |
+| `core.write_to_file` | Write content to a file |
+| `core.search_code` | Search the codebase |
+| `core.execute_command` | Run a shell command |
+| `core.git_diff` | Show a git diff |
+| `core.ask_user` | Prompt the user for input |
+| `core.coder` | Code-writing agent |
+| `core.architect` | Planning & architecture agent |
+| `core.ask` | Clarification/question agent |
+
+---
+
+## Hot Reload
+
+Plugin changes are detected by `PluginWatcher`. On any file-system event inside a
+plugin directory, a new `PluginManager` snapshot is built and atomically swapped into
+the `RegistryHolder` — live sessions transparently see the updated registry within
+500 ms.
+
+---
+
+## Legacy `agent.yaml` Migration
+
+Plugins that still use `agent.yaml` are loaded via a one-release compatibility shim
+that emits `WARNING` log records and returns `schema_version=0`. They **will not** be
+loaded as PocketFlow agents until migrated.
+
+Migration steps:
+
+1. Rename `agent.yaml` → `plugin.yaml`.
+2. Add `schema_version: 1` as the first key.
+3. Convert the `tools:` list to a `tools:` dict: `local_name: "file.py:Class"`.
+4. Create an `agents/` directory with a `create_flow()` factory module.
+5. Add an `agents:` block pointing to the factory.
+6. Remove `workflows:`, `components:`, and `node_definitions:` legacy sections.
+
+See [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)
+for a step-by-step walkthrough.

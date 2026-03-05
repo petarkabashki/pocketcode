@@ -1,6 +1,6 @@
 # PocketCoder Documentation
 
-PocketCoder is a highly configurable, agent-based AI assistant system.
+PocketCoder is an extensible terminal AI coding assistant built around PocketFlow.
 
 ## Topics
 
@@ -14,7 +14,23 @@ PocketCoder is a highly configurable, agent-based AI assistant system.
 - [Dynamic Tools](tools.md) (Planned)
 
 ## Quick Start
-1. Configure your LLM provider in `pocketcode.yml`
-2. Define a plugin with a factory function in `__init__.py`
-3. Execute your agent with:
-   `python -m pocketcode.main --agent <agent-name>`
+
+1. Configure your LLM provider in `pocketcode.yml`.
+2. Create a plugin directory under `pocketcode/plugins/my_plugin/`.
+3. Add a `plugin.yaml` with `schema_version: 1` and an `agents:` block.
+4. Execute your agent with:
+
+   ```
+   python -m pocketcode.main --agent my_plugin.my_agent
+   ```
+
+## Plugin Authoring
+
+Plugins follow the unified plugin model introduced in 003-unified-plugin-namespace:
+
+- One directory, one manifest (`plugin.yaml`, `schema_version: 1`).
+- Tools declared as `local_name: "file.py:ClassName"`.
+- Agents declared with `module:` + `entry_fn:` pointing to a PocketFlow factory.
+- All resources addressable as `plugin_name.resource_name`.
+
+See the full walkthrough: [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)

@@ -1,11 +1,18 @@
 from pocketcode.core.interfaces import Plugin
-# Placeholder: for now we don't have single_agent.py ready, but let's assume it exists
-# from .workflows.single_agent import get_single_agent_flow
+from pocketcode.plugins.core.agents.coder_agent import create_flow as _coder_flow
+from pocketcode.plugins.core.agents.architect_agent import create_flow as _architect_flow
+from pocketcode.plugins.core.agents.ask_agent import create_flow as _ask_flow
+
 
 def get_plugin(config):
     return Plugin(
         name="core",
         version="0.1.1",
-        agents={}, # Add agents here once single_agent.py is implemented
-        tools=[]
+        description="Core built-in agents and tools",
+        agents={
+            "coder": _coder_flow(),
+            "architect": _architect_flow(),
+            "ask": _ask_flow(),
+        },
+        tools=[],
     )

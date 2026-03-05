@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List
 import yaml
 
 from pocketcode.core.interfaces import Plugin, PluginContext
+from pocketcode.core.namespace_registry import NamespaceRegistry, RegistryError, RegistryHolder
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
 from pocketcode.core.runtime_models import AgentDefinition
 
@@ -21,19 +22,22 @@ class PluginManager:
         self._config = config
         self._workspace_root = Path(workspace_root).resolve()
 
-        self.tools: Dict[str, Any] = {}
-        self.agents: Dict[str, AgentDefinition] = {}
+        self.tools: NamespaceRegistry[Any] = NamespaceRegistry()
+        self.agents: NamespaceRegistry[AgentDefinition] = NamespaceRegistry()
+        self.prompts: NamespaceRegistry[str] = NamespaceRegistry()
         self.llm_profiles: Dict[str, Dict[str, Any]] = {}
         self.plugin_roots: Dict[str, Path] = {}
         self.plugins: Dict[str, Plugin] = {}
+        self._holder: RegistryHolder = RegistryHolder()
 
     @property
     def workspace_root(self) -> Path:
         return self._workspace_root
 
     def clear(self) -> None:
-        self.tools.clear()
-        self.agents.clear()
+        self.tools = NamespaceRegistry()
+        self.agents = NamespaceRegistry()
+        self.prompts = NamespaceRegistry()
         self.llm_profiles.clear()
         self.plugin_roots.clear()
         self.plugins.clear()
@@ -62,6 +66,8 @@ class PluginManager:
             len(self.agents),
             len(self.llm_profiles),
         )
+        # Atomic registry swap — new sessions immediately see fresh state
+        self._holder.swap(self)
 
     def _load_factory_plugin(self, plugin_root: Path) -> bool:
         """Attempts to load a plugin using the get_plugin(config) factory function."""
@@ -92,24 +98,38 @@ class PluginManager:
             # Register tools
             for tool in plugin.tools:
                 tool_name = getattr(tool, "__name__", str(tool))
-                if tool_name in self.tools:
-                    logger.warning(f"Plugin '{plugin_name}' tool '{tool_name}' collides with existing tool. Overwriting.")
-                self.tools[tool_name] = tool
+                try:
+                    self.tools.register(plugin_name, tool_name, tool)
+                except RegistryError:
+                    logger.warning(
+                        "Plugin '%s' tool '%s' collides with existing registration. Skipping.",
+                        plugin_name,
+                        tool_name,
+                    )
             
             # Register agents (Flows)
             for agent_name, flow in plugin.agents.items():
-                self.agents[agent_name] = AgentDefinition(
+                agent_def = AgentDefinition(
                     name=agent_name,
                     description=plugin.description or f"Programmatic agent from {plugin_name}",
                     is_programmatic=True,
                     flow_instance=flow,
                     metadata={
+                        "plugin": plugin_name,
                         "plugin_name": plugin_name,
                         "plugin_root": str(plugin_root),
                         "version": plugin.version,
-                        "author": plugin.author
-                    }
+                        "author": plugin.author,
+                    },
                 )
+                try:
+                    self.agents.register(plugin_name, agent_name, agent_def)
+                except RegistryError:
+                    logger.error(
+                        "Plugin '%s' agent '%s' collides with existing registration. Skipping.",
+                        plugin_name,
+                        agent_name,
+                    )
                 
             # Register LLM profiles from metadata if present
             if "llm_profiles" in plugin.metadata:
@@ -140,17 +160,38 @@ class PluginManager:
         if not agent:
             return []
 
+        context_plugin = (agent.metadata or {}).get("plugin")
+
         if not agent.tools:
-            return sorted(self.tools.keys())
+            return self.tools.list_all()  # all qualified names
 
         resolved: List[str] = []
-        for tool_name in agent.tools:
-            if tool_name == "*":
-                return sorted(self.tools.keys())
-            if tool_name in self.tools and tool_name not in resolved:
-                resolved.append(tool_name)
-                continue
-            logger.warning("Agent '%s' references unknown tool '%s'.", agent_name, tool_name)
+        for tool_ref in agent.tools:
+            if tool_ref == "*":
+                return self.tools.list_all()
+
+            # Determine the qualified name for this tool reference
+            if "." in tool_ref:
+                qname = tool_ref  # already qualified
+            elif context_plugin and tool_ref in self.tools._ns.get(context_plugin, {}):
+                qname = f"{context_plugin}.{tool_ref}"  # local plugin owns it
+            else:
+                owners = self.tools._bare.get(tool_ref, [])
+                if not owners:
+                    logger.warning("Agent '%s' references unknown tool '%s'.", agent_name, tool_ref)
+                    continue
+                qname = owners[0]
+                if len(owners) > 1:
+                    logger.warning(
+                        "Ambiguous tool '%s' for agent '%s': owned by %s. Using '%s'.",
+                        tool_ref,
+                        agent_name,
+                        ", ".join(f"'{o}'" for o in owners),
+                        qname,
+                    )
+
+            if qname not in resolved:
+                resolved.append(qname)
 
         return resolved
 
@@ -206,7 +247,7 @@ class PluginManager:
         plugin_name = str(manifest.get("name") or plugin_root.name)
         self.plugin_roots[plugin_name] = plugin_root
 
-        logger.info("Loading legacy plugin '%s' from %s", plugin_name, plugin_root)
+        logger.info("Loading manifest plugin '%s' from %s", plugin_name, plugin_root)
 
         self._load_plugin_llm_profiles(plugin_name, manifest)
         self._load_plugin_tools(plugin_name, plugin_root, manifest)
@@ -263,12 +304,14 @@ class PluginManager:
 
                 try:
                     loaded_tool = self._load_reference(tool_ref, plugin_root)
-                    self.tools[tool_id] = loaded_tool
+                    self.tools.register(agent_name, tool_id, loaded_tool)
                     agent_tools.append(tool_id)
+                except RegistryError as exc:
+                    logger.error("Tool '%s' for agent '%s' has registry collision: %s", tool_id, agent_name, exc)
                 except Exception as exc:
                     logger.error("Failed to load tool '%s' for agent '%s': %s", tool_id, agent_name, exc)
 
-        self.agents[agent_name] = AgentDefinition(
+        agent_def = AgentDefinition(
             name=agent_name,
             description=str(manifest.get("description", "")),
             tools=agent_tools,
@@ -277,9 +320,13 @@ class PluginManager:
                 "plugin": agent_name,
                 "plugin_root": str(plugin_root),
                 "version": manifest.get("version"),
-                "author": manifest.get("author")
-            }
+                "author": manifest.get("author"),
+            },
         )
+        try:
+            self.agents.register(agent_name, agent_name, agent_def)
+        except RegistryError as exc:
+            logger.error("Agent '%s' registry collision: %s — skipping.", agent_name, exc)
 
     def _load_plugin_llm_profiles(self, plugin_name: str, manifest: Dict[str, Any]) -> None:
         llm_profiles = manifest.get("llm_profiles", {})
@@ -306,7 +353,14 @@ class PluginManager:
         for tool_name, reference in tools_section.items():
             try:
                 loaded_tool = self._load_reference(reference, plugin_root)
-                self.tools[str(tool_name)] = loaded_tool
+                self.tools.register(plugin_name, str(tool_name), loaded_tool)
+            except RegistryError as exc:
+                logger.error(
+                    "Plugin '%s' tool '%s' registry collision: %s",
+                    plugin_name,
+                    tool_name,
+                    exc,
+                )
             except Exception as exc:
                 logger.error(
                     "Plugin '%s' failed to load tool '%s' from '%s': %s",
@@ -417,7 +471,7 @@ class PluginManager:
         if not isinstance(raw_default_handoff_policy, dict):
             raw_default_handoff_policy = {}
 
-        self.agents[agent_name] = AgentDefinition(
+        agent_def = AgentDefinition(
             name=agent_name,
             description=str(definition.get("description", "")),
             llm_profile=str(llm_profile) if llm_profile else None,
@@ -433,11 +487,80 @@ class PluginManager:
             post_handlers=post_handlers,
             handoff_policies=handoff_policies,
             default_handoff_policy=dict(raw_default_handoff_policy),
+            module=str(definition["module"]).strip() if definition.get("module") else None,
+            entry_fn=str(definition["entry_fn"]).strip() if definition.get("entry_fn") else None,
+            flow_instance=self._load_agent_flow(
+                module_ref=definition.get("module"),
+                entry_fn_name=definition.get("entry_fn"),
+                plugin_root=plugin_root,
+                agent_name=agent_name,
+                plugin_name=plugin_name,
+            ),
             metadata={
                 "plugin": plugin_name,
                 "plugin_root": str(plugin_root),
             },
         )
+        try:
+            self.agents.register(plugin_name, agent_name, agent_def)
+        except RegistryError as exc:
+            logger.error(
+                "Plugin '%s' agent '%s' registry collision: %s — skipping.",
+                plugin_name,
+                agent_name,
+                exc,
+            )
+
+    def _load_agent_flow(
+        self,
+        *,
+        module_ref: str | None,
+        entry_fn_name: str | None,
+        plugin_root: Path,
+        agent_name: str,
+        plugin_name: str,
+    ) -> Any:
+        """Load a PocketFlow Flow from a module+entry_fn declaration in plugin.yaml.
+
+        Returns the Flow instance if the factory is found and callable, ``None`` otherwise.
+        On any exception, logs at ERROR and returns ``None`` (agent still registers
+        without a flow_instance, using the legacy LLM path).
+        """
+        if not module_ref or not entry_fn_name:
+            return None
+        try:
+            file_path = (plugin_root / module_ref).resolve()
+            module = self._load_module_from_file(file_path)
+            factory = getattr(module, entry_fn_name, None)
+            if not callable(factory):
+                logger.error(
+                    "Plugin '%s' agent '%s': entry_fn '%s' not found or not callable in '%s'.",
+                    plugin_name,
+                    agent_name,
+                    entry_fn_name,
+                    file_path,
+                )
+                return None
+            flow = factory()
+            logger.debug(
+                "Plugin '%s' agent '%s': flow_instance loaded from '%s:%s'.",
+                plugin_name,
+                agent_name,
+                module_ref,
+                entry_fn_name,
+            )
+            return flow
+        except Exception as exc:
+            logger.error(
+                "Plugin '%s' agent '%s': failed to load flow from '%s:%s': %s",
+                plugin_name,
+                agent_name,
+                module_ref,
+                entry_fn_name,
+                exc,
+                exc_info=True,
+            )
+            return None
 
     def _load_reference(self, reference: Any, plugin_root: Path) -> Any:
         if not isinstance(reference, str):

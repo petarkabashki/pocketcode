@@ -563,3 +563,10 @@ TypeError: PluginContext.call_tool() got multiple values for argument 'name'
 2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
 2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
 2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 22:29:52,350 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 22:29:52,351 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 22:29:52,352 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 22:29:52,353 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 22:29:52,354 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 22:29:52,355 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 22:29:52,355 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=8, llm_profiles=0

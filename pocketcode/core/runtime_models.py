@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -22,5 +22,7 @@ class AgentDefinition:
     handoff_policies: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     default_handoff_policy: Dict[str, Any] = field(default_factory=dict)
     is_programmatic: bool = False
+    module: Optional[str] = None
+    entry_fn: Optional[str] = None
     flow_instance: Any = None
     metadata: Dict[str, Any] = field(default_factory=dict)

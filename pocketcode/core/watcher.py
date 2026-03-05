@@ -1,11 +1,19 @@
 #%% pocketcode/core/watcher.py
+from __future__ import annotations
+
 import logging
 import os
 import queue
 import threading
 import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+
+if TYPE_CHECKING:
+    from pocketcode.core.plugin_manager import PluginManager
+    from pocketcode.core.namespace_registry import RegistryHolder
 
 logger = logging.getLogger(__name__)
 
@@ -247,3 +255,173 @@ class FileWatcher:
         """Checks if the watcher thread is alive."""
         with self._lock:
             return self.thread is not None and self.thread.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# Plugin Hot-Reload Support (FR-011)
+# ---------------------------------------------------------------------------
+
+class PluginHotReloadHandler(FileSystemEventHandler):
+    """
+    Watches plugin directories for file changes and triggers a PluginManager
+    rebuild + atomic registry swap via ``RegistryHolder.swap()``.
+
+    Rebuild sequence (from research.md Topic 2):
+      (a) BUILD   — create new PluginManager + call .load() outside the lock
+      (b) SWAP    — holder.swap(new_pm) — single GIL-atomic store
+      (c) DISCARD — old_pm falls out of scope; GC handles cleanup
+
+    ``_rebuild_in_progress`` serialises concurrent rebuild attempts caused by
+    editors emitting 2–3 inotify events per save. The existing 500 ms debounce
+    timer ensures that a burst of events collapses to a single rebuild trigger.
+    """
+
+    def __init__(
+        self,
+        holder: "RegistryHolder",
+        config: dict,
+        workspace_root: "Path",
+        debounce_ms: int = 500,
+    ) -> None:
+        super().__init__()
+        self._holder = holder
+        self._config = config
+        self._workspace_root = workspace_root
+        self._debounce_ms = debounce_ms
+        self._rebuild_in_progress = threading.Event()
+        self._debounce_timers: dict[str, threading.Timer] = {}
+        self._lock = threading.Lock()
+
+    # ── Internal helpers ────────────────────────────────────────────────────
+
+    def _debounced_enqueue(self, key: str) -> None:
+        """Collapse rapid consecutive events; trigger rebuild after quiet period."""
+        with self._lock:
+            existing = self._debounce_timers.get(key)
+            if existing:
+                existing.cancel()
+            timer = threading.Timer(
+                self._debounce_ms / 1000.0,
+                self._trigger_rebuild,
+            )
+            self._debounce_timers[key] = timer
+            timer.daemon = True
+            timer.start()
+
+    def _trigger_rebuild(self) -> None:
+        """Build a new PluginManager snapshot and atomically swap the holder."""
+        if self._rebuild_in_progress.is_set():
+            logger.debug("PluginHotReloadHandler: rebuild already in progress; skipping.")
+            return
+
+        self._rebuild_in_progress.set()
+        try:
+            # Import lazily to avoid circular imports at module level
+            from pocketcode.core.plugin_manager import PluginManager  # noqa: PLC0415
+
+            logger.info("PluginHotReloadHandler: rebuilding plugin registry…")
+            new_pm = PluginManager(config=self._config, workspace_root=self._workspace_root)
+            new_pm.load()
+            self._holder.swap(new_pm)
+            logger.info("PluginHotReloadHandler: registry swapped successfully.")
+        except Exception as exc:
+            logger.error("PluginHotReloadHandler: rebuild failed: %s", exc, exc_info=True)
+        finally:
+            self._rebuild_in_progress.clear()
+
+    # ── FileSystemEventHandler overrides ────────────────────────────────────
+
+    def on_modified(self, event) -> None:
+        if event.is_directory:
+            return
+        filepath = event.src_path
+        basename = os.path.basename(filepath)
+        # Ignore hidden files, temp files, and compiled Python artefacts
+        if basename.startswith(".") or "~" in filepath or basename.endswith(".pyc"):
+            return
+        logger.debug("PluginHotReloadHandler: detected change in %s", filepath)
+        self._debounced_enqueue(filepath)
+
+    on_created = on_modified  # type: ignore[assignment]
+    on_deleted = on_modified  # type: ignore[assignment]
+
+
+class PluginWatcher:
+    """
+    Manages a watchdog Observer that monitors all plugin directories and
+    triggers hot-reload via ``PluginHotReloadHandler`` on any file change.
+
+    Usage::
+
+        pw = PluginWatcher(holder=registry_holder, config=cfg, workspace_root=root)
+        pw.start()
+        # … runtime …
+        pw.stop()
+    """
+
+    def __init__(
+        self,
+        holder: "RegistryHolder",
+        config: dict,
+        workspace_root: "Path",
+        plugin_dirs: Optional[list] = None,
+        debounce_ms: int = 500,
+    ) -> None:
+        self._holder = holder
+        self._config = config
+        self._workspace_root = workspace_root
+        self._plugin_dirs: list[Path] = [Path(d) for d in (plugin_dirs or [])]
+        self._debounce_ms = debounce_ms
+        self._observer: Optional[Observer] = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+
+    def _default_plugin_dirs(self) -> list[Path]:
+        """Resolve built-in plugin root if no explicit dirs given."""
+        from pocketcode.core.plugin_manager import PluginManager  # noqa: PLC0415
+        built_in = Path(PluginManager.__module__.rsplit(".", 1)[0].replace(".", "/"))
+        # More robustly: use the known relative path
+        built_in = self._workspace_root / "pocketcode" / "plugins"
+        return [built_in] if built_in.exists() else []
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            logger.info("PluginWatcher already running.")
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="plugin-hot-reload")
+        self._thread.start()
+        logger.info("PluginWatcher started.")
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._observer and self._observer.is_alive():
+            self._observer.stop()
+        if self._thread:
+            self._thread.join(timeout=5)
+        logger.info("PluginWatcher stopped.")
+
+    def _run(self) -> None:
+        handler = PluginHotReloadHandler(
+            holder=self._holder,
+            config=self._config,
+            workspace_root=self._workspace_root,
+            debounce_ms=self._debounce_ms,
+        )
+        self._observer = Observer()
+        dirs_to_watch = self._plugin_dirs or self._default_plugin_dirs()
+        for d in dirs_to_watch:
+            if d.exists():
+                self._observer.schedule(handler, str(d), recursive=True)
+                logger.info("PluginWatcher monitoring: %s", d)
+            else:
+                logger.warning("PluginWatcher: directory does not exist: %s", d)
+
+        self._observer.start()
+        try:
+            while not self._stop_event.is_set():
+                time.sleep(1)
+        finally:
+            if self._observer.is_alive():
+                self._observer.stop()
+            self._observer.join()
