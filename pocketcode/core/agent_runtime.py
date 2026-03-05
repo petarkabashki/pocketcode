@@ -207,6 +207,26 @@ class AgentRuntime:
     ) -> str:
         """Executes a programmatic pocketflow.Flow-based agent."""
         try:
+            # Inject runtime services for programmatic flows (e.g., react_agent).
+            # Use setdefault so test doubles can inject their own instances.
+            shared_store.setdefault("_llm_router", self._llm_router)
+            shared_store.setdefault("_tool_runtime", self._tool_runtime)
+
+            # Pre-compute tool definitions for the active agent each turn.
+            try:
+                _allowed = self._plugins.resolve_tools_for_agent(agent_name)
+                shared_store["_agent_tool_definitions"] = self._tool_runtime.describe_tools(_allowed)
+            except Exception:
+                shared_store.setdefault("_agent_tool_definitions", [])
+
+            # Resolve the LLM profile for this agent turn.
+            try:
+                shared_store["_agent_llm_profile"] = self._resolve_llm_profile(
+                    agent_name, agent_definition, shared_store
+                )
+            except Exception:
+                pass
+
             # PocketFlow returns the transition string or None
             # T011, T028 implementation
             outcome = agent_definition.flow_instance.run(shared_store)

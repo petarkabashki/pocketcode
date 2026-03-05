@@ -1,23 +1,23 @@
 schema_version: 1
-name: "micromanager"
-description: "High-precision orchestrating agent for detailed technical oversight and execution"
+name: micromanager
+description: High-precision orchestrating agent for detailed technical oversight and execution
 version: "1.0.0"
-author: "PocketCoder-Core"
+author: PocketCoder-Core
 
 tools:
-  execute_command: "tools/system.py:ExecuteCommandTool"
+  execute_command: tools/system.py:ExecuteCommandTool
 
 agents:
   micromanager:
     module: agents/micromanager_agent.py
     entry_fn: create_flow
-    description: "Orchestrates specialist sub-agents (coder, architect, ask) to handle complex multi-step tasks"
+    description: Orchestrates specialist sub-agents (coder, architect, ask) to handle complex multi-step tasks
     llm_profile: default
     tools:
       - execute_command
     prompts:
       - prompts/system.md
     handoff_agents:
-      - core.coder
-      - core.architect
-      - core.ask
+      - coder::coder
+      - architect::architect
+      - asker::ask

@@ -38,7 +38,7 @@ As a plugin author, I want to reference any tool, agent, or prompt using a `plug
 **Acceptance Scenarios**:
 
 1. **Given** two plugins both define a tool named `write_to_file`, **When** an agent references `core.write_to_file`, **Then** only the core plugin's implementation is used.
-2. **Given** an agent in plugin `koder` references `core.read_file`, **When** the system resolves the reference, **Then** it loads the tool from the core plugin without ambiguity.
+2. **Given** an agent in plugin `coder` references `core.read_file`, **When** the system resolves the reference, **Then** it loads the tool from the core plugin without ambiguity.
 3. **Given** a prompt file is declared inside a plugin, **When** another plugin's agent references it as `plugin_name.prompt_name`, **Then** the correct prompt content is loaded from the declaring plugin.
 4. **Given** a resource is referenced by its unqualified local name (no dot), **When** it belongs to the same plugin, **Then** the system resolves it to the owning plugin's resource without requiring an explicit prefix.
 

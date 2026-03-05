@@ -72,14 +72,14 @@ class TestLoadManifestSuccess:
             "plugin.yaml",
             """
             schema_version: 1
-            name: koder
+            name: coder
             description: Expert coder.
             tools:
               write_file: "tools/filesystem.py:WriteFileTool"
               git_diff: "tools/git.py:GitDiffTool"
             agents:
-              koder:
-                module: "agents/koder_agent.py"
+              coder:
+                module: "agents/coder_agent.py"
                 entry_fn: "create_flow"
                 description: "Writes code."
                 tools: [write_file, git_diff]
@@ -88,14 +88,14 @@ class TestLoadManifestSuccess:
         manifest = load_manifest(p)
 
         assert manifest.schema_version == 1
-        assert manifest.name == "koder"
+        assert manifest.name == "coder"
         assert manifest.tools == {
             "write_file": "tools/filesystem.py:WriteFileTool",
             "git_diff": "tools/git.py:GitDiffTool",
         }
-        assert "koder" in manifest.agents
-        assert manifest.agents["koder"]["module"] == "agents/koder_agent.py"
-        assert manifest.agents["koder"]["entry_fn"] == "create_flow"
+        assert "coder" in manifest.agents
+        assert manifest.agents["coder"]["module"] == "agents/coder_agent.py"
+        assert manifest.agents["coder"]["entry_fn"] == "create_flow"
 
     def test_name_defaults_to_parent_directory(self, tmp_path):
         plugin_dir = tmp_path / "my_cool_plugin"

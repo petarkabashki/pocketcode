@@ -75,15 +75,20 @@ class NamespaceRegistry(Generic[T]):
 
     def resolve(self, ref: str, *, context_plugin: Optional[str] = None) -> T:
         """
-        Resolve a qualified (``"plugin.name"``) or unqualified (``"name"``) reference.
+        Resolve a qualified (``"plugin.name"`` or ``"plugin::name"``) or unqualified
+        (``"name"``) reference.
 
         Resolution rules:
+            - ``"plugin::name"`` is normalised to ``"plugin.name"`` before lookup.
             - ``"plugin.name"`` → direct ``_flat`` lookup; ``RegistryError`` if missing.
             - ``"name"`` with *context_plugin* → tries local plugin first, then global.
             - ``"name"`` (1 owner) → ``WARNING`` log; resolves.
             - ``"name"`` (2+ owners) → ``RegistryError``.
             - ``"name"`` (0 owners) → ``RegistryError``.
         """
+        # Normalise :: delimiter to . so manifests using either form work.
+        ref = ref.replace("::", ".")
+
         if "." in ref:
             impl = self._flat.get(ref)
             if impl is None:
@@ -137,8 +142,10 @@ class NamespaceRegistry(Generic[T]):
 
         This supports both:
         - ``"plugin.name" in registry`` → exact qualified lookup
+        - ``"plugin::name" in registry`` → normalised to ``"plugin.name"``
         - ``"name" in registry`` → True if registered under any plugin
         """
+        ref = ref.replace("::", ".")
         if "." in ref:
             return ref in self._flat
         return bool(self._bare.get(ref))
@@ -208,7 +215,7 @@ class RegistryHolder:
 
         # RIGHT — snapshot captured once at session start
         registry = holder.get()
-        flow = registry.agents.resolve("core.koder").flow_instance
+        flow = registry.agents.resolve("core.coder").flow_instance
         flow.run(shared)
     """
 

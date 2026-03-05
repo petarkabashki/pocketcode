@@ -5,7 +5,7 @@
 
 ## Summary
 
-This refactor transforms the application into a framework for user-supplied agent plugins. Each agent (e.g., Arkitekt, Koder) is no longer hardcoded in `mode_flows/` but is a self-contained folder containing its persona and tools. Orchestration is strictly guided by the `pocketflow.py` implementation, using its native `Flow` and `Node` structures with minimal custom extensions.
+This refactor transforms the application into a framework for user-supplied agent plugins. Each agent (e.g., architect, coder) is no longer hardcoded in `mode_flows/` but is a self-contained folder containing its persona and tools. Orchestration is strictly guided by the `pocketflow.py` implementation, using its native `Flow` and `Node` structures with minimal custom extensions.
 
 ## Technical Context
 
@@ -17,7 +17,7 @@ This refactor transforms the application into a framework for user-supplied agen
 **Project Type**: CLI Framework / Multi-Agent Orchestrator  
 **Performance Goals**: Plugin discovery and loading under 100ms.  
 **Constraints**: No circular imports between `core` and `plugins`.  
-**Scale/Scope**: Refactoring all 4 existing modes (Arkitekt, Koder, Asker, Micromanager) into plugins.
+**Scale/Scope**: Refactoring all 4 existing modes (architect, coder, Asker, Micromanager) into plugins.
 
 ## Constitution Check
 
@@ -48,12 +48,12 @@ pocketcode/
 ├── core/                # Core orchestration (WorkflowRuntime, Engine)
 ├── tools/               # Shared Global Tools (Filesystem, Git, etc.)
 ├── plugins/             # Self-contained Plugins
-│   ├── arkitekt/
+│   ├── architect/
 │   │   ├── agent.yaml
 │   │   ├── prompts/
 │   │   ├── tools/
 │   │   └── workflows/
-│   ├── koder/
+│   ├── coder/
 │   └── ...
 └── mode_flows/          # [DELETED/MIGRATED]
 ```

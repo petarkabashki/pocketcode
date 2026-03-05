@@ -46,3 +46,61 @@ def test_pocketflow_plugin_discovery(monkeypatch):
     
     # Optional: verify other metadata if needed
     assert agent.name == "template-agent"
+
+
+def test_agent_namespace_migration(monkeypatch):
+    """
+    Verify that after the 004-agents-to-plugins migration:
+    - core::react is the only agent registered under 'core'
+    - coder::coder is registered under 'coder'
+    - architect::architect is registered under 'architect'
+    - asker::ask is registered under 'asker'
+    - Old agents core::coder, core::architect, core::ask are absent
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "dummy-key")
+
+    workspace_root = Path(__file__).parent.parent.parent.resolve()
+    config = load_settings(workspace_root=workspace_root)
+
+    plugin_paths = config.get("runtime", {}).get("plugin_paths", [])
+    if "pocketcode/plugins" not in plugin_paths:
+        plugin_paths.append("pocketcode/plugins")
+    config.setdefault("runtime", {})["plugin_paths"] = plugin_paths
+
+    plugin_manager = PluginManager(config=config, workspace_root=workspace_root)
+    plugin_manager.load()
+
+    all_agents = plugin_manager.agents.list_all()
+
+    # New namespaces must be present (registry stores as "plugin.agent" with dot)
+    assert "core.react" in all_agents, \
+        f"core.react must be registered. Found: {all_agents}"
+    assert "coder.coder" in all_agents, \
+        f"coder.coder must be registered. Found: {all_agents}"
+    assert "architect.architect" in all_agents, \
+        f"architect.architect must be registered. Found: {all_agents}"
+    assert "asker.ask" in all_agents, \
+        f"asker.ask must be registered. Found: {all_agents}"
+
+    # Also verify :: notation resolves correctly (normalised to . internally)
+    assert "core::react" in plugin_manager.agents, \
+        "core::react must be accessible via :: notation"
+    assert "coder::coder" in plugin_manager.agents, \
+        "coder::coder must be accessible via :: notation"
+    assert "architect::architect" in plugin_manager.agents, \
+        "architect::architect must be accessible via :: notation"
+    assert "asker::ask" in plugin_manager.agents, \
+        "asker::ask must be accessible via :: notation"
+
+    # Old stale references must be absent
+    assert "core.coder" not in all_agents, \
+        "core.coder must NOT be registered after migration"
+    assert "core.architect" not in all_agents, \
+        "core.architect must NOT be registered after migration"
+    assert "core.ask" not in all_agents, \
+        "core.ask must NOT be registered after migration"
+
+    # core::react must be a programmatic pocketflow agent
+    react_agent = plugin_manager.agents["core::react"]
+    assert isinstance(react_agent.flow_instance, Flow), \
+        "core::react flow_instance must be a pocketflow.Flow"

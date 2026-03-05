@@ -1,14 +1,24 @@
 schema_version: 1
-name: "asker"
-description: "Clarification agent that prompts the user for missing information and feeds answers back into the task context."
+name: asker
+description: Clarification agent that prompts the user for missing information and feeds answers back into the task context.
 
 tools:
-  ask_user: "tools/user_input.py:AskUserInputTool"
+  ask_user: tools/user_input.py:AskUserInputTool
 
 agents:
-  asker:
-    module: "agents/asker_agent.py"
-    entry_fn: "create_flow"
-    description: "Asks the user clarifying questions to fill in missing requirements before other agents proceed."
-    tools: [ask_user]
-    prompts: ["prompts/system.md"]
+  ask:
+    description: Repository Q&A and clarification specialist.
+    module: agents/asker_agent.py
+    entry_fn: create_flow
+    llm_profile: gemini_fast
+    tools:
+      - ask_user
+      - core::read_file
+      - core::list_files
+      - core::glob_files
+      - core::search_code
+    handoff_agents:
+      - coder::coder
+      - architect::architect
+    prompts:
+      - prompts/system.md

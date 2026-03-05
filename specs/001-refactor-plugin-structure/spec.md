@@ -47,7 +47,7 @@ Redundant flow logic in `pocketcode/mode_flows/` is removed or migrated to the n
 
 **Acceptance Scenarios**:
 
-1. **Given** the new architecture is in place, **When** specific modes (arkitekt, koder, etc.) are called, **Then** they execute via the `plugins` workflow system rather than hardcoded Python flows.
+1. **Given** the new architecture is in place, **When** specific modes (architect, coder, etc.) are called, **Then** they execute via the `plugins` workflow system rather than hardcoded Python flows.
 
 ### Edge Cases
 

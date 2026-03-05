@@ -65,7 +65,7 @@ A PocketFlow `Flow` owned by a plugin. Spans from a single-node LLM call to a mu
 | `local_name` | `str` | YES | Key as declared in the plugin manifest `agents:` section. |
 | `plugin` | `str` | YES | Owning plugin name. |
 | `description` | `str` | NO | Human-readable purpose. |
-| `module` | `str` | YES | Relative path to the Python file containing the factory (e.g., `agents/koder_agent.py`). |
+| `module` | `str` | YES | Relative path to the Python file containing the factory (e.g., `agents/coder_agent.py`). |
 | `entry_fn` | `str` | YES | Name of the zero-argument factory function that constructs and returns the PocketFlow `Flow`. |
 | `flow_instance` | `Flow \| None` | runtime | Populated by calling `entry_fn()` at registration time. `None` until loaded. |
 | `llm_profile` | `str \| None` | NO | LLM profile name passed to the factory via shared store or closure. |
