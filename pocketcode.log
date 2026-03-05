@@ -141,3 +141,5 @@ KeyError: "Unknown LLM profile 'gemini_default'."
 2026-03-04 23:43:33,527 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
 2026-03-04 23:43:33,527 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
 2026-03-04 23:43:37,380 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 00:13:51,840 - pocketcode.core.plugin_manager - INFO - Loading plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 00:13:51,844 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=1, tools=15, agents=4, workflows=2, components=6, node_definitions=5, node_handlers=0, llm_profiles=0
