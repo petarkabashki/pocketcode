@@ -28,5 +28,5 @@ class HelloTool(BaseTool):
     def execute(self, **kwargs) -> Any:
         name = kwargs.get("name", "World")
         greeting = f"Hello, {name}!"
-        print(greeting)
+        logger.info("Executing HelloTool with name: %s", name)
         return {"success": True, "message": greeting}

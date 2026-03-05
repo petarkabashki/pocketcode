@@ -1,12 +1,80 @@
 #%% pocketcode/core/interfaces.py
+from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Union
 
 # Import the factory function (will be updated later to return BaseLlmClient)
 # from pocketcode.core.llm_factory import create_llm_client # Commented out temporarily
 
+# Guard against circular imports if pocketflow is imported here
+# from pocketflow import Flow, AsyncFlow 
+
 logger = logging.getLogger(__name__)
+
+@dataclass
+class Plugin:
+    """Standard container for plugin resources."""
+    name: str
+    description: str = ""
+    version: str = "1.0.0"
+    author: str = ""
+    tools: List[Callable] = field(default_factory=list)
+    prompts: Dict[str, str] = field(default_factory=dict)
+    agents: Dict[str, Any] = field(default_factory=dict) # Union[Flow, AsyncFlow]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+class PluginContext:
+    """Passed to each Flow in shared['_plugin']."""
+    def __init__(self, plugin: Plugin, runtime: Any):
+        self.name = plugin.name
+        self.tools = {}
+        for t in plugin.tools:
+            # Handle both functions (has __name__) and classes/instances with .name
+            name = getattr(t, "__name__", getattr(t, "name", str(t)))
+            self.tools[name] = t
+        self.prompts = plugin.prompts
+        self._runtime = runtime
+
+    def get_prompt(self, name: str) -> str:
+        """Retrieve a local prompt by name."""
+        if name in self.prompts:
+            return self.prompts[name]
+        
+        # Fallback: try to resolve via runtime/filesystem if not pre-loaded
+        try:
+            from pocketcode.core.prompt_loader import resolve_prompt_bundle
+            from pathlib import Path
+            
+            # Use self.name as the plugin key
+            plugin_root_str = getattr(self._runtime, "_plugins", {}).plugin_roots.get(self.name)
+            if not plugin_root_str:
+                 return ""
+                 
+            plugin_root = Path(plugin_root_str)
+            prompt, _ = resolve_prompt_bundle(
+                {}, 
+                base_dir=plugin_root,
+                default_files=[f"prompts/{name}.md", f"prompts/{name}.txt"]
+            )
+            return prompt
+        except Exception:
+            return ""
+
+    def call_tool(self, tool_name: str, **kwargs) -> Any:
+        """Call a plugin-local tool."""
+        if tool_name in self.tools:
+            tool = self.tools[tool_name]
+            if hasattr(tool, "execute"):
+                return tool.execute(**kwargs)
+            return tool(**kwargs)
+        # Fallback to runtime tool execution if not local
+        return self._runtime.execute_tool(tool_name, **kwargs)
+
+def get_plugin_context(shared: Dict[str, Any]) -> Optional[PluginContext]:
+    """Helper to retrieve PluginContext from pocketflow shared store."""
+    return shared.get("_plugin")
 
 # --- LLM Client Interface ---
 class BaseLlmClient(ABC):

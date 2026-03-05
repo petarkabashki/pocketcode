@@ -164,3 +164,402 @@ KeyError: "Unknown LLM profile 'gemini_default'."
 2026-03-05 01:15:38,932 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
 2026-03-05 01:15:38,933 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
 2026-03-05 01:15:38,933 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:15:48,143 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:15:48,146 - google_genai.models - INFO - AFC remote call 1 is done.
+2026-03-05 01:16:18,919 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:16:18,920 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:16:18,925 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:16:18,925 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:16:18,926 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:16:18,927 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:16:18,928 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:16:18,928 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:16:18,929 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-05 01:16:18,963 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-05 01:16:18,963 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-05 01:16:18,963 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:16:30,355 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:16:30,356 - google_genai.models - INFO - AFC remote call 1 is done.
+2026-03-05 01:16:42,032 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:16:42,033 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:16:42,036 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:16:42,036 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:16:42,037 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:16:42,038 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:16:42,039 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:16:42,039 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:16:42,041 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-05 01:16:42,076 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-05 01:16:42,076 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-05 01:16:42,076 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:16:45,408 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:16:45,411 - google_genai.models - INFO - AFC remote call 1 is done.
+2026-03-05 01:17:21,306 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:17:21,307 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:17:21,312 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:17:21,312 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:17:21,313 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:17:21,313 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:17:21,314 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:17:21,315 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:17:21,316 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-05 01:17:21,351 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-05 01:17:21,351 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-05 01:17:21,351 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:17:25,243 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:17:25,245 - google_genai.models - INFO - AFC remote call 1 is done.
+2026-03-05 01:17:25,247 - pocketcode_dynamic_plugin_5950649863803687192 - INFO - Executing HelloTool with name: GitHub Copilot
+2026-03-05 01:17:25,251 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:17:29,440 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:17:29,441 - google_genai.models - INFO - AFC remote call 1 is done.
+2026-03-05 01:17:51,884 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:17:51,885 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:17:51,888 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:17:51,888 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:17:51,889 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:17:51,890 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:17:51,891 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:17:51,891 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:17:51,892 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-05 01:17:51,892 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-05 01:17:51,938 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-05 01:17:51,938 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-05 01:17:51,938 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:17:56,680 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:17:56,686 - pocketcode_dynamic_plugin_1028381834887461121 - INFO - Executing HelloTool with name: GitHub Copilot
+2026-03-05 01:17:56,692 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:18:01,151 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:18:25,536 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:18:25,537 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:18:25,540 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:18:25,540 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:18:25,541 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:18:25,542 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:18:25,543 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:18:25,544 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:19:07,674 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:19:07,675 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:19:07,678 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:19:07,678 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:19:07,679 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:19:07,680 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:19:07,681 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:19:07,681 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:20:19,747 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:20:19,748 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:20:19,751 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:20:19,751 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:20:19,751 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:20:19,752 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:20:19,753 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:20:19,754 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:20:19,755 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-05 01:20:19,790 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-05 01:20:19,790 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-05 01:20:19,790 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:20:24,958 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:20:24,960 - google_genai.models - INFO - AFC remote call 1 is done.
+2026-03-05 01:20:24,962 - pocketcode_dynamic_plugin_8675326585448828879 - INFO - Executing HelloTool with name: World
+2026-03-05 01:20:24,966 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:20:29,767 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:20:29,769 - google_genai.models - INFO - AFC remote call 1 is done.
+2026-03-05 01:22:08,083 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:22:08,084 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:22:08,087 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:22:08,087 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:22:08,088 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:22:08,089 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:22:08,090 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:22:08,090 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:28:39,626 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:28:39,627 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:28:39,630 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:28:39,630 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:28:39,631 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:28:39,632 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:28:39,633 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:28:39,633 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:29:09,517 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 01:29:09,518 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 01:29:09,521 - pocketcode.core.plugin_manager - INFO - Loading legacy plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 01:29:09,521 - pocketcode.core.plugin_manager - WARNING - Plugin 'core' contains legacy 'components' section; it is ignored in agent-only runtime.
+2026-03-05 01:29:09,521 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 01:29:09,522 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 01:29:09,523 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'template-agent' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 01:29:09,523 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=17, agents=5, llm_profiles=0
+2026-03-05 01:30:26,322 - pocketcode.core.llm_factory - INFO - Attempting to create LLM client wrapper for provider: gemini
+2026-03-05 01:30:26,322 - google_genai._api_client - WARNING - Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-03-05 01:30:26,401 - pocketcode.core.llm_providers.gemini - INFO - GeminiLlmProvider initialized.
+2026-03-05 01:30:26,402 - pocketcode.core.llm_factory - INFO - Successfully created GeminiLlmProvider.
+2026-03-05 01:30:26,402 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:30:30,454 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:31:22,618 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:31:32,819 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:32:29,668 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:32:33,745 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:32:51,099 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:32:56,567 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 01:35:27,754 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-03-05 01:35:31,537 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent "HTTP/1.1 200 OK"
+2026-03-05 20:06:50,433 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 20:06:50,434 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 20:06:50,435 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 20:06:50,436 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 20:06:50,438 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 20:06:50,440 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 20:06:50,440 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 20:06:50,440 - __main__ - ERROR - Request processing failed: 'HelloTool' object has no attribute '__name__'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/main.py", line 185, in run
+    response = engine.process_request(user_input=request, cli_context=cli_context)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/engine.py", line 192, in process_request
+    self._agent_runtime.run(shared_store)
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/agent_runtime.py", line 65, in run
+    transition = self._run_agent_turn(agent_name=agent_name, shared_store=shared_store)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/agent_runtime.py", line 128, in _run_agent_turn
+    shared_store["_plugin"] = PluginContext(plugin, self._tool_runtime)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/interfaces.py", line 32, in __init__
+    self.tools = {t.__name__: t for t in plugin.tools}
+                  ^^^^^^^^^^
+AttributeError: 'HelloTool' object has no attribute '__name__'. Did you mean: '__ne__'?
+2026-03-05 20:06:59,954 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 20:06:59,955 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 20:06:59,955 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 20:06:59,956 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 20:06:59,958 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 20:06:59,959 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 20:06:59,959 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 20:06:59,960 - pocketcode.core.agent_runtime - ERROR - Error executing PocketFlow agent 'template-agent': PluginContext.call_tool() got multiple values for argument 'name'
+Traceback (most recent call last):
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/core/agent_runtime.py", line 205, in _run_pocketflow_agent
+    outcome = agent_definition.flow_instance.run(shared_store)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketflow.py", line 16, in run
+    return self._run(shared)
+           ^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketflow.py", line 50, in _run
+    def _run(self,shared): p=self.prep(shared); o=self._orch(shared); return self.post(shared,p,o)
+                                                  ^^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketflow.py", line 48, in _orch
+    while curr: curr.set_params(p); last_action=curr._run(shared); curr=copy.copy(self.get_next_node(curr,last_action))
+                                                ^^^^^^^^^^^^^^^^^
+  File "/media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template/agent.py", line 18, in _run
+    result = ctx.call_tool("hello_world", name="PocketFlow User")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: PluginContext.call_tool() got multiple values for argument 'name'
+2026-03-05 20:07:09,139 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 20:07:09,140 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 20:07:09,140 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 20:07:09,141 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 20:07:09,143 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 20:07:09,144 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 20:07:09,144 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 20:07:09,144 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,144 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,144 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,144 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,144 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,144 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,145 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,146 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,146 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,146 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,146 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,146 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,146 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,147 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,148 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,149 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,150 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,151 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,151 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,151 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:09,151 - pocketcode_dynamic_plugin_6512818251435538878.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,432 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 20:07:25,433 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 20:07:25,434 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 20:07:25,435 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 20:07:25,436 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 20:07:25,437 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 20:07:25,437 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 20:07:25,438 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,438 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,438 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,438 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,438 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,438 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,439 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,439 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,439 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,439 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,439 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,439 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,439 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,440 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,441 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,442 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,443 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,444 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:25,445 - pocketcode_dynamic_plugin_4347887811765008815.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,696 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'arkitekt' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/arkitekt
+2026-03-05 20:07:39,699 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-05 20:07:39,699 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-05 20:07:39,700 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'koder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/koder
+2026-03-05 20:07:39,701 - pocketcode.core.plugin_manager - INFO - Loading agent plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-05 20:07:39,702 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-05 20:07:39,702 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=9, agents=5, llm_profiles=0
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,703 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,704 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,705 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,706 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,707 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,708 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User
+2026-03-05 20:07:39,709 - pocketcode_dynamic_plugin_5416586107337565567.tools.hello - INFO - Executing HelloTool with name: PocketFlow User

@@ -139,7 +139,6 @@ class PocketCodeTextualApp(App[None]):
             set(
                 commands
                 + self._engine.list_agents()
-                + self._engine.list_components()
                 + self._engine.list_llm_profiles()
             )
         )

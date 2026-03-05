@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List
 
 import yaml
 
+from pocketcode.core.interfaces import Plugin, PluginContext
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
 from pocketcode.core.runtime_models import AgentDefinition
 
@@ -24,6 +25,7 @@ class PluginManager:
         self.agents: Dict[str, AgentDefinition] = {}
         self.llm_profiles: Dict[str, Dict[str, Any]] = {}
         self.plugin_roots: Dict[str, Path] = {}
+        self.plugins: Dict[str, Plugin] = {}
 
     @property
     def workspace_root(self) -> Path:
@@ -34,23 +36,104 @@ class PluginManager:
         self.agents.clear()
         self.llm_profiles.clear()
         self.plugin_roots.clear()
+        self.plugins.clear()
 
     def load(self) -> None:
         self.clear()
 
         for plugin_root in self._iter_plugin_roots():
             try:
+                # Priority 1: factory-based get_plugin() - ALWAYS takes precedence
+                # Check for __init__.py FIRST to handle factory-based plugins that might also have an agent.yaml
+                if (plugin_root / "__init__.py").is_file():
+                    loaded_factory = self._load_factory_plugin(plugin_root)
+                    if loaded_factory:
+                        continue
+                
+                # Priority 2: agent.yaml or plugin.yaml
                 self._load_plugin(plugin_root)
             except Exception as exc:
                 logger.error("Failed loading plugin at %s: %s", plugin_root, exc, exc_info=True)
 
         logger.info(
-            "Plugin load complete. plugins=%s, tools=%s, agents=%s, llm_profiles=%s",
+            "Plugin load complete. plugins=%d, tools=%d, agents=%d, llm_profiles=%d",
             len(self.plugin_roots),
             len(self.tools),
             len(self.agents),
             len(self.llm_profiles),
         )
+
+    def _load_factory_plugin(self, plugin_root: Path) -> bool:
+        """Attempts to load a plugin using the get_plugin(config) factory function."""
+        init_path = plugin_root / "__init__.py"
+        try:
+            # We need to treat plugin_root as a module if it's within a package
+            # Let's use _load_from_file to get the module and check for get_plugin
+            module = self._load_module_from_file(init_path)
+            factory = getattr(module, "get_plugin", None)
+            
+            if not factory or not callable(factory):
+                logger.debug(f"No get_plugin(config) found in {init_path}")
+                return False
+                
+            plugin_config = self._config.get("plugins", {}).get(plugin_root.name, {})
+            plugin: Plugin = factory(plugin_config)
+            
+            if not isinstance(plugin, Plugin):
+                logger.warning(f"Plugin factory at {plugin_root} returned {type(plugin)}, expected Plugin instance.")
+                return False
+                
+            plugin_name = plugin.name or plugin_root.name
+            self.plugin_roots[plugin_name] = plugin_root
+            self.plugins[plugin_name] = plugin
+            
+            logger.info("Loading factory plugin '%s' from %s", plugin_name, plugin_root)
+            
+            # Register tools
+            for tool in plugin.tools:
+                tool_name = getattr(tool, "__name__", str(tool))
+                if tool_name in self.tools:
+                    logger.warning(f"Plugin '{plugin_name}' tool '{tool_name}' collides with existing tool. Overwriting.")
+                self.tools[tool_name] = tool
+            
+            # Register agents (Flows)
+            for agent_name, flow in plugin.agents.items():
+                self.agents[agent_name] = AgentDefinition(
+                    name=agent_name,
+                    description=plugin.description or f"Programmatic agent from {plugin_name}",
+                    is_programmatic=True,
+                    flow_instance=flow,
+                    metadata={
+                        "plugin_name": plugin_name,
+                        "plugin_root": str(plugin_root),
+                        "version": plugin.version,
+                        "author": plugin.author
+                    }
+                )
+                
+            # Register LLM profiles from metadata if present
+            if "llm_profiles" in plugin.metadata:
+                self._load_plugin_llm_profiles(plugin_name, plugin.metadata)
+                
+            return True
+            
+        except Exception as exc:
+            logger.error(f"Factory load failed for {plugin_root}: {exc}", exc_info=True)
+            return False
+
+    def _load_module_from_file(self, file_path: Path) -> Any:
+        module_name = f"pocketcode_dynamic_plugin_{abs(hash(str(file_path)))}"
+
+        if module_name in sys.modules:
+            return sys.modules[module_name]
+        
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if not spec or not spec.loader:
+            raise ImportError(f"Unable to create import spec for {file_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
 
     def resolve_tools_for_agent(self, agent_name: str) -> List[str]:
         agent = self.agents.get(agent_name)
@@ -94,8 +177,8 @@ class PluginManager:
             if not base_path.exists():
                 continue
 
-            # Check if current base_path itself is a plugin (has agent.yaml or plugin.yaml)
-            if (base_path / "agent.yaml").is_file() or (base_path / "plugin.yaml").is_file():
+            # Check if current base_path itself is a plugin (has __init__.py, agent.yaml, or plugin.yaml)
+            if (base_path / "__init__.py").is_file() or (base_path / "agent.yaml").is_file() or (base_path / "plugin.yaml").is_file():
                 resolved = base_path.resolve()
                 if resolved not in seen:
                     seen.add(resolved)
@@ -104,7 +187,7 @@ class PluginManager:
 
             # Otherwise, iterate through children
             for child in sorted(base_path.iterdir()):
-                if child.is_dir() and ((child / "agent.yaml").is_file() or (child / "plugin.yaml").is_file()):
+                if child.is_dir() and ((child / "__init__.py").is_file() or (child / "agent.yaml").is_file() or (child / "plugin.yaml").is_file()):
                     resolved = child.resolve()
                     if resolved not in seen:
                         seen.add(resolved)
@@ -369,6 +452,8 @@ class PluginManager:
             file_path = (plugin_root / path_part).resolve()
             if file_path.is_file():
                 return self._load_from_file(file_path, object_name)
+            else:
+                raise FileNotFoundError(f"Tool implementation file not found: {file_path}")
 
         if "." not in candidate:
             raise ValueError(

@@ -3,15 +3,28 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict
 
-from pocketflow import Node
+from pocketflow import Node, Flow, AsyncFlow
 
 from pocketcode.core.prompt_loader import coerce_str_list
-from pocketcode.core.runtime_models import WorkflowNodeDefinition
+from pocketcode.core.runtime_models import WorkflowNodeDefinition, AgentDefinition
 
 if TYPE_CHECKING:
     from pocketcode.core.workflow_runtime import WorkflowRuntime
 
 logger = logging.getLogger(__name__)
+
+
+class PocketFlowAgent(Node):
+    """Bridge between AgentDefinition and pocketflow.Flow/AsyncFlow."""
+    def __init__(self, agent_definition: AgentDefinition, runtime: "WorkflowRuntime"):
+        super().__init__()
+        self.agent_definition = agent_definition
+        self.runtime = runtime
+        self.flow: Flow | AsyncFlow = agent_definition.flow_instance
+
+    def _run(self, shared: Dict[str, Any]) -> Any:
+        # The runtime will handle the orchestration call to this node
+        return self.flow.run(shared)
 
 
 class BaseRuntimeNode(Node):
