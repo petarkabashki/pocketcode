@@ -300,7 +300,7 @@ runtime:
     tool_policies:
       execute_command: confirm
     agent_policies:
-      koder:
+      Coder:
         default_policy: confirm
         tool_policies:
           git_push: deny

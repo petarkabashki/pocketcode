@@ -2,7 +2,7 @@
 name: single_agent
 description: Simple one-agent loop with tool calling.
 start: start
-default_agent: koder
+default_agent: Coder
 prompt_file: prompts/flows/single_agent.md
 nodes:
   start:

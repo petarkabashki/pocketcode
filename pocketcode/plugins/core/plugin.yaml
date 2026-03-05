@@ -31,7 +31,7 @@ node_definitions:
     kind: end
 
 components:
-  koder:
+  Coder:
     kind: agent
     description: Code implementation and editing specialist.
     llm_profile: gemini_default
@@ -50,11 +50,11 @@ components:
       - git_pull
       - git_push
     handoff_agents:
-      - arkitekt
-      - asker
-    prompt_file: prompts/agents/koder.md
+      - Architect
+      - Ask
+    prompt_file: prompts/agents/coder.md
 
-  arkitekt:
+  Architect:
     kind: agent
     description: Architecture and planning specialist.
     llm_profile: gemini_default
@@ -64,11 +64,11 @@ components:
       - glob_files
       - search_code
     handoff_agents:
-      - koder
-      - asker
-    prompt_file: prompts/agents/arkitekt.md
+      - Coder
+      - Ask
+    prompt_file: prompts/agents/architect.md
 
-  asker:
+  Ask:
     kind: agent
     description: Repository Q&A specialist.
     llm_profile: gemini_fast
@@ -78,9 +78,9 @@ components:
       - glob_files
       - search_code
     handoff_agents:
-      - koder
-      - arkitekt
-    prompt_file: prompts/agents/asker.md
+      - Coder
+      - Architect
+    prompt_file: prompts/agents/ask.md
 
   micromanager:
     kind: agent
@@ -93,22 +93,22 @@ components:
       - glob_files
       - search_code
     handoff_agents:
-      - koder
-      - arkitekt
-      - asker
+      - Coder
+      - Architect
+      - Ask
     default_handoff_policy:
       context_mode: whole
       return_to_caller: false
     handoff_policies:
-      koder:
+      Coder:
         context_mode: delegated
         return_to_caller: true
         return_transition: continue
-      arkitekt:
+      Architect:
         context_mode: delegated
         return_to_caller: true
         return_transition: continue
-      asker:
+      Ask:
         context_mode: whole
         return_to_caller: false
     prompt_file: prompts/agents/micromanager.md

@@ -42,7 +42,7 @@ llm:
 runtime:
   log_level: INFO
   default_workflow: orchestrator
-  default_agent: asker
+  default_agent: Ask
   llm_overrides:
     agents: {}
     nodes: {}
