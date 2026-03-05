@@ -120,6 +120,13 @@ class AgentRuntime:
         shared_store["active_agent"] = agent_name
         shared_store.setdefault("agent_trace", []).append({"agent": agent_name})
 
+        # Inject PluginContext if available for this agent
+        plugin_name = agent_definition.metadata.get("plugin_name")
+        if plugin_name and plugin_name in self._plugins.plugins:
+            from pocketcode.core.interfaces import PluginContext
+            plugin = self._plugins.plugins[plugin_name]
+            shared_store["_plugin"] = PluginContext(plugin, self._tool_runtime)
+
         transition: str | None = None
         transition, pre_halt = self._run_handler_references(
             list(agent_definition.pre_handlers),
@@ -146,26 +153,33 @@ class AgentRuntime:
             )
             return str(transition or "error")
 
-        execution_mode = str(agent_definition.execution_mode or "llm").strip().lower()
-
-        if execution_mode == "deterministic":
-            transition = self._run_deterministic_agent(
-                agent_name=agent_name,
-                agent_definition=agent_definition,
-                shared_store=shared_store,
-            )
-        elif execution_mode == "composite":
-            transition = self._run_composite_agent(
+        if agent_definition.is_programmatic and agent_definition.flow_instance:
+            transition = self._run_pocketflow_agent(
                 agent_name=agent_name,
                 agent_definition=agent_definition,
                 shared_store=shared_store,
             )
         else:
-            transition = self._run_llm_agent(
-                agent_name=agent_name,
-                agent_definition=agent_definition,
-                shared_store=shared_store,
-            )
+            execution_mode = str(agent_definition.execution_mode or "llm").strip().lower()
+
+            if execution_mode == "deterministic":
+                transition = self._run_deterministic_agent(
+                    agent_name=agent_name,
+                    agent_definition=agent_definition,
+                    shared_store=shared_store,
+                )
+            elif execution_mode == "composite":
+                transition = self._run_composite_agent(
+                    agent_name=agent_name,
+                    agent_definition=agent_definition,
+                    shared_store=shared_store,
+                )
+            else:
+                transition = self._run_llm_agent(
+                    agent_name=agent_name,
+                    agent_definition=agent_definition,
+                    shared_store=shared_store,
+                )
 
         transition, _ = self._run_handler_references(
             list(agent_definition.post_handlers),
@@ -176,6 +190,36 @@ class AgentRuntime:
         )
 
         return str(transition or "continue")
+
+    def _run_pocketflow_agent(
+        self,
+        *,
+        agent_name: str,
+        agent_definition: AgentDefinition,
+        shared_store: Dict[str, Any],
+    ) -> str:
+        """Executes a programmatic pocketflow.Flow-based agent."""
+        try:
+            # PocketFlow returns the transition string or None
+            # T011, T028 implementation
+            outcome = agent_definition.flow_instance.run(shared_store)
+            
+            if isinstance(outcome, str):
+                return outcome
+            
+            if isinstance(outcome, dict):
+                 return self._apply_agent_decision(
+                    decision=outcome,
+                    agent_name=agent_name,
+                    shared_store=shared_store,
+                )
+            
+            # Default to continue if nothing specific returned but flow finished
+            return "continue"
+        except Exception as e:
+            logger.exception(f"Error executing PocketFlow agent '{agent_name}': {e}")
+            shared_store["error_message"] = f"Flow execution failed: {e}"
+            return "error"
 
     def _run_deterministic_agent(
         self,

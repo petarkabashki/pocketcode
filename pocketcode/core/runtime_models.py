@@ -21,4 +21,6 @@ class AgentDefinition:
     post_handlers: List[str] = field(default_factory=list)
     handoff_policies: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     default_handoff_policy: Dict[str, Any] = field(default_factory=dict)
+    is_programmatic: bool = False
+    flow_instance: Any = None
     metadata: Dict[str, Any] = field(default_factory=dict)
