@@ -11,6 +11,8 @@ Pocketcode now uses a small plugin-first core:
 - Flows can call other flows as nodes for arbitrarily nested composition.
 - Node/flow/agent prompts are external Markdown files with `{{ include:path.md }}` support.
 - Node and flow execution support Python `pre`, `steps`, and `post` handlers.
+- Runtime execution compiles each workflow node kind (`agent`, `tool`, `handoff`, etc.) into dedicated PocketFlow node executors for cleaner separation of hooks and core node behavior.
+- Agents now have first-class per-agent config for `llm_profile`, prompt, hooks (`pre|steps|post`), execution mode (`node|flow`), and handoff policies.
 - Tool definitions and routing payloads are exchanged with LLMs as YAML.
 - CLI now uses a Textual TUI for interactive mode.
 - CLI can switch workflow, agent, and LLM profile at runtime.

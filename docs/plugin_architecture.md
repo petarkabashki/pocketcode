@@ -36,9 +36,22 @@ components:
   planner:
     kind: agent
     llm_profile: gemini_fast
+    execution_mode: node
     tools: [read_file]
     prompt_file: prompts/agents/planner.md
     handoff_agents: [coder]
+    pre:
+      - nodes/hooks.py:before_planner_turn
+    post:
+      - nodes/hooks.py:after_planner_turn
+    default_handoff_policy:
+      context_mode: whole
+      return_to_caller: false
+    handoff_policies:
+      coder:
+        context_mode: delegated
+        return_to_caller: true
+        return_transition: continue
 
 node_definitions:
   analyze_step:
@@ -113,6 +126,11 @@ digraph graph_flow {
 - `end`
 - `noop`
 
+`kind="agent"` nodes can execute in two patterns based on agent config:
+
+- `execution_mode: node` (default): standard LLM/tool/handoff loop.
+- `execution_mode: flow` with `flow: <workflow_name>`: composite agent that runs a nested workflow.
+
 For `python` nodes:
 
 - `handler: path/to/file.py:run` (default is `nodes/<node_id>.py:run`)
@@ -128,6 +146,32 @@ Handlers may return:
 
 - `"<transition>"`
 - `{ transition: "...", updates: {...}, halt: true|false }`
+
+## Runtime Execution Model
+
+Graph workflows are compiled into PocketFlow `Node` objects at runtime.
+
+- Each node kind maps to a dedicated runtime node executor (`agent`, `tool`, `handoff`, `flow`, `python`, `output`, `end`, `start`, `noop`).
+- Hook phases (`pre`, `steps`, `post`) are handled consistently by a shared hooked-node base class before and after each node's core behavior.
+- Tool execution and agent decisions are still routed through the main workflow runtime, but node-kind dispatch is now class-based instead of one monolithic node dispatcher.
+- Agents also support their own hook phases (`pre`, `steps`, `post`) and can independently choose `execution_mode: node|flow`.
+
+## Agent Handoff Policies
+
+Agent config supports policy-based handoffs:
+
+- `default_handoff_policy`: baseline policy for all handoffs from that agent.
+- `handoff_policies.<target_agent>`: per-target overrides.
+
+Supported policy fields:
+
+- `return_to_caller: true|false`
+- `context_mode: whole|delegated`
+- `context`: optional static delegated context payload
+- `return_transition`: transition label used when returning to caller
+- `handoff_transition`: transition label emitted from the handoff node
+
+At decision time, agents can also emit `handoff_policy` and `context` in the YAML response to override policy/context for that handoff.
 
 ## Flow Composition
 

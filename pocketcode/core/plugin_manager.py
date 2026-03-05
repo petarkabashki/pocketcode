@@ -379,11 +379,21 @@ class PluginManager:
         if not tools and definition.get("allowed_tools"):
             tools = definition.get("allowed_tools", [])
         handoff_agents = definition.get("handoff_agents", [])
+        execution_mode = str(definition.get("execution_mode") or definition.get("mode") or "node").strip().lower()
+        composite_workflow = (
+            definition.get("flow")
+            or definition.get("workflow")
+            or definition.get("composite_flow")
+        )
 
         if not isinstance(tools, list):
             tools = []
         if not isinstance(handoff_agents, list):
             handoff_agents = []
+        if execution_mode not in {"node", "flow", "composite"}:
+            execution_mode = "node"
+        if composite_workflow is not None:
+            composite_workflow = str(composite_workflow).strip() or None
 
         if definition.get("tool_packs"):
             logger.warning(
@@ -401,14 +411,52 @@ class PluginManager:
             default_files=[f"prompts/agents/{agent_name}.md"],
         )
 
+        pre_handlers = list(
+            dict.fromkeys(
+                coerce_str_list(definition.get("pre")) + coerce_str_list(definition.get("pre_steps"))
+            )
+        )
+        step_handlers = list(
+            dict.fromkeys(
+                coerce_str_list(definition.get("steps"))
+                + coerce_str_list(definition.get("exec"))
+                + coerce_str_list(definition.get("exec_steps"))
+            )
+        )
+        post_handlers = list(
+            dict.fromkeys(
+                coerce_str_list(definition.get("post")) + coerce_str_list(definition.get("post_steps"))
+            )
+        )
+
+        raw_handoff_policies = definition.get("handoff_policies", {})
+        if not isinstance(raw_handoff_policies, dict):
+            raw_handoff_policies = {}
+        handoff_policies = {
+            str(target): dict(policy)
+            for target, policy in raw_handoff_policies.items()
+            if isinstance(target, str) and isinstance(policy, dict)
+        }
+
+        raw_default_handoff_policy = definition.get("default_handoff_policy", {})
+        if not isinstance(raw_default_handoff_policy, dict):
+            raw_default_handoff_policy = {}
+
         self.agents[agent_name] = AgentDefinition(
             name=agent_name,
             description=str(definition.get("description", "")),
             llm_profile=str(llm_profile) if llm_profile else None,
             tools=[str(item) for item in tools if isinstance(item, str)],
             handoff_agents=[str(item) for item in handoff_agents if isinstance(item, str)],
+            execution_mode="flow" if execution_mode in {"flow", "composite"} else "node",
+            composite_workflow=composite_workflow,
             system_prompt=system_prompt,
             prompt_sources=prompt_sources,
+            pre_handlers=pre_handlers,
+            step_handlers=step_handlers,
+            post_handlers=post_handlers,
+            handoff_policies=handoff_policies,
+            default_handoff_policy=dict(raw_default_handoff_policy),
             metadata={
                 "plugin": plugin_name,
                 "plugin_root": str(plugin_root),
