@@ -22,8 +22,15 @@ class AgentDefinition:
     llm_profile: str | None = None
     tools: List[str] = field(default_factory=list)
     handoff_agents: List[str] = field(default_factory=list)
+    execution_mode: str = "node"
+    composite_workflow: str | None = None
     system_prompt: str = ""
     prompt_sources: List[str] = field(default_factory=list)
+    pre_handlers: List[str] = field(default_factory=list)
+    step_handlers: List[str] = field(default_factory=list)
+    post_handlers: List[str] = field(default_factory=list)
+    handoff_policies: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    default_handoff_policy: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

@@ -86,6 +86,7 @@ components:
     kind: agent
     description: Orchestrator for delegation and handoffs.
     llm_profile: gemini_default
+    execution_mode: node
     tools:
       - read_file
       - list_files
@@ -95,6 +96,21 @@ components:
       - koder
       - arkitekt
       - asker
+    default_handoff_policy:
+      context_mode: whole
+      return_to_caller: false
+    handoff_policies:
+      koder:
+        context_mode: delegated
+        return_to_caller: true
+        return_transition: continue
+      arkitekt:
+        context_mode: delegated
+        return_to_caller: true
+        return_transition: continue
+      asker:
+        context_mode: whole
+        return_to_caller: false
     prompt_file: prompts/agents/micromanager.md
 
   orchestrator:

@@ -43,7 +43,7 @@ digraph orchestrator {
   handoff -> specialist [label="continue"];
   handoff -> output [label="error"];
 
-  specialist -> output [label="continue"];
+  specialist -> orchestrate [label="continue"];
   specialist -> output [label="error"];
 
   output -> end [label="done"];

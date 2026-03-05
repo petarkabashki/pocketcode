@@ -11,30 +11,17 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 
 import yaml
-from pocketflow import Flow, Node
+from pocketflow import Flow
 
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
-from pocketcode.core.prompt_loader import coerce_str_list
+from pocketcode.core.runtime_nodes import BaseRuntimeNode, create_runtime_node
 from pocketcode.core.runtime_models import WorkflowDefinition, WorkflowNodeDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
 
 logger = logging.getLogger(__name__)
 
 _YAML_BLOCK_RE = re.compile(r"```(?:yaml)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
-
-
-class RuntimeGraphNode(Node):
-    def __init__(self, node_id: str, runtime: "WorkflowRuntime"):
-        super().__init__()
-        self._node_id = node_id
-        self._runtime = runtime
-
-    def _run(self, shared_store: Dict[str, Any]) -> str | None:
-        return self._runtime.execute_node(self._node_id, shared_store)
-
-    def run(self, shared_store: Dict[str, Any]) -> str | None:
-        return self._run(shared_store)
 
 
 class BaseWorkflowRuntime:
@@ -65,7 +52,9 @@ class BaseWorkflowRuntime:
         shared_store.setdefault("dynamic_llm_overrides", {})
         shared_store.setdefault("_workflow_stack", [])
         shared_store.setdefault("_active_flow_prompts", [])
+        shared_store.setdefault("_handoff_stack", [])
         shared_store.setdefault("agent_trace", [])
+        shared_store.setdefault("active_handoff_context_mode", "whole")
         shared_store.setdefault("llm_usage_totals", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
         shared_store.setdefault("llm_cost_usd_total", 0.0)
         shared_store.setdefault("llm_calls", [])
@@ -227,6 +216,7 @@ class BaseWorkflowRuntime:
         handler: Callable[..., Any],
         shared_store: Dict[str, Any],
         node_definition: WorkflowNodeDefinition | None = None,
+        agent_definition: Any | None = None,
         phase: str | None = None,
         transition: str | None = None,
     ) -> Any:
@@ -237,6 +227,10 @@ class BaseWorkflowRuntime:
             kwargs["shared_store"] = shared_store
         if "node" in signature.parameters:
             kwargs["node"] = node_definition
+        if "agent_definition" in signature.parameters:
+            kwargs["agent_definition"] = agent_definition
+        if "agent" in signature.parameters and agent_definition is not None:
+            kwargs["agent"] = agent_definition
         if "workflow" in signature.parameters:
             kwargs["workflow"] = self.definition
         if "definition" in signature.parameters:
@@ -301,6 +295,12 @@ class BaseWorkflowRuntime:
                 return False
         return default
 
+    def _normalize_handoff_context_mode(self, value: Any) -> str:
+        mode = str(value or "").strip().lower()
+        if mode in {"delegated", "scoped", "partial"}:
+            return "delegated"
+        return "whole"
+
 
 class WorkflowRuntime(BaseWorkflowRuntime):
     def __init__(
@@ -320,13 +320,16 @@ class WorkflowRuntime(BaseWorkflowRuntime):
             runtime_config=runtime_config,
             workflow_lookup=workflow_lookup,
         )
-        self._compiled_nodes: Dict[str, RuntimeGraphNode] = {}
+        self._compiled_nodes: Dict[str, BaseRuntimeNode] = {}
         self._transitions_by_source: Dict[str, List[str]] = defaultdict(list)
         self._flow = self._compile_flow()
 
     def _compile_flow(self) -> Flow:
-        for node_id in self.definition.nodes.keys():
-            self._compiled_nodes[node_id] = RuntimeGraphNode(node_id=node_id, runtime=self)
+        for node_id, node_definition in self.definition.nodes.items():
+            self._compiled_nodes[node_id] = create_runtime_node(
+                node_definition=node_definition,
+                runtime=self,
+            )
 
         for edge in self.definition.edges:
             if edge.source not in self._compiled_nodes or edge.target not in self._compiled_nodes:
@@ -392,97 +395,6 @@ class WorkflowRuntime(BaseWorkflowRuntime):
     def available_transitions(self, node_id: str) -> List[str]:
         return list(dict.fromkeys(self._transitions_by_source.get(node_id, [])))
 
-    def execute_node(self, node_id: str, shared_store: Dict[str, Any]) -> str | None:
-        node_definition = self.definition.nodes.get(node_id)
-        if not node_definition:
-            shared_store["error_message"] = f"Node '{node_id}' not found in workflow '{self.definition.name}'."
-            return "error"
-
-        transition: str | None = None
-
-        try:
-            pre_handlers = coerce_str_list(node_definition.attributes.get("pre"))
-            step_handlers = coerce_str_list(node_definition.attributes.get("steps"))
-            post_handlers = coerce_str_list(node_definition.attributes.get("post"))
-
-            transition, pre_halt = self._run_handler_references(
-                pre_handlers,
-                shared_store,
-                phase="node:pre",
-                node_definition=node_definition,
-                transition=transition,
-            )
-            transition, step_halt = self._run_handler_references(
-                step_handlers,
-                shared_store,
-                phase="node:steps",
-                node_definition=node_definition,
-                transition=transition,
-            )
-
-            core_transition: str | None = None
-            if not (pre_halt or step_halt):
-                core_transition = self._run_core_node(node_definition, shared_store)
-
-            if core_transition is not None:
-                transition = core_transition
-
-            transition, _ = self._run_handler_references(
-                post_handlers,
-                shared_store,
-                phase="node:post",
-                node_definition=node_definition,
-                transition=transition,
-            )
-            return transition
-        except Exception as exc:
-            logger.error(
-                "Error while executing workflow '%s' node '%s': %s",
-                self.definition.name,
-                node_id,
-                exc,
-                exc_info=True,
-            )
-            shared_store["error_message"] = f"Node '{node_id}' failed: {exc}"
-            return "error"
-
-    def _run_core_node(
-        self,
-        node_definition: WorkflowNodeDefinition,
-        shared_store: Dict[str, Any],
-    ) -> str | None:
-        kind = str(node_definition.attributes.get("kind", "agent")).strip().lower()
-
-        if kind in {"noop", "pass"}:
-            return str(node_definition.attributes.get("transition", "continue"))
-        if kind == "start":
-            return self._run_start_node(node_definition, shared_store)
-        if kind == "agent":
-            return self._run_agent_node(node_definition, shared_store)
-        if kind == "tool":
-            return self._run_tool_node(node_definition, shared_store)
-        if kind == "handoff":
-            return self._run_handoff_node(node_definition, shared_store)
-        if kind == "output":
-            return self._run_output_node(node_definition, shared_store)
-        if kind == "end":
-            return self._run_end_node(node_definition, shared_store)
-        if kind == "python":
-            return self._run_python_node(node_definition, shared_store)
-        if kind in {"flow", "composite"}:
-            return self._run_flow_node(node_definition, shared_store)
-
-        custom_handler_definition = self._plugins.node_handlers.get(kind)
-        if custom_handler_definition:
-            return self._run_custom_node(
-                node_definition=node_definition,
-                shared_store=shared_store,
-                handler=custom_handler_definition.handler,
-            )
-
-        shared_store["error_message"] = f"Unsupported node kind '{kind}' on node '{node_definition.node_id}'."
-        return "error"
-
     def _run_start_node(
         self,
         node_definition: WorkflowNodeDefinition,
@@ -534,6 +446,13 @@ class WorkflowRuntime(BaseWorkflowRuntime):
             shared_store["error_message"] = f"Handoff target agent '{target_agent}' is not registered."
             return str(node_definition.attributes.get("error_transition", "error"))
 
+        handoff_policy = self._resolve_handoff_policy(
+            source_agent=source_agent,
+            target_agent=target_agent,
+            node_definition=node_definition,
+            shared_store=shared_store,
+        )
+
         handoff_llm_profile = self._resolve_handoff_llm_profile(
             source_agent=source_agent,
             target_agent=target_agent,
@@ -542,9 +461,112 @@ class WorkflowRuntime(BaseWorkflowRuntime):
         if handoff_llm_profile:
             shared_store.setdefault("dynamic_llm_overrides", {})[target_agent] = handoff_llm_profile
 
+        context_mode = self._normalize_handoff_context_mode(handoff_policy.get("context_mode"))
+        delegated_context = shared_store.pop("pending_handoff_context", None)
+        if delegated_context is None and "context" in handoff_policy:
+            delegated_context = handoff_policy.get("context")
+
+        if context_mode == "delegated":
+            shared_store["active_handoff_context"] = delegated_context
+        else:
+            shared_store.pop("active_handoff_context", None)
+        shared_store["active_handoff_context_mode"] = context_mode
+
+        return_to_caller = self._coerce_bool(handoff_policy.get("return_to_caller"), default=False)
+        if return_to_caller and source_agent:
+            frame = {
+                "source_agent": source_agent,
+                "target_agent": target_agent,
+                "context_mode": context_mode,
+                "return_to_caller": True,
+                "return_transition": str(handoff_policy.get("return_transition") or "continue"),
+            }
+            shared_store.setdefault("_handoff_stack", []).append(frame)
+
         shared_store["active_agent"] = target_agent
         shared_store["handoff_history"] = shared_store.get("handoff_history", []) + [target_agent]
-        return str(node_definition.attributes.get("transition", "continue"))
+        shared_store.setdefault("handoff_history_detailed", []).append(
+            {
+                "source": source_agent,
+                "target": target_agent,
+                "policy": handoff_policy,
+            }
+        )
+        return str(handoff_policy.get("handoff_transition") or node_definition.attributes.get("transition", "continue"))
+
+    def _resolve_handoff_policy(
+        self,
+        source_agent: str | None,
+        target_agent: str,
+        node_definition: WorkflowNodeDefinition,
+        shared_store: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        policy: Dict[str, Any] = {}
+
+        if source_agent and source_agent in self._plugins.agents:
+            source_definition = self._plugins.agents[source_agent]
+            if isinstance(source_definition.default_handoff_policy, dict):
+                policy.update(source_definition.default_handoff_policy)
+            target_policy = source_definition.handoff_policies.get(target_agent)
+            if isinstance(target_policy, dict):
+                policy.update(target_policy)
+
+        node_default_policy = self._parse_inline_yaml(node_definition.attributes.get("handoff_policy"))
+        if isinstance(node_default_policy, dict):
+            policy = {**node_default_policy, **policy}
+
+        pending = shared_store.pop("pending_handoff_policy", None)
+        if isinstance(pending, dict):
+            policy.update(pending)
+
+        if "context_mode" not in policy:
+            policy["context_mode"] = node_definition.attributes.get("context_mode", "whole")
+        if "return_to_caller" not in policy:
+            policy["return_to_caller"] = node_definition.attributes.get("return_to_caller", False)
+
+        return policy
+
+    def _finalize_handoff_return(
+        self,
+        node_definition: WorkflowNodeDefinition,
+        shared_store: Dict[str, Any],
+    ) -> str | None:
+        stack = shared_store.get("_handoff_stack")
+        if not isinstance(stack, list) or not stack:
+            return None
+
+        top = stack[-1]
+        if not isinstance(top, dict):
+            return None
+
+        target_agent = top.get("target_agent")
+        source_agent = top.get("source_agent")
+        if not target_agent or not source_agent:
+            return None
+        if str(shared_store.get("active_agent") or "") != str(target_agent):
+            return None
+
+        stack.pop()
+
+        delegated_result = {
+            "from_agent": str(target_agent),
+            "to_agent": str(source_agent),
+            "answer": shared_store.get("final_answer"),
+            "question": shared_store.get("question_to_ask"),
+            "last_tool_route": shared_store.get("last_tool_route"),
+            "last_agent_decision": shared_store.get("last_agent_decision"),
+        }
+        shared_store["last_delegated_result"] = delegated_result
+        shared_store.setdefault("delegated_results", []).append(delegated_result)
+
+        shared_store.pop("final_answer", None)
+        shared_store.pop("question_to_ask", None)
+        shared_store.pop("final_output", None)
+        shared_store["active_agent"] = str(source_agent)
+        shared_store.pop("active_handoff_context", None)
+        shared_store["active_handoff_context_mode"] = "whole"
+
+        return str(top.get("return_transition") or node_definition.attributes.get("transition", "continue"))
 
     def _run_tool_node(
         self,
@@ -639,6 +661,10 @@ class WorkflowRuntime(BaseWorkflowRuntime):
         prior_error = shared_store.get("error_message")
         nested_transition = nested_runtime.run(shared_store)
 
+        return_transition = self._finalize_handoff_return(node_definition, shared_store)
+        if return_transition:
+            return return_transition
+
         if isinstance(nested_transition, str) and nested_transition.strip():
             return nested_transition
 
@@ -695,6 +721,57 @@ class WorkflowRuntime(BaseWorkflowRuntime):
         )
         agent_definition = self._plugins.agents[agent_name]
 
+        transition: str | None = None
+        transition, pre_halt = self._run_handler_references(
+            list(agent_definition.pre_handlers),
+            shared_store,
+            phase="agent:pre",
+            node_definition=node_definition,
+            transition=transition,
+        )
+        transition, step_halt = self._run_handler_references(
+            list(agent_definition.step_handlers),
+            shared_store,
+            phase="agent:steps",
+            node_definition=node_definition,
+            transition=transition,
+        )
+
+        if pre_halt or step_halt:
+            transition, _ = self._run_handler_references(
+                list(agent_definition.post_handlers),
+                shared_store,
+                phase="agent:post",
+                node_definition=node_definition,
+                transition=transition,
+            )
+            return str(transition or node_definition.attributes.get("fallback_transition", "error"))
+
+        agent_execution_mode = str(
+            node_definition.attributes.get("agent_execution_mode") or agent_definition.execution_mode or "node"
+        ).strip().lower()
+        composite_workflow = (
+            node_definition.attributes.get("agent_workflow")
+            or node_definition.attributes.get("flow")
+            or agent_definition.composite_workflow
+        )
+
+        if agent_execution_mode in {"flow", "composite"} and composite_workflow:
+            transition = self._run_agent_composite_flow(
+                node_definition=node_definition,
+                shared_store=shared_store,
+                agent_name=agent_name,
+                target_workflow=str(composite_workflow),
+            )
+            transition, _ = self._run_handler_references(
+                list(agent_definition.post_handlers),
+                shared_store,
+                phase="agent:post",
+                node_definition=node_definition,
+                transition=transition,
+            )
+            return str(transition or node_definition.attributes.get("transition", "continue"))
+
         allowed_tools = self._plugins.resolve_tools_for_agent(agent_name)
         tool_definitions = self._tool_runtime.describe_tools(allowed_tools)
         allowed_transitions = self.available_transitions(node_definition.node_id)
@@ -715,6 +792,9 @@ class WorkflowRuntime(BaseWorkflowRuntime):
                 "cli_context": shared_store.get("cli_context", {}),
                 "formatted_cli_context": shared_store.get("formatted_cli_context", "None provided."),
                 "last_tool_route": shared_store.get("last_tool_route"),
+                "last_delegated_result": shared_store.get("last_delegated_result"),
+                "handoff_context_mode": shared_store.get("active_handoff_context_mode", "whole"),
+                "handoff_context": shared_store.get("active_handoff_context"),
                 "results": shared_store.get("results", {}),
             },
             "routing": {
@@ -733,6 +813,12 @@ class WorkflowRuntime(BaseWorkflowRuntime):
             "answer": "string answer when action=final_answer",
             "question": "string question when action=ask_user",
             "agent": "target agent when action=handoff",
+            "context": "optional delegated context object/string for handoff",
+            "handoff_policy": {
+                "return_to_caller": "bool",
+                "context_mode": "whole | delegated",
+                "return_transition": "transition label when returning to caller",
+            },
             "transition": "optional explicit transition label",
             "llm_profile": "optional profile to use for the next agent turn",
         }
@@ -803,6 +889,14 @@ class WorkflowRuntime(BaseWorkflowRuntime):
             shared_store=shared_store,
         )
 
+        transition, _ = self._run_handler_references(
+            list(agent_definition.post_handlers),
+            shared_store,
+            phase="agent:post",
+            node_definition=node_definition,
+            transition=transition,
+        )
+
         if allowed_transitions and transition not in allowed_transitions:
             shared_store["error_message"] = (
                 f"Transition '{transition}' is not allowed from node '{node_definition.node_id}'. "
@@ -812,6 +906,31 @@ class WorkflowRuntime(BaseWorkflowRuntime):
                 return "error"
 
         return transition
+
+    def _run_agent_composite_flow(
+        self,
+        node_definition: WorkflowNodeDefinition,
+        shared_store: Dict[str, Any],
+        agent_name: str,
+        target_workflow: str,
+    ) -> str:
+        if target_workflow not in self._plugins.workflows:
+            shared_store["error_message"] = (
+                f"Composite workflow '{target_workflow}' for agent '{agent_name}' is not registered."
+            )
+            return str(node_definition.attributes.get("error_transition", "error"))
+
+        nested_runtime = self._resolve_workflow_runtime(target_workflow)
+        prior_error = shared_store.get("error_message")
+        nested_transition = nested_runtime.run(shared_store)
+
+        if isinstance(nested_transition, str) and nested_transition.strip():
+            return str(nested_transition)
+
+        if shared_store.get("error_message") and shared_store.get("error_message") != prior_error:
+            return str(node_definition.attributes.get("error_transition", "error"))
+
+        return str(node_definition.attributes.get("transition", "continue"))
 
     def _build_agent_system_prompt(
         self,
@@ -1009,7 +1128,19 @@ class WorkflowRuntime(BaseWorkflowRuntime):
             if not target_agent:
                 raise ValueError("Agent selected action=handoff but did not include target agent.")
 
+            handoff_block = decision.get("handoff") if isinstance(decision.get("handoff"), dict) else {}
             shared_store["pending_handoff_agent"] = str(target_agent)
+            handoff_context = (
+                decision.get("context")
+                or handoff_block.get("context")
+                or handoff_block.get("delegated_context")
+            )
+            if handoff_context is not None:
+                shared_store["pending_handoff_context"] = handoff_context
+
+            handoff_policy = decision.get("handoff_policy") or handoff_block.get("policy")
+            if isinstance(handoff_policy, dict):
+                shared_store["pending_handoff_policy"] = dict(handoff_policy)
 
             handoff_profile = decision.get("llm_profile")
             if handoff_profile:
