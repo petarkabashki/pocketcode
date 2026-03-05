@@ -7,6 +7,7 @@ Pocketcode is an extensible terminal AI coding assistant built around PocketFlow
 Pocketcode now uses a small plugin-first core:
 
 - Workflows can be graph-based Markdown (`dot`) or custom Python flow runtimes.
+- Agents are the primary composition unit; workflows are internal execution graphs.
 - Agents and workflows are unified as plugin `components` in `plugin.yaml`.
 - Flows can call other flows as nodes for arbitrarily nested composition.
 - Node/flow/agent prompts are external Markdown files with `{{ include:path.md }}` support.
@@ -15,16 +16,16 @@ Pocketcode now uses a small plugin-first core:
 - Agents now have first-class per-agent config for `llm_profile`, prompt, hooks (`pre|steps|post`), execution mode (`node|flow`), and handoff policies.
 - Tool definitions and routing payloads are exchanged with LLMs as YAML.
 - CLI now uses a Textual TUI for interactive mode.
-- CLI can switch workflow, agent, and LLM profile at runtime.
-- Workflows support agent handoff and multi-LLM routing.
+- CLI switches agent and LLM profile at runtime.
+- Internal runtime flows support agent handoff and multi-LLM routing.
 - Gemini provider is implemented with the `google.genai` package (`google-genai` dependency).
 
 ## Built-In Runtime
 
 - Built-in plugin: `pocketcode/plugins/core`
-- Built-in workflows:
-  - `orchestrator` (multi-agent handoff)
-  - `single_agent` (simple tool loop)
+- Built-in internal flows:
+  - `orchestrator` (multi-agent handoff graph)
+  - `single_agent` (agent runtime loop with recursive handoff support)
 
 ## Configuration
 
@@ -33,9 +34,9 @@ Main config file: `./pocketcode.yml` (required in workspace root)
 Key sections:
 
 - `llm.providers`: provider credentials/settings
-- `llm.profiles`: named LLM configs used by agents/workflows
+- `llm.profiles`: named LLM configs used by agents/internal flows
 - `llm.default_profile`: default profile name
-- `runtime`: workflow/agent defaults, plugin paths, and tool confirmation policy
+- `runtime`: agent defaults, internal runtime flow, plugin paths, and tool confirmation policy
 
 Supported providers:
 
@@ -84,7 +85,7 @@ Tool confirmation policy supports `allow|confirm|deny` at multiple levels:
 
 Default behavior is confirmation-first (`confirm`) unless you explicitly override it in config or via CLI (`--auto-confirm-tools`).
 
-LLM routing supports layered overrides for multi-agent and nested workflows:
+LLM routing supports layered overrides for multi-agent and nested flows:
 
 - node-level (`workflow.node` or `node`) in config and CLI
 - handoff-level (`source_agent->target_agent`) in config and CLI
@@ -95,17 +96,18 @@ Precedence is: CLI node > config node > CLI agent > config agent > CLI global > 
 
 ## CLI Commands
 
-- `/list <workflows|agents|llms|components|tools> [agent]`
-- `/set <workflow|agent|llm|llm-agent|llm-node|llm-handoff> ...`
+- `/list <agents|llms|components|tools>`
+- `/set <agent|llm|llm-agent|llm-node|llm-handoff> ...`
 - `/reload`, `/status`
 - `/context ...`
 - `/confirm ...`
 
 Compatibility aliases remain available:
 
-- `/workflows`, `/agents`, `/llms`, `/components`, `/tools`
-- `/workflow`, `/agent`, `/llm`, `/llm-agent`, `/llm-node`, `/llm-handoff`
-- Short aliases: `/ls`, `/wf`, `/ag`, `/lm`, `/la`, `/ln`, `/lh`, `/st`, `/r`, `/q`
+- `/agents`, `/llms`, `/components`, `/tools`
+- `/agent`, `/llm`, `/llm-agent`, `/llm-node`, `/llm-handoff`
+- Deprecated compatibility aliases: `/workflows`, `/workflow`, `/mode`, `/wf`
+- Short aliases: `/ls`, `/ag`, `/lm`, `/la`, `/ln`, `/lh`, `/st`, `/r`, `/q`
 
 Textual keyboard shortcuts:
 
@@ -123,7 +125,7 @@ Output box behavior:
 - output text is selectable with mouse/keyboard
 - copy selected text with your terminal copy shortcut (for example `Ctrl+Shift+C`)
 
-Prompt suggestions include commands, workflows, agents, components, and LLM profiles.
+Prompt suggestions include commands, agents, components, and LLM profiles.
 
 Textual copy commands:
 

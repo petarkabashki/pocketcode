@@ -1,0 +1,25 @@
+name: "arkitekt"
+description: "Expert software architect for high-level technical planning and system design"
+version: "1.0.0"
+author: "PocketCoder-Core"
+
+personality:
+  system_prompt: "prompts/system.md"
+  rules:
+    - "Always maintain focus on system integrity and modularity."
+    - "Ensure proposed changes follow the best practices specified in the context."
+
+tools:
+  - id: "read_file"
+    handler: "filesystem.py:ReadFileTool"
+    description: "Read the contents of a file"
+  - id: "list_files"
+    handler: "filesystem.py:ListFilesTool"
+    description: "List files in a directory"
+  - id: "search_code"
+    handler: "search.py:SearchCodeTool"
+    description: "Search for code patterns using regex or plain text"
+
+workflows:
+  - id: "default"
+    file: "main.md"

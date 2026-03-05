@@ -29,35 +29,29 @@ def handle_command(
 
     if command in {"/reload"}:
         engine.reload()
-        print("Reloaded plugins, workflows, tools, and LLM profile mappings.")
+        print("Reloaded plugins, agents, tools, and LLM profile mappings.")
         return None
 
     if command in {"/status"}:
         status = engine.status()
         print("Runtime status:")
-        print(f"  Workflow: {status['workflow']}")
         print(f"  Agent: {status['agent']}")
         print(f"  Global LLM Override: {status['global_llm_override']}")
         print(f"  Agent LLM Overrides: {status['agent_llm_overrides']}")
-        print(f"  Node LLM Overrides: {status.get('node_llm_overrides', {})}")
         print(f"  Handoff LLM Overrides: {status.get('handoff_llm_overrides', {})}")
         print(f"  Config LLM Overrides: {status.get('config_llm_overrides', {})}")
         print(f"  Default LLM Profile: {status['default_llm_profile']}")
         print(f"  Tool Confirmation (config): {status.get('tool_confirmation', {})}")
         print(f"  Tool Confirmation (session overrides): {status.get('session_tool_confirmation_overrides', {})}")
-        print(f"  Components: {len(status.get('available_components', []))}")
         return None
 
-    if command in {"/components", "/workflows", "/modes", "/agents", "/llms", "/tools", "/list"}:
+    if command in {"/agents", "/llms", "/tools", "/list"}:
         return _handle_list_command(command=command, args=args, engine=engine)
 
     if command in {
-        "/workflow",
-        "/mode",
         "/agent",
         "/llm",
         "/llm-agent",
-        "/llm-node",
         "/llm-handoff",
         "/set",
     }:
@@ -80,22 +74,16 @@ def _normalize_command(command: str) -> str:
         "/r": "/reload",
         "/st": "/status",
         "/ls": "/list",
-        "/wf": "/workflow",
         "/ag": "/agent",
         "/lm": "/llm",
         "/la": "/llm-agent",
-        "/ln": "/llm-node",
         "/lh": "/llm-handoff",
     }
     return aliases.get(command, command)
 
 
 def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine) -> Optional[str]:
-    if command == "/components":
-        scope = "components"
-    elif command in {"/workflows", "/modes"}:
-        scope = "workflows"
-    elif command == "/agents":
+    if command == "/agents":
         scope = "agents"
     elif command == "/llms":
         scope = "llms"
@@ -103,18 +91,10 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         scope = "tools"
     else:
         if not args:
-            print("Usage: /list <workflows|agents|llms|components|tools> [agent]")
+            print("Usage: /list <agents|llms|tools> [agent]")
             return None
         scope = args[0].lower()
         args = args[1:]
-
-    if scope in {"workflows", "modes"}:
-        workflows = engine.list_workflows()
-        print("Available workflows:")
-        for workflow in workflows:
-            marker = "*" if workflow == engine.get_current_workflow() else " "
-            print(f"  {marker} {workflow}")
-        return None
 
     if scope == "agents":
         agents = engine.list_agents()
@@ -131,13 +111,6 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
             marker = "*" if profile == engine.global_llm_override else " "
             print(f"  {marker} {profile}")
         print(f"Global override: {engine.global_llm_override or 'none'}")
-        return None
-
-    if scope == "components":
-        components = engine.describe_components()
-        print("Available components:")
-        for item in components:
-            print(f"  - {item['name']} ({item['kind']}, plugin={item['plugin']}, source={item['source']})")
         return None
 
     if scope == "tools":
@@ -157,7 +130,7 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         return None
 
     print(f"Unknown list scope: {scope}")
-    print("Usage: /list <workflows|agents|llms|components|tools> [agent]")
+    print("Usage: /list <agents|llms|tools> [agent]")
     return None
 
 
@@ -165,22 +138,11 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
     if command == "/set":
         if not args:
             print(
-                "Usage: /set <workflow|agent|llm|llm-agent|llm-node|llm-handoff> <args...>"
+                "Usage: /set <agent|llm|llm-agent|llm-handoff> <args...>"
             )
             return None
         command = f"/{args[0].lower()}"
         args = args[1:]
-
-    if command in {"/workflow", "/mode"}:
-        if not args:
-            print("Usage: /workflow <workflow_name>")
-            return None
-        try:
-            engine.set_workflow(args[0])
-            print(f"Selected workflow: {args[0]}")
-        except Exception as exc:
-            print(f"Error: {exc}")
-        return None
 
     if command == "/agent":
         if not args:
@@ -191,7 +153,7 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
         try:
             if target.lower() == "auto":
                 engine.set_agent(None)
-                print("Agent selection reset to workflow default/hand-off.")
+                print("Agent selection reset to runtime default/handoff.")
             else:
                 engine.set_agent(target)
                 print(f"Selected agent: {target}")
@@ -232,22 +194,6 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
             print(f"Error: {exc}")
         return None
 
-    if command == "/llm-node":
-        if len(args) < 2:
-            print("Usage: /llm-node <workflow.node|node> <profile_name|none>")
-            return None
-        node_ref, profile_name = args[0], args[1]
-        try:
-            if profile_name.lower() in {"none", "reset", "auto"}:
-                engine.set_node_llm_override(node_ref=node_ref, profile_name=None)
-                print(f"Node-specific LLM override cleared for: {node_ref}")
-            else:
-                engine.set_node_llm_override(node_ref=node_ref, profile_name=profile_name)
-                print(f"Node-specific LLM override set: {node_ref} -> {profile_name}")
-        except Exception as exc:
-            print(f"Error: {exc}")
-        return None
-
     if command == "/llm-handoff":
         if len(args) < 3:
             print("Usage: /llm-handoff <source_agent> <target_agent> <profile_name|none>")
@@ -276,7 +222,7 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
         return None
 
     print(f"Unknown set target: {command}")
-    print("Usage: /set <workflow|agent|llm|llm-agent|llm-node|llm-handoff> <args...>")
+    print("Usage: /set <agent|llm|llm-agent|llm-handoff> <args...>")
     return None
 
 
@@ -409,10 +355,10 @@ def print_help() -> None:
 Pocketcode Commands:
   /help                          Show this help message.
   /list <scope> [opts]           List entities by scope.
-                                 Scopes: workflows|agents|llms|components|tools [agent]
+                                 Scopes: agents|llms|tools [agent for tools]
   /set <target> <args...>        Set runtime selection/override.
-                                 Targets: workflow|agent|llm|llm-agent|llm-node|llm-handoff
-  /reload                        Reload plugins, workflows, and runtime catalogs.
+                                 Targets: agent|llm|llm-agent|llm-handoff
+  /reload                        Reload plugins and runtime catalogs.
   /status                        Show runtime status.
   /context <cmd> [opts]          Manage context. Run '/context help'.
   /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
@@ -420,17 +366,12 @@ Pocketcode Commands:
   /exit, /quit                   Exit Pocketcode.
 
 Compatibility aliases:
-  /workflows -> /list workflows
   /agents    -> /list agents
   /llms      -> /list llms
-  /components-> /list components
   /tools     -> /list tools
-  /workflow  -> /set workflow
-  /mode      -> /set workflow
   /agent     -> /set agent
   /llm       -> /set llm
   /llm-agent -> /set llm-agent
-  /llm-node  -> /set llm-node
   /llm-handoff -> /set llm-handoff
 
 Keyboard shortcuts (Textual UI):
@@ -449,11 +390,9 @@ Textual convenience commands:
 
 Shortcut aliases:
   /ls   /list
-  /wf   /workflow
   /ag   /agent
   /lm   /llm
   /la   /llm-agent
-  /ln   /llm-node
   /lh   /llm-handoff
   /st   /status
   /r    /reload

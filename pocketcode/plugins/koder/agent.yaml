@@ -1,0 +1,25 @@
+name: "koder"
+description: "Expert developer focused on implementation details and coding tasks"
+version: "1.0.0"
+author: "PocketCoder-Core"
+
+personality:
+  system_prompt: "prompts/system.md"
+  rules:
+    - "Write clean, idiomatic, and self-documenting code."
+    - "Always verify syntax and common errors."
+
+tools:
+  - id: "write_to_file"
+    handler: "filesystem.py:WriteToFileTool"
+    description: "Write content to a file in the workspace"
+  - id: "create_directory"
+    handler: "filesystem.py:CreateDirectoryTool"
+    description: "Create a new directory"
+  - id: "git_diff"
+    handler: "git.py:GitDiffTool"
+    description: "Inspect changes in the git repository"
+
+workflows:
+  - id: "default"
+    file: "main.md"

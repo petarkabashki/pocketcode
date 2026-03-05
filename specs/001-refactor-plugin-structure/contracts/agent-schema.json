@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentManifest",
+  "description": "Configuration schema for user-supplied agent plugins",
+  "type": "object",
+  "required": ["name", "description", "version"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique identifier for the agent"
+    },
+    "description": {
+      "type": "string",
+      "description": "Friendly description of the agent"
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version of the agent plugin"
+    },
+    "author": {
+      "type": "string"
+    },
+    "personality": {
+      "type": "object",
+      "properties": {
+        "system_prompt": { "type": "string", "description": "Local path to system prompt file" },
+        "rules": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "handler"],
+        "properties": {
+          "id": { "type": "string" },
+          "handler": { "type": "string", "description": "Local path relative to tools/ e.g. tool.py:HandlerClass" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "workflows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "file"],
+        "properties": {
+          "id": { "type": "string" },
+          "file": { "type": "string", "description": "Local path relative to workflows/ e.g. main.md" }
+        }
+      }
+    },
+    "prompts": {
+      "type": "array",
+      "items": { "type": "string", "description": "Local paths to additional prompt snippets" }
+    }
+  }
+}

@@ -107,10 +107,6 @@ class PocketCodeTextualApp(App[None]):
             "/help",
             "/list",
             "/set",
-            "/workflows",
-            "/modes",
-            "/workflow",
-            "/mode",
             "/agents",
             "/agent",
             "/components",
@@ -142,7 +138,6 @@ class PocketCodeTextualApp(App[None]):
         words = sorted(
             set(
                 commands
-                + self._engine.list_workflows()
                 + self._engine.list_agents()
                 + self._engine.list_components()
                 + self._engine.list_llm_profiles()
@@ -153,7 +148,7 @@ class PocketCodeTextualApp(App[None]):
 
     def _update_status(self) -> None:
         status = self._engine.status()
-        workflow = status.get("workflow") or "no-workflow"
+        runtime_flow = status.get("runtime_workflow") or "internal-flow"
         run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
         current_agent = run_summary.get("current_agent") or status.get("agent") or "auto"
 
@@ -166,7 +161,7 @@ class PocketCodeTextualApp(App[None]):
         current_llm_profile = run_summary.get("current_llm_profile") or status.get("global_llm_override") or "none"
         current_llm_model = run_summary.get("current_llm_model") or "-"
         text = (
-            f"Workflow: {workflow} | Agent: {agent_display} | "
+            f"Runtime flow: {runtime_flow} | Agent: {agent_display} | "
             f"LLM: {current_llm_profile} ({current_llm_model})"
         )
         self.query_one("#status", Static).update(text)
@@ -339,7 +334,7 @@ class PocketCodeTextualApp(App[None]):
         try:
             self._engine.reload()
             self._refresh_suggestions()
-            self._write_info("Reloaded plugins, workflows, tools, and LLM profile mappings.")
+            self._write_info("Reloaded plugins, agents, internal flows, tools, and LLM profile mappings.")
         except Exception as exc:
             self._write_error(str(exc))
         finally:

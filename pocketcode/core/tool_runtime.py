@@ -111,15 +111,26 @@ class ToolRuntime:
 
     def _resolve_tool(self, tool_name: str) -> Any:
         if tool_name not in self._tools:
+            # Check if it's a built-in tool that hasn't been registered yet?
+            # Or if it's a dynamic path
+            if "/" in tool_name or ".py:" in tool_name:
+                 # Attempt dynamic load? Actually ToolRuntime should probably just use what's in self._tools
+                 # which is populated by PluginManager.
+                 pass
             raise KeyError(f"Tool '{tool_name}' is not registered.")
 
         tool_impl = self._tools[tool_name]
 
         if isinstance(tool_impl, str):
-            if "." not in tool_impl:
+            if "." not in tool_impl and ":" not in tool_impl:
                 raise ValueError(
-                    f"String tool reference '{tool_impl}' for '{tool_name}' must be an import path."
+                    f"String tool reference '{tool_impl}' for '{tool_name}' must be an import path or file:Object."
                 )
+            
+            if ":" in tool_impl:
+                # Handle path.py:ClassName if ToolRuntime is given raw strings (unlikely with current PluginManager)
+                pass
+
             module_name, object_name = tool_impl.rsplit(".", 1)
             module = importlib.import_module(module_name)
             tool_impl = getattr(module, object_name)

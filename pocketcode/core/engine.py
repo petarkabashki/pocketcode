@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.core.tool_runtime import ToolRuntime
-from pocketcode.core.workflow_runtime import BaseWorkflowRuntime, CustomWorkflowRuntime, WorkflowRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,12 @@ class PocketCodeEngine:
             auto_approved_tools=list(self._runtime_config.get("auto_approved_tools", [])),
             confirmation_config=self._tool_confirmation_config,
         )
-
-        self._workflow_runtime_cache: Dict[str, BaseWorkflowRuntime] = {}
+        self._agent_runtime = AgentRuntime(
+            plugin_manager=self._plugins,
+            llm_router=self._llm_router,
+            tool_runtime=self._tool_runtime,
+            runtime_config=self._runtime_config,
+        )
 
         self.default_llm_profile = (
             self._llm_config.get("default_profile")
@@ -41,14 +45,9 @@ class PocketCodeEngine:
         )
         self.config_llm_overrides = self._build_llm_overrides_config()
 
-        self.current_workflow = self._runtime_config.get("default_workflow")
-        if not self.current_workflow and self._plugins.workflows:
-            self.current_workflow = sorted(self._plugins.workflows.keys())[0]
-
         self.current_agent = self._runtime_config.get("default_agent")
         self.global_llm_override: Optional[str] = None
         self.agent_llm_overrides: Dict[str, str] = {}
-        self.node_llm_overrides: Dict[str, str] = {}
         self.handoff_llm_overrides: Dict[str, str] = {}
         self.auto_confirm_tools = bool(self._runtime_config.get("auto_confirm_tools", False))
         self.session_confirmation_overrides: Dict[str, Any] = {
@@ -79,13 +78,15 @@ class PocketCodeEngine:
             auto_approved_tools=list(self._runtime_config.get("auto_approved_tools", [])),
             confirmation_config=self._tool_confirmation_config,
         )
-        self._workflow_runtime_cache.clear()
+        self._agent_runtime = AgentRuntime(
+            plugin_manager=self._plugins,
+            llm_router=self._llm_router,
+            tool_runtime=self._tool_runtime,
+            runtime_config=self._runtime_config,
+        )
         self._validate_current_selections()
 
     def _validate_current_selections(self) -> None:
-        if self.current_workflow not in self._plugins.workflows:
-            self.current_workflow = sorted(self._plugins.workflows.keys())[0] if self._plugins.workflows else None
-
         if self.current_agent and self.current_agent not in self._plugins.agents:
             self.current_agent = None
 
@@ -105,43 +106,14 @@ class PocketCodeEngine:
         for handoff_key in invalid_handoff_overrides:
             self.handoff_llm_overrides.pop(handoff_key, None)
 
-    def list_workflows(self) -> List[str]:
-        return sorted(self._plugins.workflows.keys())
-
     def list_agents(self) -> List[str]:
         return sorted(self._plugins.agents.keys())
-
-    def list_components(self) -> List[str]:
-        return sorted(self._plugins.components.keys())
-
-    def describe_components(self) -> List[Dict[str, Any]]:
-        descriptions: List[Dict[str, Any]] = []
-        for name in sorted(self._plugins.components.keys()):
-            component = self._plugins.components[name]
-            descriptions.append(
-                {
-                    "name": component.name,
-                    "kind": component.kind,
-                    "plugin": component.plugin_name,
-                    "source": component.metadata.get("source", "unknown"),
-                }
-            )
-        return descriptions
 
     def list_llm_profiles(self) -> List[str]:
         return sorted(self._llm_router.list_profiles().keys())
 
-    def get_current_workflow(self):
-        return self.current_workflow
-
     def get_current_agent(self):
         return self.current_agent
-
-    def set_workflow(self, workflow_name: str) -> None:
-        if workflow_name not in self._plugins.workflows:
-            raise KeyError(f"Unknown workflow '{workflow_name}'.")
-        self.current_workflow = workflow_name
-        self._workflow_runtime_cache.pop(workflow_name, None)
 
     def set_agent(self, agent_name: Optional[str]) -> None:
         if not agent_name:
@@ -168,18 +140,6 @@ class PocketCodeEngine:
 
         self._llm_router.resolve_profile_config(profile_name)
         self.agent_llm_overrides[agent_name] = profile_name
-
-    def set_node_llm_override(self, node_ref: str, profile_name: Optional[str]) -> None:
-        node_ref = str(node_ref).strip()
-        if not node_ref:
-            raise ValueError("Node reference cannot be empty.")
-
-        if not profile_name:
-            self.node_llm_overrides.pop(node_ref, None)
-            return
-
-        self._llm_router.resolve_profile_config(profile_name)
-        self.node_llm_overrides[node_ref] = str(profile_name)
 
     def set_handoff_llm_override(
         self,
@@ -208,36 +168,28 @@ class PocketCodeEngine:
         return self._tool_runtime.describe_tools(tool_names)
 
     def process_request(self, user_input: str, cli_context: Dict[str, Any]) -> str:
-        if not self.current_workflow:
-            raise RuntimeError("No workflow is selected.")
-
-        runtime = self._get_workflow_runtime(self.current_workflow)
-
-        initial_agent = (
-            self.current_agent
-            or runtime.definition.default_agent
-            or self._runtime_config.get("default_agent")
-        )
+        initial_agent = self.current_agent or self._runtime_config.get("default_agent")
+        if not initial_agent:
+            agents = self.list_agents()
+            if agents:
+                initial_agent = agents[0]
 
         shared_store: Dict[str, Any] = {
             "initial_request": user_input,
             "cli_context": self._copy_cli_context(cli_context),
             "formatted_cli_context": self._format_cli_context(cli_context),
-            "active_workflow": self.current_workflow,
             "active_agent": initial_agent,
             "default_llm_profile": self.default_llm_profile,
             "cli_llm_override": self.global_llm_override,
             "cli_agent_llm_overrides": dict(self.agent_llm_overrides),
-            "cli_node_llm_overrides": dict(self.node_llm_overrides),
             "cli_handoff_llm_overrides": dict(self.handoff_llm_overrides),
             "config_agent_llm_overrides": dict(self.config_llm_overrides.get("agents", {})),
-            "config_node_llm_overrides": dict(self.config_llm_overrides.get("nodes", {})),
             "config_handoff_llm_overrides": dict(self.config_llm_overrides.get("handoffs", {})),
             "auto_confirm_tools": self.auto_confirm_tools,
             "session_tool_confirmation": self._copy_session_confirmation_overrides(),
         }
 
-        runtime.run(shared_store)
+        self._agent_runtime.run(shared_store)
 
         if shared_store.get("active_agent"):
             self.current_agent = shared_store["active_agent"]
@@ -262,19 +214,15 @@ class PocketCodeEngine:
 
     def status(self) -> Dict[str, Any]:
         return {
-            "workflow": self.current_workflow,
             "agent": self.current_agent,
             "global_llm_override": self.global_llm_override,
             "agent_llm_overrides": dict(self.agent_llm_overrides),
-            "node_llm_overrides": dict(self.node_llm_overrides),
             "handoff_llm_overrides": dict(self.handoff_llm_overrides),
             "config_llm_overrides": dict(self.config_llm_overrides),
             "default_llm_profile": self.default_llm_profile,
             "tool_confirmation": self._tool_confirmation_config,
             "session_tool_confirmation_overrides": self._copy_session_confirmation_overrides(),
-            "available_workflows": self.list_workflows(),
             "available_agents": self.list_agents(),
-            "available_components": self.list_components(),
             "available_llm_profiles": self.list_llm_profiles(),
             "last_run_summary": dict(self.last_run_summary),
         }
@@ -305,35 +253,6 @@ class PocketCodeEngine:
             "tool_policies": {},
             "agent_policies": {},
         }
-
-    def _get_workflow_runtime(self, workflow_name: str) -> BaseWorkflowRuntime:
-        if workflow_name in self._workflow_runtime_cache:
-            return self._workflow_runtime_cache[workflow_name]
-
-        workflow_definition = self._plugins.workflows.get(workflow_name)
-        if not workflow_definition:
-            raise KeyError(f"Workflow '{workflow_name}' is not registered.")
-
-        if workflow_definition.workflow_kind == "custom":
-            workflow_runtime = CustomWorkflowRuntime(
-                workflow_definition=workflow_definition,
-                plugin_manager=self._plugins,
-                llm_router=self._llm_router,
-                tool_runtime=self._tool_runtime,
-                runtime_config=self._runtime_config,
-                workflow_lookup=self._get_workflow_runtime,
-            )
-        else:
-            workflow_runtime = WorkflowRuntime(
-                workflow_definition=workflow_definition,
-                plugin_manager=self._plugins,
-                llm_router=self._llm_router,
-                tool_runtime=self._tool_runtime,
-                runtime_config=self._runtime_config,
-                workflow_lookup=self._get_workflow_runtime,
-            )
-        self._workflow_runtime_cache[workflow_name] = workflow_runtime
-        return workflow_runtime
 
     def _copy_cli_context(self, cli_context: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -423,7 +342,7 @@ class PocketCodeEngine:
     def _build_llm_overrides_config(self) -> Dict[str, Dict[str, str]]:
         runtime_overrides = self._runtime_config.get("llm_overrides", {})
         if not isinstance(runtime_overrides, dict):
-            return {"agents": {}, "nodes": {}, "handoffs": {}}
+            return {"agents": {}, "handoffs": {}}
 
         agent_map: Dict[str, str] = {}
         raw_agents = runtime_overrides.get("agents", {})
@@ -431,13 +350,6 @@ class PocketCodeEngine:
             for agent_name, profile_name in raw_agents.items():
                 if isinstance(agent_name, str) and isinstance(profile_name, str):
                     agent_map[agent_name.strip()] = profile_name.strip()
-
-        node_map: Dict[str, str] = {}
-        raw_nodes = runtime_overrides.get("nodes", {})
-        if isinstance(raw_nodes, dict):
-            for node_ref, profile_name in raw_nodes.items():
-                if isinstance(node_ref, str) and isinstance(profile_name, str):
-                    node_map[node_ref.strip()] = profile_name.strip()
 
         handoff_map: Dict[str, str] = {}
         raw_handoffs = runtime_overrides.get("handoffs", {})
@@ -455,7 +367,6 @@ class PocketCodeEngine:
 
         return {
             "agents": agent_map,
-            "nodes": node_map,
             "handoffs": handoff_map,
         }
 

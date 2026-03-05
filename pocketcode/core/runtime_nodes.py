@@ -20,56 +20,57 @@ class BaseRuntimeNode(Node):
         self.node_definition = node_definition
         self.runtime = runtime
 
+    def prep(self, shared_store: Dict[str, Any]) -> Dict[str, Any]:
+        pre_handlers = coerce_str_list(self.node_definition.attributes.get("pre"))
+        transition, halt = self.runtime._run_handler_references(
+            pre_handlers,
+            shared_store,
+            phase="node:pre",
+            node_definition=self.node_definition
+        )
+        return {"halt": halt, "transition_override": transition}
+
+    def exec(self, prep_res: Dict[str, Any]) -> Any:
+        # This will be overridden by subclasses
+        return None
+
+    def post(self, shared_store: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Any) -> str | None:
+        transition = exec_res if exec_res is not None else prep_res.get("transition_override")
+        
+        post_handlers = coerce_str_list(self.node_definition.attributes.get("post"))
+        final_transition, _ = self.runtime._run_handler_references(
+            post_handlers,
+            shared_store,
+            phase="node:post",
+            node_definition=self.node_definition,
+            transition=transition
+        )
+        return final_transition
+
     def _run(self, shared_store: Dict[str, Any]) -> str | None:
-        return self.run(shared_store)
-
-    def run(self, shared_store: Dict[str, Any]) -> str | None:
-        raise NotImplementedError
-
-
-class HookedRuntimeNode(BaseRuntimeNode):
-    def run(self, shared_store: Dict[str, Any]) -> str | None:
-        transition: str | None = None
-
         try:
-            pre_handlers = coerce_str_list(self.node_definition.attributes.get("pre"))
+            p = self.prep(shared_store)
+            if p.get("halt"):
+                return self.post(shared_store, p, None)
+            
+            # Run "steps" as part of core logic or as actual exec
             step_handlers = coerce_str_list(self.node_definition.attributes.get("steps"))
-            post_handlers = coerce_str_list(self.node_definition.attributes.get("post"))
-
-            transition, pre_halt = self.runtime._run_handler_references(
-                pre_handlers,
-                shared_store,
-                phase="node:pre",
-                node_definition=self.node_definition,
-                transition=transition,
-            )
-            transition, step_halt = self.runtime._run_handler_references(
+            step_transition, step_halt = self.runtime._run_handler_references(
                 step_handlers,
                 shared_store,
                 phase="node:steps",
                 node_definition=self.node_definition,
-                transition=transition,
+                transition=p.get("transition_override")
             )
 
-            core_transition: str | None = None
-            if not (pre_halt or step_halt):
-                core_transition = self._run_core(shared_store)
+            if step_halt:
+                 return self.post(shared_store, p, step_transition)
 
-            if core_transition is not None:
-                transition = core_transition
-
-            transition, _ = self.runtime._run_handler_references(
-                post_handlers,
-                shared_store,
-                phase="node:post",
-                node_definition=self.node_definition,
-                transition=transition,
-            )
-            return transition
+            e = self.exec(shared_store) # Passing shared_store as prep_res for now to simplify
+            return self.post(shared_store, p, e if e is not None else step_transition)
         except Exception as exc:
             logger.error(
-                "Error while executing workflow '%s' node '%s': %s",
-                self.runtime.definition.name,
+                "Error while executing node '%s': %s",
                 self.node_definition.node_id,
                 exc,
                 exc_info=True,
@@ -77,56 +78,43 @@ class HookedRuntimeNode(BaseRuntimeNode):
             shared_store["error_message"] = f"Node '{self.node_definition.node_id}' failed: {exc}"
             return "error"
 
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
-        raise NotImplementedError
-
-
-class StartRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class StartRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_start_node(self.node_definition, shared_store)
 
-
-class AgentRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class AgentRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_agent_node(self.node_definition, shared_store)
 
-
-class ToolRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class ToolRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_tool_node(self.node_definition, shared_store)
 
-
-class HandoffRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class HandoffRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_handoff_node(self.node_definition, shared_store)
 
-
-class OutputRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class OutputRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_output_node(self.node_definition, shared_store)
 
-
-class EndRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class EndRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_end_node(self.node_definition, shared_store)
 
-
-class PythonRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class PythonRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_python_node(self.node_definition, shared_store)
 
-
-class FlowRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class FlowRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_flow_node(self.node_definition, shared_store)
 
-
-class NoopRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, _shared_store: Dict[str, Any]) -> str | None:
+class NoopRuntimeNode(BaseRuntimeNode):
+    def exec(self, _shared_store: Dict[str, Any]) -> str | None:
         return str(self.node_definition.attributes.get("transition", "continue"))
 
-
-class CustomKindRuntimeNode(HookedRuntimeNode):
+class CustomKindRuntimeNode(BaseRuntimeNode):
     def __init__(
         self,
         node_definition: WorkflowNodeDefinition,
@@ -136,16 +124,15 @@ class CustomKindRuntimeNode(HookedRuntimeNode):
         super().__init__(node_definition=node_definition, runtime=runtime)
         self._handler = handler
 
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         return self.runtime._run_custom_node(
             node_definition=self.node_definition,
             shared_store=shared_store,
             handler=self._handler,
         )
 
-
-class UnsupportedRuntimeNode(HookedRuntimeNode):
-    def _run_core(self, shared_store: Dict[str, Any]) -> str | None:
+class UnsupportedRuntimeNode(BaseRuntimeNode):
+    def exec(self, shared_store: Dict[str, Any]) -> str | None:
         kind = str(self.node_definition.attributes.get("kind", "agent")).strip().lower()
         shared_store["error_message"] = (
             f"Unsupported node kind '{kind}' on node '{self.node_definition.node_id}'."

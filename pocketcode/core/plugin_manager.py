@@ -10,13 +10,7 @@ from typing import Any, Dict, Iterable, List
 import yaml
 
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
-from pocketcode.core.runtime_models import (
-    AgentDefinition,
-    ComponentDefinition,
-    CustomNodeHandlerDefinition,
-    WorkflowDefinition,
-)
-from pocketcode.core.workflow_parser import parse_markdown_workflow
+from pocketcode.core.runtime_models import AgentDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +21,8 @@ class PluginManager:
         self._workspace_root = Path(workspace_root).resolve()
 
         self.tools: Dict[str, Any] = {}
-        self.components: Dict[str, ComponentDefinition] = {}
         self.agents: Dict[str, AgentDefinition] = {}
-        self.workflows: Dict[str, WorkflowDefinition] = {}
         self.llm_profiles: Dict[str, Dict[str, Any]] = {}
-        self.node_definitions: Dict[str, Dict[str, Any]] = {}
-        self.node_handlers: Dict[str, CustomNodeHandlerDefinition] = {}
         self.plugin_roots: Dict[str, Path] = {}
 
     @property
@@ -41,12 +31,8 @@ class PluginManager:
 
     def clear(self) -> None:
         self.tools.clear()
-        self.components.clear()
         self.agents.clear()
-        self.workflows.clear()
         self.llm_profiles.clear()
-        self.node_definitions.clear()
-        self.node_handlers.clear()
         self.plugin_roots.clear()
 
     def load(self) -> None:
@@ -59,17 +45,10 @@ class PluginManager:
                 logger.error("Failed loading plugin at %s: %s", plugin_root, exc, exc_info=True)
 
         logger.info(
-            (
-                "Plugin load complete. plugins=%s, tools=%s, agents=%s, workflows=%s, "
-                "components=%s, node_definitions=%s, node_handlers=%s, llm_profiles=%s"
-            ),
+            "Plugin load complete. plugins=%s, tools=%s, agents=%s, llm_profiles=%s",
             len(self.plugin_roots),
             len(self.tools),
             len(self.agents),
-            len(self.workflows),
-            len(self.components),
-            len(self.node_definitions),
-            len(self.node_handlers),
             len(self.llm_profiles),
         )
 
@@ -115,21 +94,27 @@ class PluginManager:
             if not base_path.exists():
                 continue
 
-            if (base_path / "plugin.yaml").is_file():
+            # Check if current base_path itself is a plugin (has agent.yaml or plugin.yaml)
+            if (base_path / "agent.yaml").is_file() or (base_path / "plugin.yaml").is_file():
                 resolved = base_path.resolve()
                 if resolved not in seen:
                     seen.add(resolved)
                     yield resolved
                 continue
 
+            # Otherwise, iterate through children
             for child in sorted(base_path.iterdir()):
-                if child.is_dir() and (child / "plugin.yaml").is_file():
+                if child.is_dir() and ((child / "agent.yaml").is_file() or (child / "plugin.yaml").is_file()):
                     resolved = child.resolve()
                     if resolved not in seen:
                         seen.add(resolved)
                         yield resolved
 
     def _load_plugin(self, plugin_root: Path) -> None:
+        if (plugin_root / "agent.yaml").is_file():
+            self._load_agent_plugin(plugin_root)
+            return
+
         manifest_path = plugin_root / "plugin.yaml"
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         if not isinstance(manifest, dict):
@@ -138,52 +123,79 @@ class PluginManager:
         plugin_name = str(manifest.get("name") or plugin_root.name)
         self.plugin_roots[plugin_name] = plugin_root
 
-        logger.info("Loading plugin '%s' from %s", plugin_name, plugin_root)
+        logger.info("Loading legacy plugin '%s' from %s", plugin_name, plugin_root)
 
         self._load_plugin_llm_profiles(plugin_name, manifest)
         self._load_plugin_tools(plugin_name, plugin_root, manifest)
-        plugin_node_definitions = self._load_plugin_node_definitions(plugin_name, plugin_root, manifest)
-        self._load_plugin_node_handlers(plugin_name, plugin_root, manifest)
         self._load_plugin_agents(plugin_name, plugin_root, manifest)
-        self._load_plugin_workflows(
-            plugin_name=plugin_name,
-            plugin_root=plugin_root,
-            manifest=manifest,
-            plugin_node_definitions=plugin_node_definitions,
-        )
-        self._load_plugin_components(
-            plugin_name=plugin_name,
-            plugin_root=plugin_root,
-            manifest=manifest,
-            plugin_node_definitions=plugin_node_definitions,
-        )
 
-    def _register_component(
-        self,
-        *,
-        name: str,
-        kind: str,
-        plugin_name: str,
-        plugin_root: Path,
-        definition: Dict[str, Any],
-        source: str,
-    ) -> None:
-        existing = self.components.get(name)
-        if existing:
-            logger.warning(
-                "Component '%s' (%s) is being overwritten by plugin '%s' via %s.",
-                name,
-                existing.kind,
-                plugin_name,
-                source,
-            )
-        self.components[name] = ComponentDefinition(
-            name=name,
-            kind=kind,
-            plugin_name=plugin_name,
-            plugin_root=plugin_root,
-            config=dict(definition),
-            metadata={"source": source},
+        # Explicitly ignore removed legacy sections.
+        for legacy_key in ("components", "workflows", "flows", "modes"):
+            if legacy_key in manifest:
+                logger.warning(
+                    "Plugin '%s' contains legacy '%s' section; it is ignored in agent-only runtime.",
+                    plugin_name,
+                    legacy_key,
+                )
+
+    def _load_agent_plugin(self, plugin_root: Path) -> None:
+        manifest_path = plugin_root / "agent.yaml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(manifest, dict):
+            raise ValueError(f"Agent manifest must be a YAML object: {manifest_path}")
+
+        agent_name = str(manifest.get("name") or plugin_root.name)
+        self.plugin_roots[agent_name] = plugin_root
+
+        logger.info("Loading agent plugin '%s' from %s", agent_name, plugin_root)
+
+        # Map agent.yaml fields to AgentDefinition
+        personality = manifest.get("personality", {})
+        system_prompt_file = personality.get("system_prompt")
+        rules = personality.get("rules", [])
+
+        system_prompt = ""
+        if system_prompt_file:
+            prompt_path = plugin_root / system_prompt_file
+            if prompt_path.is_file():
+                system_prompt = prompt_path.read_text(encoding="utf-8")
+        
+        if rules:
+            rules_text = "\n".join([f"- {r}" for r in rules])
+            system_prompt = f"{system_prompt}\n\nRules:\n{rules_text}" if system_prompt else f"Rules:\n{rules_text}"
+
+        tools_manifest = manifest.get("tools", [])
+        agent_tools = []
+        for t in tools_manifest:
+            if isinstance(t, dict) and "id" in t and "handler" in t:
+                tool_id = t["id"]
+                handler = t["handler"]
+                # Register tool globally with plugin prefix to avoid collisions? 
+                # For now, let's keep it simple and register with provided ID if not exists
+                # In Option B, tools/ are local.
+                tool_ref = f"{plugin_root}/tools/{handler}" if not handler.startswith("/") else handler
+                if ":" not in tool_ref and "/" in tool_ref:
+                    # If it looks like a path but lacks a colon, assume it's path.py:Handler
+                    pass
+
+                try:
+                    loaded_tool = self._load_reference(tool_ref, plugin_root)
+                    self.tools[tool_id] = loaded_tool
+                    agent_tools.append(tool_id)
+                except Exception as exc:
+                    logger.error("Failed to load tool '%s' for agent '%s': %s", tool_id, agent_name, exc)
+
+        self.agents[agent_name] = AgentDefinition(
+            name=agent_name,
+            description=str(manifest.get("description", "")),
+            tools=agent_tools,
+            system_prompt=system_prompt,
+            metadata={
+                "plugin": agent_name,
+                "plugin_root": str(plugin_root),
+                "version": manifest.get("version"),
+                "author": manifest.get("author")
+            }
         )
 
     def _load_plugin_llm_profiles(self, plugin_name: str, manifest: Dict[str, Any]) -> None:
@@ -221,129 +233,6 @@ class PluginManager:
                     exc,
                 )
 
-    def _load_plugin_node_definitions(
-        self,
-        plugin_name: str,
-        plugin_root: Path,
-        manifest: Dict[str, Any],
-    ) -> Dict[str, Dict[str, Any]]:
-        node_definitions_section = manifest.get("node_definitions")
-        if node_definitions_section is None:
-            node_definitions_section = manifest.get("nodes", {})
-
-        if not isinstance(node_definitions_section, dict):
-            logger.warning("Plugin '%s' node_definitions section is not a mapping. Skipping.", plugin_name)
-            return {}
-
-        loaded_for_plugin: Dict[str, Dict[str, Any]] = {}
-
-        for node_definition_name, raw_definition in node_definitions_section.items():
-            if not isinstance(raw_definition, dict):
-                logger.warning(
-                    "Plugin '%s' node definition '%s' must be a mapping. Skipping.",
-                    plugin_name,
-                    node_definition_name,
-                )
-                continue
-
-            definition = dict(raw_definition)
-            prompt_text, prompt_sources = resolve_prompt_bundle(
-                definition,
-                base_dir=plugin_root,
-                inline_keys=("prompt", "system_prompt"),
-                file_keys=("prompt_file", "system_prompt_file"),
-                files_key="prompt_files",
-                default_files=[f"prompts/nodes/{node_definition_name}.md"],
-            )
-            if prompt_text:
-                definition["prompt"] = prompt_text
-            if prompt_sources:
-                definition["prompt_sources"] = prompt_sources
-
-            pre_handlers = list(
-                dict.fromkeys(
-                    coerce_str_list(definition.get("pre")) + coerce_str_list(definition.get("pre_steps"))
-                )
-            )
-            step_handlers = list(
-                dict.fromkeys(
-                    coerce_str_list(definition.get("steps"))
-                    + coerce_str_list(definition.get("exec"))
-                    + coerce_str_list(definition.get("exec_steps"))
-                )
-            )
-            post_handlers = list(
-                dict.fromkeys(
-                    coerce_str_list(definition.get("post")) + coerce_str_list(definition.get("post_steps"))
-                )
-            )
-            if pre_handlers:
-                definition["pre"] = pre_handlers
-            if step_handlers:
-                definition["steps"] = step_handlers
-            if post_handlers:
-                definition["post"] = post_handlers
-
-            key = str(node_definition_name)
-            loaded_for_plugin[key] = definition
-
-            global_key = f"{plugin_name}.{key}"
-            if global_key in self.node_definitions:
-                logger.warning(
-                    "Node definition '%s' is being overwritten by plugin '%s'.",
-                    global_key,
-                    plugin_name,
-                )
-            self.node_definitions[global_key] = definition
-
-        return loaded_for_plugin
-
-    def _load_plugin_node_handlers(self, plugin_name: str, plugin_root: Path, manifest: Dict[str, Any]) -> None:
-        handlers_section = manifest.get("node_handlers", {})
-        if not isinstance(handlers_section, dict):
-            logger.warning("Plugin '%s' node_handlers section is not a mapping. Skipping.", plugin_name)
-            return
-
-        for kind_name, reference in handlers_section.items():
-            kind = str(kind_name).strip().lower()
-            if not kind:
-                continue
-
-            try:
-                handler = self._load_reference(reference, plugin_root)
-            except Exception as exc:
-                logger.error(
-                    "Plugin '%s' failed to load node handler '%s' from '%s': %s",
-                    plugin_name,
-                    kind,
-                    reference,
-                    exc,
-                )
-                continue
-
-            if not callable(handler):
-                logger.error(
-                    "Plugin '%s' node handler '%s' is not callable: %s",
-                    plugin_name,
-                    kind,
-                    type(handler),
-                )
-                continue
-
-            if kind in self.node_handlers:
-                logger.warning(
-                    "Node handler kind '%s' is being overwritten by plugin '%s'.",
-                    kind,
-                    plugin_name,
-                )
-
-            self.node_handlers[kind] = CustomNodeHandlerDefinition(
-                kind=kind,
-                handler=handler,
-                plugin_name=plugin_name,
-                metadata={"reference": str(reference)},
-            )
-
     def _load_plugin_agents(self, plugin_name: str, plugin_root: Path, manifest: Dict[str, Any]) -> None:
         agents_section = manifest.get("agents", {})
         if not isinstance(agents_section, dict):
@@ -352,14 +241,6 @@ class PluginManager:
 
         for agent_name, raw_definition in agents_section.items():
             definition = raw_definition if isinstance(raw_definition, dict) else {}
-            self._register_component(
-                name=str(agent_name),
-                kind="agent",
-                plugin_name=plugin_name,
-                plugin_root=plugin_root,
-                definition=definition,
-                source="legacy_agents",
-            )
             self._register_agent_definition(
                 agent_name=str(agent_name),
                 definition=definition,
@@ -379,21 +260,32 @@ class PluginManager:
         if not tools and definition.get("allowed_tools"):
             tools = definition.get("allowed_tools", [])
         handoff_agents = definition.get("handoff_agents", [])
-        execution_mode = str(definition.get("execution_mode") or definition.get("mode") or "node").strip().lower()
-        composite_workflow = (
-            definition.get("flow")
-            or definition.get("workflow")
-            or definition.get("composite_flow")
-        )
 
         if not isinstance(tools, list):
             tools = []
         if not isinstance(handoff_agents, list):
             handoff_agents = []
-        if execution_mode not in {"node", "flow", "composite"}:
-            execution_mode = "node"
-        if composite_workflow is not None:
-            composite_workflow = str(composite_workflow).strip() or None
+
+        raw_mode = str(definition.get("execution_mode") or definition.get("mode") or "llm").strip().lower()
+        if raw_mode in {"node", "llm"}:
+            execution_mode = "llm"
+        elif raw_mode in {"deterministic", "python"}:
+            execution_mode = "deterministic"
+        elif raw_mode in {"composite"}:
+            execution_mode = "composite"
+        else:
+            execution_mode = "llm"
+
+        deterministic_handler = definition.get("deterministic_handler") or definition.get("handler")
+
+        composite_agents = (
+            definition.get("composite_agents")
+            or definition.get("sub_agents")
+            or definition.get("delegate_agents")
+            or []
+        )
+        if not isinstance(composite_agents, list):
+            composite_agents = []
 
         if definition.get("tool_packs"):
             logger.warning(
@@ -448,8 +340,9 @@ class PluginManager:
             llm_profile=str(llm_profile) if llm_profile else None,
             tools=[str(item) for item in tools if isinstance(item, str)],
             handoff_agents=[str(item) for item in handoff_agents if isinstance(item, str)],
-            execution_mode="flow" if execution_mode in {"flow", "composite"} else "node",
-            composite_workflow=composite_workflow,
+            execution_mode=execution_mode,
+            deterministic_handler=str(deterministic_handler).strip() if deterministic_handler else None,
+            composite_agents=[str(item) for item in composite_agents if isinstance(item, str)],
             system_prompt=system_prompt,
             prompt_sources=prompt_sources,
             pre_handlers=pre_handlers,
@@ -461,338 +354,6 @@ class PluginManager:
                 "plugin": plugin_name,
                 "plugin_root": str(plugin_root),
             },
-        )
-
-    def _load_plugin_workflows(
-        self,
-        plugin_name: str,
-        plugin_root: Path,
-        manifest: Dict[str, Any],
-        plugin_node_definitions: Dict[str, Dict[str, Any]],
-    ) -> None:
-        workflows_section = manifest.get("flows")
-        if workflows_section is None:
-            workflows_section = manifest.get("workflows", {})
-        if not isinstance(workflows_section, dict):
-            logger.warning("Plugin '%s' workflows section is not a mapping. Skipping.", plugin_name)
-            return
-
-        for workflow_name, workflow_entry in workflows_section.items():
-            try:
-                definition_for_component = (
-                    workflow_entry if isinstance(workflow_entry, dict) else {"path": workflow_entry}
-                )
-                self._register_component(
-                    name=str(workflow_name),
-                    kind="workflow",
-                    plugin_name=plugin_name,
-                    plugin_root=plugin_root,
-                    definition=definition_for_component,
-                    source="legacy_workflows",
-                )
-                workflow_definition = self._load_workflow_definition(
-                    workflow_name=str(workflow_name),
-                    workflow_entry=workflow_entry,
-                    plugin_name=plugin_name,
-                    plugin_root=plugin_root,
-                    plugin_node_definitions=plugin_node_definitions,
-                )
-                self.workflows[str(workflow_name)] = workflow_definition
-            except Exception as exc:
-                logger.error(
-                    "Plugin '%s' failed to parse workflow '%s' (%s): %s",
-                    plugin_name,
-                    workflow_name,
-                    workflow_entry,
-                    exc,
-                )
-
-    def _load_plugin_components(
-        self,
-        plugin_name: str,
-        plugin_root: Path,
-        manifest: Dict[str, Any],
-        plugin_node_definitions: Dict[str, Dict[str, Any]],
-    ) -> None:
-        components_section = manifest.get("components", {})
-        if not isinstance(components_section, dict):
-            logger.warning("Plugin '%s' components section is not a mapping. Skipping.", plugin_name)
-            return
-
-        for component_name, raw_definition in components_section.items():
-            if not isinstance(raw_definition, dict):
-                logger.warning(
-                    "Plugin '%s' component '%s' must be a mapping. Skipping.",
-                    plugin_name,
-                    component_name,
-                )
-                continue
-
-            definition = dict(raw_definition)
-            kind = str(definition.get("kind", "")).strip().lower()
-            if not kind:
-                kind = self._infer_component_kind(definition)
-
-            name = str(component_name)
-            self._register_component(
-                name=name,
-                kind=kind,
-                plugin_name=plugin_name,
-                plugin_root=plugin_root,
-                definition=definition,
-                source="components",
-            )
-
-            try:
-                if kind in {"agent", "llm", "assistant"}:
-                    self._register_agent_definition(
-                        agent_name=name,
-                        definition=definition,
-                        plugin_name=plugin_name,
-                        plugin_root=plugin_root,
-                    )
-                    continue
-
-                if kind in {"workflow", "flow", "graph", "composite", "custom_flow"}:
-                    workflow_entry = (
-                        definition.get("workflow")
-                        or definition.get("path")
-                        or definition.get("graph")
-                        or definition.get("ref")
-                        or definition.get("factory")
-                        or definition.get("handler")
-                        or definition.get("flow")
-                        or definition
-                    )
-                    workflow_definition = self._load_workflow_definition(
-                        workflow_name=name,
-                        workflow_entry=workflow_entry,
-                        plugin_name=plugin_name,
-                        plugin_root=plugin_root,
-                        plugin_node_definitions=plugin_node_definitions,
-                    )
-                    if isinstance(definition, dict):
-                        workflow_definition = self._apply_workflow_metadata_overrides(
-                            definition=workflow_definition,
-                            metadata=definition,
-                            plugin_root=plugin_root,
-                        )
-                    self.workflows[name] = workflow_definition
-                    continue
-
-                logger.warning(
-                    "Plugin '%s' component '%s' has unsupported kind '%s'.",
-                    plugin_name,
-                    component_name,
-                    kind,
-                )
-            except Exception as exc:
-                logger.error(
-                    "Plugin '%s' failed to materialize component '%s' (%s): %s",
-                    plugin_name,
-                    component_name,
-                    kind,
-                    exc,
-                )
-
-    def _infer_component_kind(self, definition: Dict[str, Any]) -> str:
-        if any(key in definition for key in {"llm_profile", "tools", "allowed_tools", "handoff_agents"}):
-            return "agent"
-        if any(
-            key in definition
-            for key in {"workflow", "path", "graph", "ref", "factory", "handler", "flow", "markdown"}
-        ):
-            return "workflow"
-        return "agent"
-
-    def _load_workflow_definition(
-        self,
-        workflow_name: str,
-        workflow_entry: Any,
-        plugin_name: str,
-        plugin_root: Path,
-        plugin_node_definitions: Dict[str, Dict[str, Any]],
-    ) -> WorkflowDefinition:
-        if isinstance(workflow_entry, str):
-            candidate_path = (plugin_root / workflow_entry).resolve()
-            if candidate_path.is_file() and candidate_path.suffix.lower() in {".md", ".markdown"}:
-                return parse_markdown_workflow(
-                    workflow_path=candidate_path,
-                    workflow_name=workflow_name,
-                    plugin_name=plugin_name,
-                    plugin_root=plugin_root,
-                    plugin_node_definitions=plugin_node_definitions,
-                )
-            if workflow_entry.lower().endswith((".md", ".markdown")):
-                raise FileNotFoundError(
-                    f"Workflow markdown file not found for '{workflow_name}': {candidate_path}"
-                )
-            return self._build_custom_workflow_definition(
-                workflow_name=workflow_name,
-                plugin_name=plugin_name,
-                plugin_root=plugin_root,
-                flow_reference=workflow_entry,
-                raw_metadata={},
-            )
-
-        if isinstance(workflow_entry, dict):
-            markdown_path = (
-                workflow_entry.get("path")
-                or workflow_entry.get("workflow")
-                or workflow_entry.get("markdown")
-                or workflow_entry.get("graph")
-            )
-            if markdown_path:
-                candidate_path = (plugin_root / str(markdown_path)).resolve()
-                definition = parse_markdown_workflow(
-                    workflow_path=candidate_path,
-                    workflow_name=workflow_name,
-                    plugin_name=plugin_name,
-                    plugin_root=plugin_root,
-                    plugin_node_definitions=plugin_node_definitions,
-                )
-                return self._apply_workflow_metadata_overrides(
-                    definition=definition,
-                    metadata=workflow_entry,
-                    plugin_root=plugin_root,
-                )
-
-            flow_reference = (
-                workflow_entry.get("ref")
-                or workflow_entry.get("factory")
-                or workflow_entry.get("handler")
-                or workflow_entry.get("callable")
-                or workflow_entry.get("flow")
-            )
-            if not flow_reference:
-                raise ValueError(
-                    f"Workflow '{workflow_name}' must include a markdown path or custom flow reference."
-                )
-            return self._build_custom_workflow_definition(
-                workflow_name=workflow_name,
-                plugin_name=plugin_name,
-                plugin_root=plugin_root,
-                flow_reference=str(flow_reference),
-                raw_metadata=workflow_entry,
-            )
-
-        raise ValueError(
-            f"Workflow '{workflow_name}' configuration must be a string or mapping, got {type(workflow_entry)}."
-        )
-
-    def _apply_workflow_metadata_overrides(
-        self,
-        definition: WorkflowDefinition,
-        metadata: Dict[str, Any],
-        plugin_root: Path,
-    ) -> WorkflowDefinition:
-        updated = definition
-        if metadata.get("description"):
-            updated.description = str(metadata["description"])
-        if metadata.get("default_agent"):
-            updated.default_agent = str(metadata["default_agent"])
-
-        prompt_text, prompt_sources = resolve_prompt_bundle(
-            metadata,
-            base_dir=plugin_root,
-            inline_keys=("prompt",),
-            file_keys=("prompt_file",),
-            files_key="prompt_files",
-            default_files=[],
-        )
-        if prompt_text:
-            updated.prompt = prompt_text
-            updated.prompt_sources = prompt_sources
-
-        pre_handlers = list(
-            dict.fromkeys(
-                coerce_str_list(metadata.get("pre")) + coerce_str_list(metadata.get("pre_steps"))
-            )
-        )
-        step_handlers = list(
-            dict.fromkeys(
-                coerce_str_list(metadata.get("steps"))
-                + coerce_str_list(metadata.get("exec"))
-                + coerce_str_list(metadata.get("exec_steps"))
-            )
-        )
-        post_handlers = list(
-            dict.fromkeys(
-                coerce_str_list(metadata.get("post")) + coerce_str_list(metadata.get("post_steps"))
-            )
-        )
-
-        if pre_handlers:
-            updated.pre_handlers = pre_handlers
-        if step_handlers:
-            updated.step_handlers = step_handlers
-        if post_handlers:
-            updated.post_handlers = post_handlers
-
-        merged_metadata = dict(updated.metadata)
-        merged_metadata.update(dict(metadata))
-        updated.metadata = merged_metadata
-        return updated
-
-    def _build_custom_workflow_definition(
-        self,
-        workflow_name: str,
-        plugin_name: str,
-        plugin_root: Path,
-        flow_reference: str,
-        raw_metadata: Dict[str, Any],
-    ) -> WorkflowDefinition:
-        custom_flow = self._load_reference(flow_reference, plugin_root)
-        if not callable(custom_flow) and not hasattr(custom_flow, "run"):
-            raise TypeError(
-                f"Custom flow reference '{flow_reference}' must be callable or have a run(shared_store) method."
-            )
-
-        prompt_text, prompt_sources = resolve_prompt_bundle(
-            raw_metadata,
-            base_dir=plugin_root,
-            inline_keys=("prompt",),
-            file_keys=("prompt_file",),
-            files_key="prompt_files",
-            default_files=[f"prompts/flows/{workflow_name}.md"],
-        )
-        pre_handlers = list(
-            dict.fromkeys(
-                coerce_str_list(raw_metadata.get("pre")) + coerce_str_list(raw_metadata.get("pre_steps"))
-            )
-        )
-        step_handlers = list(
-            dict.fromkeys(
-                coerce_str_list(raw_metadata.get("steps"))
-                + coerce_str_list(raw_metadata.get("exec"))
-                + coerce_str_list(raw_metadata.get("exec_steps"))
-            )
-        )
-        post_handlers = list(
-            dict.fromkeys(
-                coerce_str_list(raw_metadata.get("post")) + coerce_str_list(raw_metadata.get("post_steps"))
-            )
-        )
-
-        default_agent = raw_metadata.get("default_agent")
-        start_node = str(raw_metadata.get("start_node") or "__custom_flow__")
-
-        return WorkflowDefinition(
-            name=workflow_name,
-            description=str(raw_metadata.get("description", "")),
-            plugin_name=plugin_name,
-            plugin_root=plugin_root,
-            markdown_path=plugin_root / "<custom-flow>",
-            start_node=start_node,
-            default_agent=str(default_agent) if default_agent else None,
-            workflow_kind="custom",
-            custom_flow=custom_flow,
-            prompt=prompt_text,
-            prompt_sources=prompt_sources,
-            pre_handlers=pre_handlers,
-            step_handlers=step_handlers,
-            post_handlers=post_handlers,
-            metadata={**dict(raw_metadata), "reference": flow_reference},
         )
 
     def _load_reference(self, reference: Any, plugin_root: Path) -> Any:
