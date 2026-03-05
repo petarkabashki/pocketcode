@@ -1,90 +1,132 @@
-# Programming Agent with PocketFlow
+# PocketFlow Agents
 
-PocketCoder supports defining agent logic programmatically using [PocketFlow](pocketflow.md). This approach provides full control over the agent's behavior, branching, and tool usage without relying on YAML/Markdown workflow descriptions.
+PocketCoder agents are expressed as PocketFlow `Flow` factories registered in
+`plugin.yaml`. This replaces the older YAML-workflow and `agent.yaml` formats
+completely — agents ARE flows, with no separate workflow layer.
+
+---
 
 ## Overview
 
-A programmatic agent is defined in the plugin's `agent.py` file using PocketFlow's `Node` and `Flow` classes. These agents are registered via a factory function in the plugin's `__init__.py`.
+A PocketFlow agent is a Python module that contains:
 
-## Creating a Programmatic Agent
+1. One or more `Node` subclasses (each node is a step in the agent's reasoning loop).
+2. A `create_flow() -> Flow` factory function that wires the nodes into a `Flow` and
+   returns it.
+
+The `Flow` is then referenced from `plugin.yaml` via `module:` + `entry_fn:`.
+
+---
+
+## Creating an Agent
 
 ### 1. Define Nodes
 
-Nodes represent individual steps in your agent's workflow. Inherit from `pocketflow.Node` and implement the `_run` method.
+```python
+from pocketflow import Node
+from typing import Any, Dict
+
+class ThinkNode(Node):
+    def prep(self, shared: Dict[str, Any]) -> str:
+        """Extract the task from shared state."""
+        return shared.get("task", "")
+
+    def exec(self, task: str) -> str:
+        """Pure computation step — no shared state side-effects here."""
+        return task  # hand off to LLM router when wired
+
+    def post(self, shared: Dict[str, Any], prep_res: str, exec_res: str) -> str:
+        """Update shared state and return an action string for branching."""
+        shared["result"] = exec_res
+        return "continue"  # matches a transition key defined in the Flow
+```
+
+### 2. Wire into a Flow
 
 ```python
-from pocketcode.core.pocketflow import Node
+from pocketflow import Flow
 
-class MyNode(Node):
-    def _run(self, shared):
-        # Access the plugin context injected by the runtime
-        ctx = shared.get("_plugin")
-        
-        # Call a tool registered in this plugin (or globally)
-        result = ctx.call_tool("my_tool", arg1="value")
-        
-        # Load a prompt from the plugin's prompts/ directory
-        system_prompt = ctx.get_prompt("system")
-        
-        # Update shared state
-        shared["last_result"] = result
-        
-        # Return an action string for branching
-        return "success"
+def create_flow() -> Flow:
+    think = ThinkNode()
+    # Simple single-node flow:
+    return Flow(start=think)
 ```
 
-### 2. Define the Flow
-
-The `Flow` class orchestrates the execution of nodes.
+For multi-step agents, connect nodes with the `>>` operator:
 
 ```python
-from pocketcode.core.pocketflow import Flow
+def create_flow() -> Flow:
+    plan = PlanNode()
+    execute = ExecuteNode()
+    review = ReviewNode()
 
-class MyAgentFlow(Flow):
-    def __init__(self):
-        super().__init__()
-        self.start_node = MyNode()
-        # Define transitions: node >> { "action": next_node }
-        # or simply node >> next_node for default transitions
+    plan >> {"execute": execute, "done": None}
+    execute >> {"review": review, "retry": execute}
+    review >> {"done": None, "revise": execute}
+
+    return Flow(start=plan)
 ```
 
-### 3. Register via Factory
+### 3. Register in `plugin.yaml`
 
-In your plugin's `__init__.py`, define a `get_plugin()` function that returns a `Plugin` instance containing your agent.
+```yaml
+schema_version: 1
+name: my_plugin
+description: My plugin.
+
+agents:
+  my_agent:
+    module: "agents/my_agent.py"
+    entry_fn: "create_flow"
+    description: "Does X using Y."
+    tools: [my_tool]
+    prompts: ["prompts/system.md"]
+```
+
+---
+
+## Shared Store (`shared`)
+
+The `shared` dictionary is the single mutable context passed between all nodes in a
+session. Useful keys injected by the runtime:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `"task"` | `str` | Initial user request |
+| `"messages"` | `list` | Conversation history |
+| `"_registry"` | `PluginManager` | Live plugin registry snapshot |
+| `"_llm_router"` | `LLMRouter` | LLM routing client (if wired) |
+| `"results"` | `dict` | Accumulated outputs |
+
+---
+
+## Cross-Agent Delegation
+
+An orchestrating agent (e.g., `micromanager`) can delegate to other agents by
+resolving their `AgentDefinition` from `shared["_registry"]`:
 
 ```python
-from pocketcode.core.interfaces import Plugin
-from .agent import MyAgentFlow
-from .tools.my_tools import my_tool
-
-def get_plugin():
-    return Plugin(
-        name="my-plugin",
-        tools=[my_tool],
-        agents={
-            "my-agent": MyAgentFlow()
-        }
-    )
+def post(self, shared, prep_res, exec_res):
+    registry = shared.get("_registry")
+    try:
+        agent_def = registry.agents.resolve("core.coder")
+        agent_def.flow_instance.run(shared)
+    except Exception as exc:
+        shared["error"] = str(exc)
+    return "done"
 ```
 
-## PluginContext API
+---
 
-When a programmatic agent runs, a `PluginContext` object is automatically injected into `shared["_plugin"]`. It provides the following methods:
+## Architecture Notes
 
-- `call_tool(tool_name: str, **kwargs)`: Executes a tool by name. Handles both local plugin tools and global tools.
-- `get_prompt(prompt_name: str) -> str`: Retrieves the content of a prompt file from the plugin's `prompts/` directory (e.g., `prompts/system.md`).
-- `name`: The name of the plugin.
+- Agents supersede workflows: there is no separate `workflows:` YAML — the `Flow`
+  graph IS the workflow.
+- `flow_instance` is eagerly created at plugin-load time by calling `entry_fn()`.
+  If the factory raises, the agent is skipped and `ERROR` is logged.
+- All agents are addressed by their qualified name `{plugin}.{agent}` in the
+  `NamespaceRegistry`.
 
-## Running the Agent
-
-Use the `--agent` flag with the CLI:
-
-```bash
-python -m pocketcode.main --agent my-agent --prompt "Your request"
-```
-
-## Best Practices
-
-1. **State Management**: Use the `shared` dictionary to pass data between nodes.
-2. **Error Handling**: Use node transitions to handle failures (e.g., `node >> {"error": recovery_node}`).
-3. **Local Tools**: Prefer defining tools within the plugin and registering them via the factory for better encapsulation.
+See [Plugin Architecture](plugin_architecture.md) for the full plugin model.
+See [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)
+for an end-to-end walkthrough of creating a new plugin.

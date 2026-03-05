@@ -181,3 +181,34 @@ See: `docs/plugin_architecture.md`
   ```bash
   echo "Summarize the current workspace" | pocketcode
   ```
+
+## Plugin Authoring
+
+Plugins follow the unified plugin model (003-unified-plugin-namespace):
+
+- Each plugin lives in `pocketcode/plugins/<name>/`.
+- Declare everything in `plugin.yaml` with `schema_version: 1`.
+- Tools are declared as `local_name: "tools/file.py:ClassName"`.
+- Agents are declared with `module:` + `entry_fn:` pointing to a zero-arg Python
+  factory that returns a PocketFlow `Flow`.
+- All resources are addressable as `plugin_name.resource_name`.
+
+Quick example:
+
+```yaml
+# pocketcode/plugins/my_plugin/plugin.yaml
+schema_version: 1
+name: my_plugin
+description: My custom plugin.
+
+tools:
+  my_tool: "tools/my_tool.py:MyTool"
+
+agents:
+  my_agent:
+    module: "agents/my_agent.py"
+    entry_fn: "create_flow"
+    tools: [my_tool]
+```
+
+Full walkthrough: [`specs/003-unified-plugin-namespace/quickstart.md`](specs/003-unified-plugin-namespace/quickstart.md)

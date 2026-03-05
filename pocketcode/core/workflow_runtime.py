@@ -58,6 +58,12 @@ class BaseWorkflowRuntime:
         shared_store.setdefault("llm_usage_totals", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
         shared_store.setdefault("llm_cost_usd_total", 0.0)
         shared_store.setdefault("llm_calls", [])
+        # FR-011: populate registry snapshot for PocketFlow agents (T028)
+        if "_registry" not in shared_store:
+            try:
+                shared_store["_registry"] = self._plugins._holder.get()
+            except AttributeError:
+                shared_store["_registry"] = None
 
     def _push_workflow_context(self, shared_store: Dict[str, Any]) -> bool:
         shared_store["active_workflow"] = self.definition.name
@@ -704,6 +710,22 @@ class WorkflowRuntime(BaseWorkflowRuntime, Flow):
             }
         )
         agent_definition = self._plugins.agents[agent_name]
+
+        # T028: Route through flow_instance when available (programmatic or factory agents)
+        if agent_definition.flow_instance is not None:
+            # Ensure _registry is available for cross-agent delegation
+            if "_registry" not in shared_store:
+                try:
+                    shared_store["_registry"] = self._plugins._holder.get()
+                except AttributeError:
+                    shared_store["_registry"] = None
+            try:
+                agent_definition.flow_instance.run(shared_store)
+            except Exception as exc:
+                logger.error("PocketFlow agent '%s' raised: %s", agent_name, exc, exc_info=True)
+                shared_store["error_message"] = str(exc)
+                return "error"
+            return str(shared_store.get("transition", "continue"))
 
         transition: str | None = None
         transition, pre_halt = self._run_handler_references(

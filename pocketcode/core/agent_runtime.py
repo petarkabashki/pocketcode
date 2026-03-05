@@ -113,6 +113,13 @@ class AgentRuntime:
         )
         shared_store.setdefault("llm_cost_usd_total", 0.0)
         shared_store.setdefault("llm_calls", [])
+        # FR-011: populate registry snapshot for PocketFlow agents (T028)
+        if "_registry" not in shared_store:
+            try:
+                shared_store["_registry"] = self._plugins._holder.get()
+            except AttributeError:
+                # Defensive: test doubles (MagicMock, etc.) may not have _holder
+                shared_store["_registry"] = None
 
     def _run_agent_turn(self, agent_name: str, shared_store: Dict[str, Any]) -> str:
         agent_definition = self._plugins.agents[agent_name]
@@ -153,7 +160,7 @@ class AgentRuntime:
             )
             return str(transition or "error")
 
-        if agent_definition.is_programmatic and agent_definition.flow_instance:
+        if agent_definition.flow_instance:
             transition = self._run_pocketflow_agent(
                 agent_name=agent_name,
                 agent_definition=agent_definition,

@@ -19,9 +19,9 @@
 
 **Purpose**: Create directory structure and package init files that all subsequent tasks write into.
 
-- [ ] T001 Create `pocketcode/plugins/core/tools/__init__.py` (empty package init — makes `core/tools/` a valid Python package)
-- [ ] T002 [P] Create `pocketcode/plugins/core/agents/__init__.py` (empty — home for core agent PocketFlow factories)
-- [ ] T003 [P] Create `tests/unit/__init__.py` (empty — enables pytest discovery for new unit tests)
+- [X] T001 Create `pocketcode/plugins/core/tools/__init__.py` (empty package init — makes `core/tools/` a valid Python package)
+- [X] T002 [P] Create `pocketcode/plugins/core/agents/__init__.py` (empty — home for core agent PocketFlow factories)
+- [X] T003 [P] Create `tests/unit/__init__.py` (empty — enables pytest discovery for new unit tests)
 
 ---
 
@@ -31,9 +31,9 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 [P] Create `pocketcode/core/namespace_registry.py` — implement full `NamespaceRegistry[T]` class with three-tier store (`_ns`, `_flat`, `_bare`), `register()`, `unregister_plugin()`, `resolve()` (qualified + unqualified + `context_plugin` local-first), `list_all()`, `list_by_plugin()`, `plugins()`, `items()`, `__contains__()`, `snapshot()`, `RegistryError`, and `RegistryHolder` with `get()` + `swap()` per `contracts/registry-api.md`
-- [ ] T005 [P] Create `pocketcode/core/manifest_loader.py` — implement `ParsedManifest` dataclass, `ManifestSchemaError(ValueError)`, `load_manifest(path: Path) -> ParsedManifest`, `_validate_schema_version()`, `_load_agent_yaml_with_warning()` shim (returns `schema_version=0`), `_warn_legacy_sections()` for `components/workflows/node_definitions/flows/modes`, per `contracts/manifest-v1.md`
-- [ ] T006 [P] Update `pocketcode/core/runtime_models.py` — add `module: Optional[str] = None`, `entry_fn: Optional[str] = None`, and `flow_instance: Optional[Flow] = None` fields to `AgentDefinition` (or whichever dataclass holds agent metadata); keep all existing fields intact; `flow_instance` is populated **eagerly** during `PluginManager._load_plugin()` by calling `entry_fn()` immediately after registration — if `entry_fn()` raises, the agent is skipped and `ERROR` is logged
+- [X] T004 [P] Create `pocketcode/core/namespace_registry.py` — implement full `NamespaceRegistry[T]` class with three-tier store (`_ns`, `_flat`, `_bare`), `register()`, `unregister_plugin()`, `resolve()` (qualified + unqualified + `context_plugin` local-first), `list_all()`, `list_by_plugin()`, `plugins()`, `items()`, `__contains__()`, `snapshot()`, `RegistryError`, and `RegistryHolder` with `get()` + `swap()` per `contracts/registry-api.md`
+- [X] T005 [P] Create `pocketcode/core/manifest_loader.py` — implement `ParsedManifest` dataclass, `ManifestSchemaError(ValueError)`, `load_manifest(path: Path) -> ParsedManifest`, `_validate_schema_version()`, `_load_agent_yaml_with_warning()` shim (returns `schema_version=0`), `_warn_legacy_sections()` for `components/workflows/node_definitions/flows/modes`, per `contracts/manifest-v1.md`
+- [X] T006 [P] Update `pocketcode/core/runtime_models.py` — add `module: Optional[str] = None`, `entry_fn: Optional[str] = None`, and `flow_instance: Optional[Flow] = None` fields to `AgentDefinition` (or whichever dataclass holds agent metadata); keep all existing fields intact; `flow_instance` is populated **eagerly** during `PluginManager._load_plugin()` by calling `entry_fn()` immediately after registration — if `entry_fn()` raises, the agent is skipped and `ERROR` is logged
 
 **Checkpoint**: `python -c "from pocketcode.core.namespace_registry import NamespaceRegistry; from pocketcode.core.manifest_loader import load_manifest"` completes without error.
 
@@ -47,20 +47,20 @@
 
 ### Implementation for User Story 1
 
-- [ ] T007 [P] [US1] Copy `pocketcode/tools/filesystem.py` → `pocketcode/plugins/core/tools/filesystem.py`; update any intra-package imports from `pocketcode.tools.*` to `pocketcode.plugins.core.tools.*`
-- [ ] T008 [P] [US1] Copy `pocketcode/tools/system.py` → `pocketcode/plugins/core/tools/system.py`; update intra-package imports
-- [ ] T009 [P] [US1] Copy `pocketcode/tools/git.py` → `pocketcode/plugins/core/tools/git.py`; update the `execute_shell_command` import to `from pocketcode.plugins.core.tools.system import execute_shell_command` (canonical, not the shim)
-- [ ] T010 [P] [US1] Copy `pocketcode/tools/search.py` → `pocketcode/plugins/core/tools/search.py`; update intra-package imports
-- [ ] T011 [P] [US1] Copy `pocketcode/tools/user_input.py` → `pocketcode/plugins/core/tools/user_input.py`; update intra-package imports
-- [ ] T011a [P] [US1] Copy `pocketcode/tools/context_elephant_store_tools.py` → `pocketcode/plugins/core/tools/context_elephant_store_tools.py`; update any intra-package imports; **note**: this file contains 5 `BaseTool` subclasses (`ReadContextElephantStoreFileTool`, `WriteContextElephantStoreFileTool`, `AppendToContextElephantStoreFileTool`, `GetContextElephantStoreSummaryTool`, `CheckContextElephantStoreStatusTool`) and is NOT currently registered in any `plugin.yaml` — do not add it to core tool registrations without an explicit decision; the wrapper in T011b is still required because code may import from the old path
-- [ ] T011b [P] [US1] Replace `pocketcode/tools/context_elephant_store_tools.py` with a backward-compat re-export wrapper forwarding all public `BaseTool` subclasses and exception types from `pocketcode.plugins.core.tools.context_elephant_store_tools` (depends on T011a)
-- [ ] T012 [US1] Replace `pocketcode/tools/filesystem.py` with a backward-compat re-export wrapper: `from pocketcode.plugins.core.tools.filesystem import *` plus explicit `__all__` listing every public symbol (depends on T007)
-- [ ] T013 [P] [US1] Replace `pocketcode/tools/system.py` with re-export wrapper — MUST re-export both `ExecuteCommandTool` and bare function `execute_shell_command` (consumed by `koder/tools/git.py`) (depends on T008)
-- [ ] T014 [P] [US1] Replace `pocketcode/tools/git.py` with re-export wrapper (depends on T009)
-- [ ] T015 [P] [US1] Replace `pocketcode/tools/search.py` with re-export wrapper (depends on T010)
-- [ ] T016 [P] [US1] Replace `pocketcode/tools/user_input.py` with re-export wrapper (depends on T011)
-- [ ] T017 [US1] Update `pocketcode/plugins/core/plugin.yaml` — change all tool entry values from dotted-module paths (`pocketcode.tools.filesystem.ReadFileTool`) to file-relative format (`tools/filesystem.py:ReadFileTool`); add `schema_version: 1` as the first key; remove or comment out `components:`, `workflows:`, and `node_definitions:` legacy sections
-- [ ] T018 [US1] Run `pytest tests/integration/` — must pass without any test file modifications (SC-001 first checkpoint); fix any import breakages in wrappers before proceeding
+- [X] T007 [P] [US1] Copy `pocketcode/tools/filesystem.py` → `pocketcode/plugins/core/tools/filesystem.py`; update any intra-package imports from `pocketcode.tools.*` to `pocketcode.plugins.core.tools.*`
+- [X] T008 [P] [US1] Copy `pocketcode/tools/system.py` → `pocketcode/plugins/core/tools/system.py`; update intra-package imports
+- [X] T009 [P] [US1] Copy `pocketcode/tools/git.py` → `pocketcode/plugins/core/tools/git.py`; update the `execute_shell_command` import to `from pocketcode.plugins.core.tools.system import execute_shell_command` (canonical, not the shim)
+- [X] T010 [P] [US1] Copy `pocketcode/tools/search.py` → `pocketcode/plugins/core/tools/search.py`; update intra-package imports
+- [X] T011 [P] [US1] Copy `pocketcode/tools/user_input.py` → `pocketcode/plugins/core/tools/user_input.py`; update intra-package imports
+- [X] T011a [P] [US1] Copy `pocketcode/tools/context_elephant_store_tools.py` → `pocketcode/plugins/core/tools/context_elephant_store_tools.py`; update any intra-package imports; **note**: this file contains 5 `BaseTool` subclasses (`ReadContextElephantStoreFileTool`, `WriteContextElephantStoreFileTool`, `AppendToContextElephantStoreFileTool`, `GetContextElephantStoreSummaryTool`, `CheckContextElephantStoreStatusTool`) and is NOT currently registered in any `plugin.yaml` — do not add it to core tool registrations without an explicit decision; the wrapper in T011b is still required because code may import from the old path
+- [X] T011b [P] [US1] Replace `pocketcode/tools/context_elephant_store_tools.py` with a backward-compat re-export wrapper forwarding all public `BaseTool` subclasses and exception types from `pocketcode.plugins.core.tools.context_elephant_store_tools` (depends on T011a)
+- [X] T012 [US1] Replace `pocketcode/tools/filesystem.py` with a backward-compat re-export wrapper: `from pocketcode.plugins.core.tools.filesystem import *` plus explicit `__all__` listing every public symbol (depends on T007)
+- [X] T013 [P] [US1] Replace `pocketcode/tools/system.py` with re-export wrapper — MUST re-export both `ExecuteCommandTool` and bare function `execute_shell_command` (consumed by `koder/tools/git.py`) (depends on T008)
+- [X] T014 [P] [US1] Replace `pocketcode/tools/git.py` with re-export wrapper (depends on T009)
+- [X] T015 [P] [US1] Replace `pocketcode/tools/search.py` with re-export wrapper (depends on T010)
+- [X] T016 [P] [US1] Replace `pocketcode/tools/user_input.py` with re-export wrapper (depends on T011)
+- [X] T017 [US1] Update `pocketcode/plugins/core/plugin.yaml` — change all tool entry values from dotted-module paths (`pocketcode.tools.filesystem.ReadFileTool`) to file-relative format (`tools/filesystem.py:ReadFileTool`); add `schema_version: 1` as the first key; remove or comment out `components:`, `workflows:`, and `node_definitions:` legacy sections
+- [X] T018 [US1] Run `pytest tests/integration/` — must pass without any test file modifications (SC-001 first checkpoint); fix any import breakages in wrappers before proceeding
 
 **Checkpoint**: Core plugin loads; all core tools register; `pytest tests/integration/` is green; `from pocketcode.tools.system import execute_shell_command` resolves in a fresh interpreter.
 
@@ -74,11 +74,11 @@
 
 ### Implementation for User Story 4
 
-- [ ] T019 [US4] Create `pocketcode/plugins/core/agents/coder_agent.py` — `create_flow() -> Flow` factory; port the Coder agent's logic into a PocketFlow `Flow` + `Node` graph; source: `core/plugin.yaml` `components: Coder:` block, associated workflow YAML files in `core/workflows/`, and current `agent_runtime.py` execution paths
-- [ ] T020 [P] [US4] Create `pocketcode/plugins/core/agents/architect_agent.py` — `create_flow() -> Flow` factory for **`core.Architect`** (the planning component currently declared in `core/plugin.yaml` under `components: Architect:`); **no collision with `arkitekt` plugin**: `arkitekt` registers under its own plugin namespace with local name `arkitekt`, while `core.Architect` has local name `Architect` — different bare names, no FR-006 ambiguity
-- [ ] T021 [P] [US4] Create `pocketcode/plugins/core/agents/ask_agent.py` — `create_flow() -> Flow` factory for the Ask agent; source: `core/plugin.yaml` `components: Ask:` block
-- [ ] T023 [US4] Update `pocketcode/plugins/core/plugin.yaml` — add `agents:` block with entries for `coder`, `architect`, `ask`; each with `module:` pointing to the new factory file and `entry_fn: create_flow`; include `llm_profile`, `tools`, and `prompts` per each agent's existing configuration; **depends on T017** (schema_version and tool refs must already be updated before adding the agents: block)
-- [ ] T025 [US4] Run `pytest tests/integration/` against the three core agents (Coder, Architect, Ask); confirm tests pass unmodified for those flows (SC-001 P1 partial gate); micromanager integration tests are deferred to T030 in Phase 5
+- [X] T019 [US4] Create `pocketcode/plugins/core/agents/coder_agent.py` — `create_flow() -> Flow` factory; port the Coder agent's logic into a PocketFlow `Flow` + `Node` graph; source: `core/plugin.yaml` `components: Coder:` block, associated workflow YAML files in `core/workflows/`, and current `agent_runtime.py` execution paths
+- [X] T020 [P] [US4] Create `pocketcode/plugins/core/agents/architect_agent.py` — `create_flow() -> Flow` factory for **`core.Architect`** (the planning component currently declared in `core/plugin.yaml` under `components: Architect:`); **no collision with `arkitekt` plugin**: `arkitekt` registers under its own plugin namespace with local name `arkitekt`, while `core.Architect` has local name `Architect` — different bare names, no FR-006 ambiguity
+- [X] T021 [P] [US4] Create `pocketcode/plugins/core/agents/ask_agent.py` — `create_flow() -> Flow` factory for the Ask agent; source: `core/plugin.yaml` `components: Ask:` block
+- [X] T023 [US4] Update `pocketcode/plugins/core/plugin.yaml` — add `agents:` block with entries for `coder`, `architect`, `ask`; each with `module:` pointing to the new factory file and `entry_fn: create_flow`; include `llm_profile`, `tools`, and `prompts` per each agent's existing configuration; **depends on T017** (schema_version and tool refs must already be updated before adding the agents: block)
+- [X] T025 [US4] Run `pytest tests/integration/` against the three core agents (Coder, Architect, Ask); confirm tests pass unmodified for those flows (SC-001 P1 partial gate); micromanager integration tests are deferred to T030 in Phase 5
 
 **Checkpoint**: Core agents Coder, Architect, and Ask load and execute correctly via PocketFlow factories. Core `plugin.yaml` has `schema_version: 1` and an `agents:` block. `pytest tests/integration/` passes for non-micromanager flows.
 
@@ -92,13 +92,13 @@
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US4→US2] Create `pocketcode/plugins/micromanager/agents/micromanager_agent.py` — `create_flow() -> Flow` factory; orchestrating Flow whose nodes delegate to sub-agents by resolving `core.Coder`, `core.Architect`, etc. from `shared["_registry"].agents`; **moved from Phase 4** because `shared["_registry"]` is only populated after T028 wires the registry into the session shared store
-- [ ] T024 [US4→US2] Convert `pocketcode/plugins/micromanager/agent.yaml` → `pocketcode/plugins/micromanager/plugin.yaml` — add `schema_version: 1`; add `agents:` block for `micromanager` with `module: agents/micromanager_agent.py`, `entry_fn: create_flow`; migrate existing tools and prompts entries (depends on T022)
-- [ ] T026 [US2] Refactor `pocketcode/core/plugin_manager.py` — replace `self.tools` (dict) with `self.tools: NamespaceRegistry[Callable]`; replace `self.agents` with `self.agents: NamespaceRegistry[AgentDefinition]`; add `self.prompts: NamespaceRegistry[str]`; update `_load_plugin()` to call `manifest_loader.load_manifest()` and then `self.tools.register(plugin, name, impl)` / `self.agents.register(plugin, name, def)` / `self.prompts.register(plugin, name, content)` per each loaded resource; catch `RegistryError` and log at `ERROR` level, skipping offending plugin; add `RegistryHolder` instance as `self._holder`; add plugin-namespace-collision check in `load()` before any `register()` calls
-- [ ] T027 [P] [US2] Update `pocketcode/core/watcher.py` — add `_rebuild_in_progress: threading.Event` flag; on file-change callback, skip if rebuild already in progress; otherwise set flag, build new `PluginManager` snapshot outside the lock, call `self._holder.swap(new_pm)`, then clear flag; existing `_debounced_enqueue` (500 ms timer) is retained as-is
-- [ ] T028 [US2] Update `pocketcode/core/workflow_runtime.py` — remove any YAML-workflow-specific execution branches; route all agent invocations through `registry = holder.get(); flow = registry.agents.resolve(agent_qname).flow_instance; flow.run(shared)` pattern; ensure `shared["_registry"]` is populated at session start with the registry snapshot
-- [ ] T029 [P] [US2] Write `tests/unit/test_namespace_registry.py` — unit tests covering: `register()` success; `RegistryError` on qualified-name collision; `resolve()` with qualified ref; `resolve()` with unqualified ref + 1 owner emits `WARNING`; `resolve()` with unqualified ref + 2 owners raises `RegistryError`; `resolve()` with `context_plugin` resolves local name first; `unregister_plugin()` removes all entries; `snapshot()` returns deep copy; `list_all()`, `list_by_plugin()`, `plugins()`, `__contains__()`; **prompt registry coverage**: `prompts` `NamespaceRegistry[str]` — `resolve("plugin.prompt_name")` succeeds; `RegistryError` when plugin is not loaded; `WARNING` emitted for unqualified cross-plugin prompt ref with 1 owner; `RegistryError` for unqualified prompt ref matching 2+ plugins
-- [ ] T030 [US2] Run `pytest tests/` — all unit tests (T029) pass; all integration tests still pass; fix any callsites that depended on the old flat dict API (e.g., `plugin_manager.tools["name"]` → `plugin_manager.tools.resolve("name")`)
+- [X] T022 [US4→US2] Create `pocketcode/plugins/micromanager/agents/micromanager_agent.py` — `create_flow() -> Flow` factory; orchestrating Flow whose nodes delegate to sub-agents by resolving `core.Coder`, `core.Architect`, etc. from `shared["_registry"].agents`; **moved from Phase 4** because `shared["_registry"]` is only populated after T028 wires the registry into the session shared store
+- [X] T024 [US4→US2] Convert `pocketcode/plugins/micromanager/agent.yaml` → `pocketcode/plugins/micromanager/plugin.yaml` — add `schema_version: 1`; add `agents:` block for `micromanager` with `module: agents/micromanager_agent.py`, `entry_fn: create_flow`; migrate existing tools and prompts entries (depends on T022)
+- [X] T026 [US2] Refactor `pocketcode/core/plugin_manager.py` — replace `self.tools` (dict) with `self.tools: NamespaceRegistry[Callable]`; replace `self.agents` with `self.agents: NamespaceRegistry[AgentDefinition]`; add `self.prompts: NamespaceRegistry[str]`; update `_load_plugin()` to call `manifest_loader.load_manifest()` and then `self.tools.register(plugin, name, impl)` / `self.agents.register(plugin, name, def)` / `self.prompts.register(plugin, name, content)` per each loaded resource; catch `RegistryError` and log at `ERROR` level, skipping offending plugin; add `RegistryHolder` instance as `self._holder`; add plugin-namespace-collision check in `load()` before any `register()` calls
+- [X] T027 [P] [US2] Update `pocketcode/core/watcher.py` — add `_rebuild_in_progress: threading.Event` flag; on file-change callback, skip if rebuild already in progress; otherwise set flag, build new `PluginManager` snapshot outside the lock, call `self._holder.swap(new_pm)`, then clear flag; existing `_debounced_enqueue` (500 ms timer) is retained as-is
+- [X] T028 [US2] Update `pocketcode/core/workflow_runtime.py` — remove any YAML-workflow-specific execution branches; route all agent invocations through `registry = holder.get(); flow = registry.agents.resolve(agent_qname).flow_instance; flow.run(shared)` pattern; ensure `shared["_registry"]` is populated at session start with the registry snapshot
+- [X] T029 [P] [US2] Write `tests/unit/test_namespace_registry.py` — unit tests covering: `register()` success; `RegistryError` on qualified-name collision; `resolve()` with qualified ref; `resolve()` with unqualified ref + 1 owner emits `WARNING`; `resolve()` with unqualified ref + 2 owners raises `RegistryError`; `resolve()` with `context_plugin` resolves local name first; `unregister_plugin()` removes all entries; `snapshot()` returns deep copy; `list_all()`, `list_by_plugin()`, `plugins()`, `__contains__()`; **prompt registry coverage**: `prompts` `NamespaceRegistry[str]` — `resolve("plugin.prompt_name")` succeeds; `RegistryError` when plugin is not loaded; `WARNING` emitted for unqualified cross-plugin prompt ref with 1 owner; `RegistryError` for unqualified prompt ref matching 2+ plugins
+- [X] T030 [US2] Run `pytest tests/` — all unit tests (T029) pass; all integration tests still pass; fix any callsites that depended on the old flat dict API (e.g., `plugin_manager.tools["name"]` → `plugin_manager.tools.resolve("name")`)
 
 **Checkpoint**: Qualified references (`core.read_file`, `koder.write_to_file`) resolve correctly across all loaded plugins. Collision between two plugins emits `ERROR` and skips the second plugin. Hot-reload within 5 s (SC-007). Micromanager loads, its factory resolves `core.Coder` from `shared["_registry"].agents`. `pytest tests/` is fully green including any micromanager integration tests.
 
@@ -112,14 +112,14 @@
 
 ### Implementation for User Story 3
 
-- [ ] T031 [US3] Create `pocketcode/plugins/koder/agents/koder_agent.py` — `create_flow() -> Flow` factory; port koder's personality, tools, and workflow logic into a PocketFlow `Flow` + `Node` graph
-- [ ] T032 [US3] Convert `pocketcode/plugins/koder/agent.yaml` → `pocketcode/plugins/koder/plugin.yaml` — add `schema_version: 1`; migrate `tools:` list-of-dicts to `tools:` dict format (`local_name: tools/file.py:ClassName`); add `agents:` block with `koder: {module: agents/koder_agent.py, entry_fn: create_flow, ...}`; migrate `personality.system_prompt` → `prompts.system`; remove `workflows:` list
-- [ ] T033 [P] [US3] Create `pocketcode/plugins/arkitekt/agents/arkitekt_agent.py` — `create_flow() -> Flow` factory for the Architect plugin
-- [ ] T034 [P] [US3] Convert `pocketcode/plugins/arkitekt/agent.yaml` → `pocketcode/plugins/arkitekt/plugin.yaml` (schema_version: 1, agents: block, tools dict, prompts)
-- [ ] T035 [P] [US3] Create `pocketcode/plugins/asker/agents/asker_agent.py` — `create_flow() -> Flow` factory for the Ask/Asker plugin
-- [ ] T036 [P] [US3] Convert `pocketcode/plugins/asker/agent.yaml` → `pocketcode/plugins/asker/plugin.yaml` (schema_version: 1, agents: block, tools dict, prompts)
-- [ ] T037 [P] [US3] Write `tests/unit/test_manifest_loader.py` — unit tests covering: `load_manifest()` success for valid `plugin.yaml`; `ManifestSchemaError` on missing `schema_version`; `ManifestSchemaError` on unknown `schema_version` value; `agent.yaml` detection emits `WARNING` and returns `schema_version=0`; `_warn_legacy_sections()` emits `WARNING` for `components:`, `workflows:`, `node_definitions:`; missing `module` or `entry_fn` in an agent block raises `ManifestSchemaError`
-- [ ] T038 [US3] Run `pytest tests/` — all unit tests (T037) pass; all integration tests pass; no `agent.yaml` files remain in `plugins/` (verify with `find pocketcode/plugins -name agent.yaml`)
+- [X] T031 [US3] Create `pocketcode/plugins/koder/agents/koder_agent.py` — `create_flow() -> Flow` factory; port koder's personality, tools, and workflow logic into a PocketFlow `Flow` + `Node` graph
+- [X] T032 [US3] Convert `pocketcode/plugins/koder/agent.yaml` → `pocketcode/plugins/koder/plugin.yaml` — add `schema_version: 1`; migrate `tools:` list-of-dicts to `tools:` dict format (`local_name: tools/file.py:ClassName`); add `agents:` block with `koder: {module: agents/koder_agent.py, entry_fn: create_flow, ...}`; migrate `personality.system_prompt` → `prompts.system`; remove `workflows:` list
+- [X] T033 [P] [US3] Create `pocketcode/plugins/arkitekt/agents/arkitekt_agent.py` — `create_flow() -> Flow` factory for the Architect plugin
+- [X] T034 [P] [US3] Convert `pocketcode/plugins/arkitekt/agent.yaml` → `pocketcode/plugins/arkitekt/plugin.yaml` (schema_version: 1, agents: block, tools dict, prompts)
+- [X] T035 [P] [US3] Create `pocketcode/plugins/asker/agents/asker_agent.py` — `create_flow() -> Flow` factory for the Ask/Asker plugin
+- [X] T036 [P] [US3] Convert `pocketcode/plugins/asker/agent.yaml` → `pocketcode/plugins/asker/plugin.yaml` (schema_version: 1, agents: block, tools dict, prompts)
+- [X] T037 [P] [US3] Write `tests/unit/test_manifest_loader.py` — unit tests covering: `load_manifest()` success for valid `plugin.yaml`; `ManifestSchemaError` on missing `schema_version`; `ManifestSchemaError` on unknown `schema_version` value; `agent.yaml` detection emits `WARNING` and returns `schema_version=0`; `_warn_legacy_sections()` emits `WARNING` for `components:`, `workflows:`, `node_definitions:`; missing `module` or `entry_fn` in an agent block raises `ManifestSchemaError`
+- [X] T038 [US3] Run `pytest tests/` — all unit tests (T037) pass; all integration tests pass; no `agent.yaml` files remain in `plugins/` (verify with `find pocketcode/plugins -name agent.yaml`)
 
 **Checkpoint**: Zero `agent.yaml` files remain. All plugins load via `plugin.yaml` with `schema_version: 1`. No legacy-section warnings at startup. `pytest tests/` is fully green.
 
@@ -129,11 +129,11 @@
 
 **Purpose**: Cleanup, documentation, and final end-to-end validation across all user stories.
 
-- [ ] T039 [P] Remove stale workflow YAML files from `plugins/*/workflows/` directories that have been superseded by PocketFlow agent factories (verify no remaining files are referenced anywhere in the codebase before deleting)
-- [ ] T040 [P] Update `docs/plugin_architecture.md` — replace workflow-centric content with the unified plugin model: one manifest, one namespace, agents = PocketFlow flows
-- [ ] T041 [P] Update `docs/pocketflow_agents.md` — reflect the final architecture where agents supersede workflows completely; link to `quickstart.md`
-- [ ] T042 [P] Update `docs/README.md` and `readme.md` — add plugin authoring section with link to `specs/003-unified-plugin-namespace/quickstart.md`
-- [ ] T043 Run the `quickstart.md` end-to-end validation — follow every step in `specs/003-unified-plugin-namespace/quickstart.md` to create a fresh minimal plugin; confirm it loads, its tool is discoverable, and its agent `create_flow` returns a runnable `Flow`
+- [X] T039 [P] Remove stale workflow YAML files from `plugins/*/workflows/` directories that have been superseded by PocketFlow agent factories (verify no remaining files are referenced anywhere in the codebase before deleting)
+- [X] T040 [P] Update `docs/plugin_architecture.md` — replace workflow-centric content with the unified plugin model: one manifest, one namespace, agents = PocketFlow flows
+- [X] T041 [P] Update `docs/pocketflow_agents.md` — reflect the final architecture where agents supersede workflows completely; link to `quickstart.md`
+- [X] T042 [P] Update `docs/README.md` and `readme.md` — add plugin authoring section with link to `specs/003-unified-plugin-namespace/quickstart.md`
+- [X] T043 Run the `quickstart.md` end-to-end validation — follow every step in `specs/003-unified-plugin-namespace/quickstart.md` to create a fresh minimal plugin; confirm it loads, its tool is discoverable, and its agent `create_flow` returns a runnable `Flow`
 
 ---
 
