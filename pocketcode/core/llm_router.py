@@ -67,6 +67,9 @@ class LlmRouter:
     def list_profiles(self) -> Dict[str, Dict[str, Any]]:
         return copy.deepcopy(self._profiles)
 
+    def list_profile_names(self) -> list[str]:
+        return sorted(self._profiles.keys())
+
     def resolve_profile_config(self, profile_name: str | None) -> Dict[str, Any]:
         effective_profile_name = profile_name or self.default_profile_name
         if not effective_profile_name:

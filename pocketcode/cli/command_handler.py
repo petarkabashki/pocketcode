@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 from typing import Any, Dict, Optional
 
 from pocketcode.core.engine import PocketCodeEngine
@@ -59,7 +60,11 @@ def handle_command(
     engine: PocketCodeEngine,
     cli_context: Dict[str, Any],
 ) -> Optional[str]:
-    parts = command_input.strip().split()
+    try:
+        parts = shlex.split(command_input.strip())
+    except ValueError as exc:
+        print(f"Command parse error: {exc}")
+        return None
     if not parts:
         return None
 
@@ -439,8 +444,13 @@ Compatibility aliases:
 Keyboard shortcuts (Textual UI):
   Tab                           Complete current prompt input.
   Ctrl+]                        Select next agent.
+  Ctrl+P                        Select next profile for the current agent.
   Ctrl+[                        Select next global LLM override.
+  Ctrl+B                        Toggle the left navigation panel.
+  Ctrl+I                        Toggle the right inspector panel.
+  Ctrl+W                        Cycle workspace mode presets.
   Ctrl+T                        Toggle top stats panel.
+  Alt+1 / Alt+2 / Alt+3 / Alt+4 Switch Chat / Control / Context / Run views.
   Ctrl+Space                    Complete current prompt input.
   Ctrl+Shift+A                  Copy full response console output.
   Ctrl+Y                        Copy last assistant response.
