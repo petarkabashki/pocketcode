@@ -12,8 +12,8 @@ Pocketcode now uses a small plugin-first core:
 - Agents support Python `pre`, `steps`, and `post` handlers alongside LLM and deterministic execution modes.
 - Agent profiles can override LLM selection, tool allowlists, extra prompts, and confirmation policy.
 - Tool definitions and routing payloads are exchanged with LLMs as YAML.
-- CLI now uses a Textual TUI for interactive mode.
-- CLI switches agent, agent profile, and LLM profile at runtime.
+- CLI now uses a multi-pane Textual workspace for interactive mode.
+- CLI switches agent, agent profile, and LLM profile at runtime from both commands and UI controls.
 - The runtime supports agent handoff and per-agent/per-handoff LLM overrides.
 - Gemini provider is implemented with the `google.genai` package (`google-genai` dependency).
 
@@ -107,17 +107,59 @@ Textual keyboard shortcuts:
 
 - `Tab`: complete current prompt input
 - `Ctrl+]`: switch to next agent
+- `Ctrl+P`: switch to the next profile for the current agent
 - `Ctrl+[`: switch global LLM override (cycles `none` + profiles)
+- `Ctrl+B`: toggle the left navigation panel
+- `Ctrl+I`: toggle the right inspector panel
+- `Ctrl+W`: cycle workspace mode presets (`Balanced`, `Chat Focus`, `Control Desk`, `Minimal`, `Review`)
 - `Ctrl+T`: toggle top stats panel
+- `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`: switch `Chat`, `Control`, `Context`, and `Run` views
 - `Ctrl+Space`: complete current prompt input
 - `Ctrl+Shift+A`: copy full response console output
 - `Ctrl+Y`: copy last assistant response
 - `Ctrl+Q`: quit Textual UI
 
+Interactive workspace views:
+
+- `Chat`: conversation and command entry
+- `Control`: form-based selectors and toggles for agent, profile, global LLM, session confirmation, and editable workspace-backed profiles
+- `Context`: add, remove, and clear files, folders, URLs, and snippets without slash commands
+- `Run`: inspect the latest runtime path, effective LLM/profile state, token usage, and cost
+- agent/profile/tool metadata is reused across a single UI refresh so switching the active agent stays responsive
+- the Textual client now derives one UI snapshot per refresh and applies only changed widget state, instead of imperatively rebuilding each pane in multiple passes
+
+Inspector panels:
+
+- `Session Context`: current context counts and the active file/folder/url/snippet list
+- `Profiles For Active Agent`: quick profile switcher
+- `Active Tools`: effective tool scope after profile filtering
+- `Prompt Sources`: agent prompt sources plus profile extra prompts
+
+Interactive workspace presets:
+
+- `Balanced`: chat-first layout with both side panels visible
+- `Chat Focus`: larger chat area with the left navigator hidden
+- `Control Desk`: opens directly into the form-driven control surface
+- `Minimal`: pure chat canvas with both side panels hidden
+- `Review`: jumps to the run inspector for runtime/debugging work
+
+Theme presets:
+
+- `Ocean`: blue/cyan high-contrast default
+- `Forest`: green terminal-inspired workspace
+- `Ember`: warm orange/brown review-focused palette
+
+Profile editing in the Textual UI:
+
+- plugin and synthesised profiles are read-only until cloned to a workspace profile
+- workspace-backed profiles can edit `llm_profile`, tool allowlists, confirmation defaults, and `extra_prompts`
+- tools and prompts can be changed from lists, toggles, and text boxes instead of editing YAML manually
+
 Output box behavior:
 
 - output text is selectable with mouse/keyboard
 - copy selected text with your terminal copy shortcut (for example `Ctrl+Shift+C`)
+- the TUI retains only the most recent 400 output lines and inserts a trim notice once older history is dropped, which keeps long sessions responsive
 
 Prompt suggestions include commands, agents, agent profiles, and LLM profiles.
 
@@ -128,9 +170,17 @@ Textual copy commands:
 
 Top stats panel includes:
 
-- context stats (`files`, `folders`, `urls`, `snippets`, `snippet_chars`)
 - aggregated token usage (`in`, `out`, `total`) for the latest request
 - estimated USD cost (if pricing is configured)
+- active session confirmation default
+- it does not repeat the active agent/profile state already shown in the status bar
+
+Context counts and item details now live in the right-hand inspector instead of the top strip.
+
+Terminal font size note:
+
+- Pocketcode can change colors, density, emphasis, borders, and layout inside the TUI
+- actual font size is still controlled by your terminal emulator rather than the app
 
 Optional cost pricing map:
 

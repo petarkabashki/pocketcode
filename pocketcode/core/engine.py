@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,6 +45,7 @@ class PocketCodeEngine:
             tool_runtime=self._tool_runtime,
             runtime_config=self._runtime_config,
         )
+        self._agent_tools_cache: Dict[str, List[str]] = {}
 
         self.default_llm_profile = (
             self._llm_config.get("default_profile")
@@ -102,6 +104,7 @@ class PocketCodeEngine:
             tool_runtime=self._tool_runtime,
             runtime_config=self._runtime_config,
         )
+        self._agent_tools_cache = {}
         self._validate_current_selections()
 
     def _validate_current_selections(self) -> None:
@@ -128,7 +131,7 @@ class PocketCodeEngine:
         return sorted(self._plugins.agents.keys())
 
     def list_llm_profiles(self) -> List[str]:
-        return sorted(self._llm_router.list_profiles().keys())
+        return self._llm_router.list_profile_names()
 
     def get_current_agent(self):
         return self.current_agent
@@ -163,9 +166,12 @@ class PocketCodeEngine:
         self.current_agent = profile.agent
         self.active_agent_profile = profile
 
-    def list_agent_profiles(self) -> List[str]:
-        """Return all known agent profile names, sorted."""
-        return [p.name for p in self._agent_profile_manager.list()]
+    def list_agent_profiles(self, agent_name: Optional[str] = None) -> List[str]:
+        """Return known agent profile names, optionally filtered by target agent."""
+        profiles = self._agent_profile_manager.list()
+        if agent_name:
+            profiles = [profile for profile in profiles if profile.agent == agent_name]
+        return [p.name for p in profiles]
 
     def get_agent_profile(self, name: Optional[str] = None) -> Any:
         """Return a named agent profile, or the active one when *name* is None."""
@@ -176,6 +182,111 @@ class PocketCodeEngine:
     def clone_agent_profile(self, src_name: str, new_name: str) -> Any:
         """Clone an agent profile and return the new workspace-backed profile."""
         return self._agent_profile_manager.clone(src_name, new_name)
+
+    def update_agent_profile(
+        self,
+        name: str,
+        *,
+        llm_profile: Optional[str],
+        tools: Optional[List[str]],
+        extra_prompts: List[str],
+        tool_confirmation_default: Optional[str],
+    ) -> Any:
+        """Persist updates to a workspace-backed agent profile and refresh runtime state."""
+        profile = self._agent_profile_manager.get(name)
+        if profile is None:
+            raise ValueError(f"Unknown agent profile '{name}'.")
+        if profile.source != "workspace" or profile.source_path is None:
+            raise ValueError(
+                f"Agent profile '{name}' is not workspace-backed. Clone it before editing."
+            )
+        if llm_profile:
+            self._llm_router.resolve_profile_config(llm_profile)
+
+        confirmation = dict(profile.tool_confirmation or {})
+        overrides = dict(confirmation.get("overrides", {}))
+        if tool_confirmation_default is None:
+            confirmation.pop("default", None)
+        else:
+            confirmation["default"] = self._normalize_confirmation_policy(tool_confirmation_default)
+        if overrides:
+            confirmation["overrides"] = overrides
+        elif "overrides" in confirmation:
+            confirmation["overrides"] = {}
+
+        updated = dataclasses.replace(
+            profile,
+            llm_profile=llm_profile or None,
+            tools=list(tools) if tools is not None else None,
+            extra_prompts=list(extra_prompts),
+            tool_confirmation=confirmation,
+        )
+        self._agent_profile_manager.save(updated)
+        self._agent_profile_manager.reload(dict(self._plugins.agents))
+        refreshed = self._agent_profile_manager.get(name)
+        if refreshed is not None and self.active_agent_profile and self.active_agent_profile.name == name:
+            self.active_agent_profile = refreshed
+        return refreshed
+
+    def list_tools_for_agent(
+        self,
+        agent_name: str,
+        *,
+        apply_active_profile: bool = False,
+    ) -> List[str]:
+        """Return tool names for an agent, optionally filtered by the active profile."""
+        if agent_name not in self._plugins.agents:
+            raise KeyError(f"Unknown agent '{agent_name}'.")
+        if not apply_active_profile and agent_name in self._agent_tools_cache:
+            return list(self._agent_tools_cache[agent_name])
+
+        tool_names = list(self._plugins.resolve_tools_for_agent(agent_name))
+        if apply_active_profile:
+            active_profile = self.active_agent_profile
+            if (
+                active_profile is not None
+                and active_profile.agent == agent_name
+                and active_profile.tools is not None
+            ):
+                tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
+        sorted_tool_names = sorted(tool_names)
+        if not apply_active_profile:
+            self._agent_tools_cache[agent_name] = list(sorted_tool_names)
+        return sorted_tool_names
+
+    def describe_agent(self, agent_name: Optional[str] = None) -> Dict[str, Any]:
+        """Expose agent metadata for the control-oriented TUI."""
+        target = agent_name or self.current_agent
+        if not target:
+            return {
+                "name": None,
+                "description": "",
+                "execution_mode": "",
+                "prompt_sources": [],
+                "profiles": [],
+                "tools": [],
+            }
+        definition = self._plugins.agents.get(target)
+        if definition is None:
+            raise KeyError(f"Unknown agent '{target}'.")
+        return {
+            "name": target,
+            "description": definition.description,
+            "execution_mode": definition.execution_mode,
+            "prompt_sources": list(definition.prompt_sources),
+            "profiles": self.list_agent_profiles(target),
+            "tools": self.list_tools_for_agent(target),
+        }
+
+    def get_agent_prompt_sources(self, agent_name: Optional[str] = None) -> List[str]:
+        """Return prompt source paths for the target agent."""
+        target = agent_name or self.current_agent
+        if not target:
+            return []
+        definition = self._plugins.agents.get(target)
+        if definition is None:
+            raise KeyError(f"Unknown agent '{target}'.")
+        return list(definition.prompt_sources)
 
     def _activate_default_profile_for(self, agent_name: str) -> None:
         """Set active_agent_profile to the agent's default profile."""
@@ -293,6 +404,7 @@ class PocketCodeEngine:
     def status(self) -> Dict[str, Any]:
         return {
             "agent": self.current_agent,
+            "runtime_workflow": self._runtime_config.get("agent_runtime_workflow"),
             # T013: expose active agent profile name.
             "active_agent_profile": self.active_agent_profile.name if self.active_agent_profile else None,
             "global_llm_override": self.global_llm_override,
