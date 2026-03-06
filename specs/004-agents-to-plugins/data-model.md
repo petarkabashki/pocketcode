@@ -165,4 +165,4 @@ Items that must be absent after the migration (verified by SC-* acceptance crite
 | `prompts/nodes/single_agent/think.md` | `core/prompts/nodes/single_agent/` | file deletion |
 | `agent_runtime_workflow: single_agent` | `pocketcode.yml` | config update |
 | `default_agent: Ask` | `pocketcode.yml` | config update → `core::react` |
-| `core.coder`, `core.architect`, `core.ask` refs | `micromanager/plugin.yaml` | manifest update |
+| `core.coder`, `core.architect`, `core.ask` refs | `.pocketcode/plugins/micromanager/plugin.yaml` | manifest update |

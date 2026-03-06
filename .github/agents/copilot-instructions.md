@@ -35,8 +35,10 @@ def my_node(shared):
 pocketcode/
 ├── core/            # Framework engine and interfaces
 ├── cli/             # Textual-based CLI and command handlers
-├── plugins/         # Built-in and user plugins (factory-based)
+├── plugins/         # Package-owned plugins (core lives here)
 └── tools/           # Shared core tools
+.pocketcode/
+└── plugins/         # Workspace and repo-local plugins
 ```
 
 ## Commands

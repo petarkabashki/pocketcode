@@ -116,7 +116,7 @@ Unqualified bare-name resolution:
 
 ## Core Plugin (`pocketcode/plugins/core`)
 
-The built-in `core` plugin ships the default runtime flow plus the shared interactive tool family. Git and context elephant store tools are implemented and registered from the workspace plugins at `.pocketcode/plugins/workspace_git` and `.pocketcode/plugins/workspace_context`. The only remaining compatibility surface for git is the `pocketcode.tools` package export; the old core git module is gone:
+The package-owned `core` plugin ships the default runtime flow plus the shared interactive tool family. All other repo-shipped plugins now live under `.pocketcode/plugins/` and are discovered through `runtime.plugin_paths` just like workspace-local plugins. Git and context elephant store tools are implemented and registered from the workspace plugins at `.pocketcode/plugins/workspace_git` and `.pocketcode/plugins/workspace_context`. The only remaining compatibility surface for git is the `pocketcode.tools` package export; the old core git module is gone:
 
 | Qualified name | Description |
 |----------------|-------------|
@@ -139,7 +139,7 @@ Workspace plugin example:
 | `workspace_git.git_status` | Show git status |
 | `workspace_context.read_context_elephant_store_file` | Read a context elephant store file |
 
-For built-in plugins that share tool behavior, prefer re-export shims over copy-pasted tool modules. The filesystem tools are the reference pattern: `pocketcode/plugins/core/tools/filesystem.py` is canonical, while plugin-local `tools/filesystem.py` modules can re-export those symbols so manifest-local handler paths remain stable without duplicating implementation.
+For plugins that share tool behavior, prefer re-export shims over copy-pasted tool modules. The filesystem tools are the reference pattern: `pocketcode/plugins/core/tools/filesystem.py` is canonical, while plugin-local `tools/filesystem.py` modules can re-export those symbols so manifest-local handler paths remain stable without duplicating implementation.
 
 ---
 

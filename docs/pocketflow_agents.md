@@ -109,7 +109,7 @@ resolving their `FlowDefinition` from `shared["_registry"]`:
 def post(self, shared, prep_res, exec_res):
     registry = shared.get("_registry")
     try:
-        flow_def = registry.agents.resolve("core.coder")
+        flow_def = registry.agents.resolve("coder::coder")
         flow_def.flow_instance.run(shared)
     except Exception as exc:
         shared["error"] = str(exc)

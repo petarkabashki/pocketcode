@@ -6,10 +6,10 @@
 
 ### 1. Structure
 
-Create a folder under `pocketcode/plugins/`:
+Create a folder under `.pocketcode/plugins/`:
 
 ```text
-pocketcode/plugins/my_plugin/
+.pocketcode/plugins/my_plugin/
 ├── plugin.yaml
 ├── prompts/
 │   └── main.md

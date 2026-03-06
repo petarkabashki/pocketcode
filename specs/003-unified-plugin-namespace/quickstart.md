@@ -9,7 +9,7 @@ This guide shows how to create, migrate, and reference resources under the new u
 ## 1. Directory Layout for a New Plugin
 
 ```
-pocketcode/plugins/my_plugin/
+.pocketcode/plugins/my_plugin/
 ├── plugin.yaml              ← unified manifest (schema_version: 1)
 ├── tools/
 │   └── my_tool.py           ← tool implementation(s)
@@ -67,7 +67,7 @@ llm_profiles:
 ## 3. Writing a Tool
 
 ```python
-# pocketcode/plugins/my_plugin/tools/my_tool.py
+# .pocketcode/plugins/my_plugin/tools/my_tool.py
 from pocketcode.core.interfaces import BaseTool
 
 
@@ -86,7 +86,7 @@ No registration code needed anywhere else. Adding the tool to `plugin.yaml` is t
 ## 4. Writing an Agent (PocketFlow Factory)
 
 ```python
-# pocketcode/plugins/my_plugin/agents/my_agent.py
+# .pocketcode/plugins/my_plugin/agents/my_agent.py
 from pocketflow import Flow, Node
 from pocketcode.core.llm_factory import create_llm_client
 
@@ -119,7 +119,7 @@ The factory name (`create_flow`) must match `entry_fn:` in the manifest.
 An orchestrating agent is architecturally identical to any other agent — it is a `Flow` whose nodes delegate to other agents as nested sub-flows.
 
 ```python
-# pocketcode/plugins/my_plugin/agents/orchestrator.py
+# .pocketcode/plugins/my_plugin/agents/orchestrator.py
 from pocketflow import Flow, Node
 
 
@@ -129,7 +129,7 @@ class DelegateNode(Node):
     def prep(self, shared):
         # The registry snapshot is passed in shared["_registry"] by the runtime
         registry = shared.get("_registry")
-        sub_agent_def = registry.agents.resolve("core.Coder")
+      sub_agent_def = registry.agents.resolve("coder::coder")
         return sub_agent_def.flow_instance
 
     def exec(self, sub_flow):
@@ -160,7 +160,7 @@ agents:
 | Reference style | When to use | Example |
 |---|---|---|
 | Local name (no dot) | Within your own plugin | `my_tool`, `system` |
-| Qualified name | Cross-plugin or disambiguation | `core.read_file`, `core.Coder` |
+| Qualified name | Cross-plugin or disambiguation | `core.read_file`, `coder::coder` |
 
 Local names are resolved within the owning plugin first (FR-004). Unqualified references to resources owned by exactly one *other* plugin emit a `WARNING` and are resolved; references matching resources in multiple plugins emit an `ERROR`.
 

@@ -24,12 +24,12 @@ logger = logging.getLogger(__name__)
 # Routing heuristics — map simple keywords to qualified agent names
 # ---------------------------------------------------------------------------
 _ROUTING_RULES: list[tuple[tuple[str, ...], str]] = [
-    (("code", "implement", "write", "fix", "debug", "refactor"), "core.coder"),
-    (("architect", "design", "plan", "structure", "scaffold"), "core.architect"),
-    (("ask", "question", "explain", "help", "what", "how", "why"), "core.ask"),
+    (("code", "implement", "write", "fix", "debug", "refactor"), "coder::coder"),
+    (("architect", "design", "plan", "structure", "scaffold"), "architect::architect"),
+    (("ask", "question", "explain", "help", "what", "how", "why"), "asker::ask"),
 ]
 
-_DEFAULT_AGENT = "core.coder"
+_DEFAULT_AGENT = "coder::coder"
 
 
 def _route_task(shared: Dict[str, Any]) -> str:

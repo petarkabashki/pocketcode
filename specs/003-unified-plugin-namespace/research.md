@@ -159,7 +159,7 @@ from pocketcode.plugins.core.tools.filesystem import (  # noqa: F401
 ### Critical detail: `execute_shell_command`
 `system.py` exports a bare function `execute_shell_command` (not a Tool class) consumed by:
 - Historical note: `pocketcode/tools/git.py` once existed as an intra-package wrapper; the current codebase exposes git tools directly from the `pocketcode.tools` package.
-- `pocketcode/plugins/coder/tools/git.py` (cross-plugin import)
+- `.pocketcode/plugins/coder/tools/git.py` (cross-plugin import)
 
 The wrapper in `pocketcode/tools/system.py` MUST re-export `execute_shell_command` alongside `ExecuteCommandTool`. This note is historical: git tooling no longer lives in `pocketcode/plugins/core/tools/git.py`; the current canonical implementation is `.pocketcode/plugins/workspace_git/tools/git.py`.
 
@@ -205,7 +205,7 @@ tools:
 |---|---|
 | `pocketcode/core/tool_runtime.py` | `from pocketcode.tools.user_input import ConfirmUserInputTool` |
 | Historical `pocketcode/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` (intra-package) |
-| `pocketcode/plugins/coder/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` |
+| `.pocketcode/plugins/coder/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` |
 | `pocketcode/plugins/core/plugin.yaml` | dotted paths: `pocketcode.tools.filesystem.ReadFileTool`, etc. |
 | `tests/integration/` | **No direct imports from `pocketcode.tools.*`** — only `pocketcode.core.*` |
 

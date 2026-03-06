@@ -11,7 +11,7 @@ This guide shows you how to migrate your agent from a YAML-based `workflow.md` d
 The plugin must be a Python package (a directory with an `__init__.py`).
 
 ```text
-pocketcode/plugins/my_new_agent/
+.pocketcode/plugins/my_new_agent/
 ├── __init__.py
 ├── agents.py
 ├── tools.py
@@ -20,7 +20,7 @@ pocketcode/plugins/my_new_agent/
 ```
 
 ## 2. Define the Plugin Factory
-In `pocketcode/plugins/my_new_agent/__init__.py`, implement `get_plugin(**config)`:
+In `.pocketcode/plugins/my_new_agent/__init__.py`, implement `get_plugin(**config)`:
 
 ```python
 from pocketcode.core.interfaces import Plugin
@@ -39,7 +39,7 @@ def get_plugin(config):
 ```
 
 ## 3. Create the Flow
-In `pocketcode/plugins/my_new_agent/agents.py`, define your agent using `pocketflow`:
+In `.pocketcode/plugins/my_new_agent/agents.py`, define your agent using `pocketflow`:
 
 ```python
 from pocketflow import Flow, Node
@@ -63,7 +63,7 @@ class HelloWorldFlow(Flow):
 ```
 
 ## 4. Run your Agent
-Once the plugin directory is added to the `pocketcode.yml` configuration (or is in the default `pocketcode/plugins/` directory), you can run it via the CLI:
+Once the plugin directory is added to the `pocketcode.yml` configuration (or is in the default `.pocketcode/plugins/` directory), you can run it via the CLI:
 
 ```bash
 python3 -m pocketcode.main --agent my-first-agent --prompt "Say hello"

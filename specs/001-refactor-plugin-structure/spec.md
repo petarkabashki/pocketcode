@@ -13,7 +13,7 @@ A user provides their own persona or specialized agent as a self-contained plugi
 
 **Why this priority**: Shifting from hardcoded modes to user-supplied agents is the central architectural goal.
 
-**Independent Test**: Create a temporary `plugins/test_plugin` folder with a simple workflow, prompt, and tool, and verify it can be run via the CLI/Engine.
+**Independent Test**: Create a temporary `.pocketcode/plugins/test_plugin` folder with a simple workflow, prompt, and tool, and verify it can be run via the CLI/Engine.
 
 **Acceptance Scenarios**:
 

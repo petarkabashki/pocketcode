@@ -226,7 +226,7 @@ class RegistryHolder:
 
         # RIGHT — snapshot captured once at session start
         registry = holder.get()
-        flow = registry.agents.resolve("core.coder").flow_instance
+        flow = registry.agents.resolve("coder::coder").flow_instance
         flow.run(shared)
     """
 

@@ -79,7 +79,7 @@ The flow is self-contained within the PocketFlow `Flow`; `AgentRuntime._run_pock
 
 ## 6. Handoff Reference Format in Manifests
 
-**Finding**: `micromanager/plugin.yaml` currently references handoff targets as `core.coder`, `core.architect`, `core.ask` (dot notation). The namespace resolution code (spec 003) uses `::` as the delimiter.
+**Finding**: `.pocketcode/plugins/micromanager/plugin.yaml` currently references handoff targets as `core.coder`, `core.architect`, `core.ask` (dot notation). The namespace resolution code (spec 003) uses `::` as the delimiter.
 
 **Decision**: Update micromanager manifest to use `coder::coder`, `architect::architect`, `asker::ask` in fully-qualified form. The coder/architect/asker agent manifests use the same `plugin::agent` form for their mutual handoff references.
 

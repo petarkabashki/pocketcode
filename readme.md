@@ -20,7 +20,8 @@ Pocketcode now uses a small plugin-first core:
 
 ## Built-In Runtime
 
-- Built-in plugins live under `pocketcode/plugins/`
+- The package-owned `core` plugin lives under `pocketcode/plugins/core/`
+- Repo-shipped workspace plugins live under `.pocketcode/plugins/`
 - The default flow is `core::react`
 - Shared filesystem tool behavior is implemented once in `pocketcode/plugins/core/tools/filesystem.py`; plugin-local filesystem modules re-export that canonical implementation to avoid drift.
 - Git and context elephant store tools now live in separate workspace plugins at `.pocketcode/plugins/workspace_git/` and `.pocketcode/plugins/workspace_context/`; built-in flows reference those workspace plugins explicitly. The remaining public compatibility surface is the `pocketcode.tools` package exports, while `pocketcode.plugins.core.tools.context_elephant_store_tools` remains only as a compatibility shim for context-elephant imports.
@@ -270,7 +271,8 @@ See: `docs/plugin_architecture.md`
 
 Plugins follow the unified plugin model (003-unified-plugin-namespace):
 
-- Each plugin lives in `pocketcode/plugins/<name>/`.
+- Workspace plugins live in `.pocketcode/plugins/<name>/`.
+- The only package-owned plugin is `pocketcode/plugins/core/`.
 - Declare everything in `plugin.yaml` with `schema_version: 1`.
 - Tools are declared as `local_name: "tools/file.py:ClassName"`.
 - Flows are declared with `module:` + `entry_fn:` pointing to a zero-arg Python
@@ -281,7 +283,7 @@ Plugins follow the unified plugin model (003-unified-plugin-namespace):
 Quick example:
 
 ```yaml
-# pocketcode/plugins/my_plugin/plugin.yaml
+# .pocketcode/plugins/my_plugin/plugin.yaml
 schema_version: 1
 name: my_plugin
 description: My custom plugin.

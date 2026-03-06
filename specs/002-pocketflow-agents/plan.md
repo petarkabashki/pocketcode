@@ -55,7 +55,7 @@ pocketcode/
     └── template/        # Example of new factory-based plugin
 ```
 
-**Structure Decision**: Standard single-project structure extending the existing `pocketcode/core` modules and providing examples in `pocketcode/plugins/`.
+**Structure Decision**: Standard single-project structure extending the existing `pocketcode/core` modules and providing examples in `.pocketcode/plugins/`.
 
 ## Complexity Tracking
 

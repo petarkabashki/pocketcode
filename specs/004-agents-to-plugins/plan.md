@@ -65,18 +65,16 @@ pocketcode/plugins/
 │   │   └── shared/                          # KEPT
 │   └── tools/                               # UNCHANGED
 │
+.pocketcode/plugins/
 ├── coder/
 │   ├── plugin.yaml                          # MODIFIED — rename agent coder→coder; add full tool list
 │   └── agents/coder_agent.py                # KEPT (entry_fn: create_flow)
-│
 ├── architect/
 │   ├── plugin.yaml                          # MODIFIED — add glob_files, handoff targets
 │   └── agents/architect_agent.py            # KEPT
-│
 ├── asker/
 │   ├── plugin.yaml                          # MODIFIED — fix plugin name (ask→asker); add full tool list
 │   └── agents/asker_agent.py                # KEPT
-│
 └── micromanager/
     └── plugin.yaml                          # MODIFIED — update handoff_agents to namespaced form
 
@@ -89,7 +87,7 @@ tests/
     └── test_manifest_loader.py               # UPDATED if needed
 ```
 
-**Structure Decision**: Single-project layout. All changes are within the existing `pocketcode/plugins/` directory tree and the top-level config file. No new top-level directories are needed.
+**Structure Decision**: Single-project layout. The package-owned `core` plugin remains under `pocketcode/plugins/`, while non-core repo-shipped plugins live under `.pocketcode/plugins/`. The top-level config file is updated accordingly.
 
 ## Complexity Tracking
 

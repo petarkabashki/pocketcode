@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from pocketcode.plugins.architect.tools import filesystem as architect_filesystem
-from pocketcode.plugins.coder.tools import filesystem as coder_filesystem
 from pocketcode.plugins.core.tools import filesystem as core_filesystem
+from pocketcode.tools._workspace_plugin_loader import load_workspace_plugin_module
+
+
+architect_filesystem = load_workspace_plugin_module(
+    ".pocketcode", "plugins", "architect", "tools", "filesystem.py"
+)
+coder_filesystem = load_workspace_plugin_module(
+    ".pocketcode", "plugins", "coder", "tools", "filesystem.py"
+)
 
 
 class TestFilesystemHelpers:

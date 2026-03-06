@@ -3,16 +3,16 @@
 **Feature**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 
 ## Implementation Strategy
-Minimalist refactor using `pocketflow.py` as the core. Transition from hardcoded logic in `mode_flows/` to user-supplied agent folders in `pocketcode/plugins/`.
+Minimalist refactor using `pocketflow.py` as the core. Transition from hardcoded logic in `mode_flows/` to user-supplied agent folders in `.pocketcode/plugins/`.
 
 ---
 
 ## Phase 1: Setup & Contracts
 Initialize new folder structures and define the agent manifest schema.
 
-- [X] T001 Create directory structure for user-supplied agents in `pocketcode/plugins/`
+- [X] T001 Create directory structure for user-supplied agents in `.pocketcode/plugins/`
 - [X] T002 Define JSON schema for `agent.yaml` in `specs/001-refactor-plugin-structure/contracts/agent-schema.json`
-- [X] T003 [P] Create base `agent.yaml` template in `pocketcode/plugins/template/agent.yaml`
+- [X] T003 [P] Create base `agent.yaml` template in `.pocketcode/plugins/template/agent.yaml`
 
 ---
 
@@ -20,7 +20,7 @@ Initialize new folder structures and define the agent manifest schema.
 Refactor the generic runtime to be a thin layer over `pocketflow.py`.
 
 - [X] T004 Refactor `pocketcode/core/workflow_runtime.py` to use `pocketflow.Flow` and `pocketflow.Node` directly
-- [X] T005 Implement `PluginManager` update to scan `pocketcode/plugins/` for `agent.yaml` manifests
+- [X] T005 Implement `PluginManager` update to scan `.pocketcode/plugins/` for `agent.yaml` manifests
 - [X] T006 [P] Update `ToolRuntime` to search for tools in both local plugin `tools/` and global `pocketcode/tools/`
 - [X] T007 Implement minimalist `BaseAgentNode` in `pocketcode/core/runtime_nodes.py` that maps `pocketflow.Node.prep` and `post`
 
@@ -31,8 +31,8 @@ Refactor the generic runtime to be a thin layer over `pocketflow.py`.
 
 **Independent Test**: Verify agent loading via CLI with a test dummy agent folder.
 
-- [ ] T008 [US1] Create `architect` agent plugin in `pocketcode/plugins/architect/` (moving existing assets)
-- [ ] T009 [US1] Create `coder` agent plugin in `pocketcode/plugins/coder/`
+- [ ] T008 [US1] Create `architect` agent plugin in `.pocketcode/plugins/architect/` (moving existing assets)
+- [ ] T009 [US1] Create `coder` agent plugin in `.pocketcode/plugins/coder/`
 - [ ] T010 [US1] Implement persona loading logic in `pocketcode/core/prompt_loader.py` to resolve local `prompts/`
 - [ ] T011 [P] [US1] Verify agent loading via CLI with a test dummy agent folder
 

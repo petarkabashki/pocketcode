@@ -18,7 +18,7 @@ PocketCoder is an extensible terminal AI coding assistant built around PocketFlo
 ## Quick Start
 
 1. Configure your LLM provider in `pocketcode.yml`.
-2. Create a plugin directory under `pocketcode/plugins/my_plugin/`.
+2. Create a plugin directory under `.pocketcode/plugins/my_plugin/`.
 3. Add a `plugin.yaml` with `schema_version: 1` and a `flows:` block.
 4. Execute your flow with:
 

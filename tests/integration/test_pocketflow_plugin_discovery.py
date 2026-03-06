@@ -1,5 +1,4 @@
 import pytest
-import os
 from pathlib import Path
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.config.loader import load_settings
@@ -21,14 +20,6 @@ def test_pocketflow_plugin_discovery(monkeypatch):
     workspace_root = Path(__file__).parent.parent.parent.resolve()
     config = load_settings(workspace_root=workspace_root)
     
-    # 2. Add the plugins directory to plugin_paths if not present
-    # By default, PluginManager might look in .pocketcode/plugins
-    # We want it to find pocketcode/plugins/template
-    plugin_paths = config.get("runtime", {}).get("plugin_paths", [])
-    if "pocketcode/plugins" not in plugin_paths:
-        plugin_paths.append("pocketcode/plugins")
-    config.setdefault("runtime", {})["plugin_paths"] = plugin_paths
-
     plugin_manager = PluginManager(config=config, workspace_root=workspace_root)
     
     # 3. Call load()
@@ -65,11 +56,6 @@ def test_agent_namespace_migration(monkeypatch):
 
     workspace_root = Path(__file__).parent.parent.parent.resolve()
     config = load_settings(workspace_root=workspace_root)
-
-    plugin_paths = config.get("runtime", {}).get("plugin_paths", [])
-    if "pocketcode/plugins" not in plugin_paths:
-        plugin_paths.append("pocketcode/plugins")
-    config.setdefault("runtime", {})["plugin_paths"] = plugin_paths
 
     plugin_manager = PluginManager(config=config, workspace_root=workspace_root)
     plugin_manager.load()

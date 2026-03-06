@@ -23,7 +23,7 @@ description: "Task list for 004-agents-to-plugins"
 
 **Purpose**: Remove stale artifacts before any changes to avoid confusing __pycache__ entries.
 
-- [x] T001 [P] Remove stale __pycache__ artifacts from pocketcode/plugins/core/agents/; verify that coder_agent.py exists in pocketcode/plugins/coder/agents/, architect_agent.py in pocketcode/plugins/architect/agents/, and asker_agent.py in pocketcode/plugins/asker/agents/ (FR-006 precondition — research §1 confirms they are already there, but this check makes the assumption explicit)
+- [x] T001 [P] Remove stale __pycache__ artifacts from pocketcode/plugins/core/agents/; verify that coder_agent.py exists in .pocketcode/plugins/coder/agents/, architect_agent.py in .pocketcode/plugins/architect/agents/, and asker_agent.py in .pocketcode/plugins/asker/agents/ (FR-006 precondition — research §1 confirms they are already there, but this check makes the assumption explicit)
 
 **Checkpoint**: Core agents directory is clean; domain agent .py files confirmed in correct locations — ready for new react_agent.py.
 
@@ -77,9 +77,9 @@ EOF
 python - <<'EOF'
 import yaml
 checks = [
-    ("pocketcode/plugins/coder/plugin.yaml",     "coder",     "coder"),
-    ("pocketcode/plugins/architect/plugin.yaml", "architect", "architect"),
-    ("pocketcode/plugins/asker/plugin.yaml",     "asker",     "ask"),
+    (".pocketcode/plugins/coder/plugin.yaml",     "coder",     "coder"),
+    (".pocketcode/plugins/architect/plugin.yaml", "architect", "architect"),
+    (".pocketcode/plugins/asker/plugin.yaml",     "asker",     "ask"),
 ]
 for path, name, agent in checks:
     with open(path) as f:
@@ -92,9 +92,9 @@ EOF
 
 ### Implementation for User Story 2
 
-- [x] T007 [P] [US2] Update pocketcode/plugins/coder/plugin.yaml — rename agent key `coder` → `coder`; add full tool list (local: write_to_file, create_directory, git_diff; cross-plugin: core::read_file, core::list_files, core::glob_files, core::search_code, core::execute_command, core::git_status, core::git_add, core::git_commit, core::git_pull, core::git_push); set handoff_agents: [architect::architect, asker::ask] (FR-003, research §2, contract coder section)
-- [x] T008 [P] [US2] Update pocketcode/plugins/architect/plugin.yaml — confirm agent key is `architect`; add core::glob_files to tools; set handoff_agents: [coder::coder, asker::ask] in fully-qualified form (FR-004, research §3, contract architect section)
-- [x] T009 [P] [US2] Update pocketcode/plugins/asker/plugin.yaml — rename plugin `name` field from `ask` to `asker`; confirm agent key is `ask`; expand tools with core::read_file, core::list_files, core::glob_files, core::search_code; set handoff_agents: [coder::coder, architect::architect] in fully-qualified form (FR-005, research §4, contract asker section)
+- [x] T007 [P] [US2] Update .pocketcode/plugins/coder/plugin.yaml — rename agent key `coder` → `coder`; add full tool list (local: write_to_file, create_directory, git_diff; cross-plugin: core::read_file, core::list_files, core::glob_files, core::search_code, core::execute_command, core::git_status, core::git_add, core::git_commit, core::git_pull, core::git_push); set handoff_agents: [architect::architect, asker::ask] (FR-003, research §2, contract coder section)
+- [x] T008 [P] [US2] Update .pocketcode/plugins/architect/plugin.yaml — confirm agent key is `architect`; add core::glob_files to tools; set handoff_agents: [coder::coder, asker::ask] in fully-qualified form (FR-004, research §3, contract architect section)
+- [x] T009 [P] [US2] Update .pocketcode/plugins/asker/plugin.yaml — rename plugin `name` field from `ask` to `asker`; confirm agent key is `ask`; expand tools with core::read_file, core::list_files, core::glob_files, core::search_code; set handoff_agents: [coder::coder, architect::architect] in fully-qualified form (FR-005, research §4, contract asker section)
 
 **Checkpoint**: All three domain plugins register their agents. Run quickstart Story 2 manifest check script.
 
@@ -108,7 +108,7 @@ EOF
 ```bash
 python - <<'EOF'
 import yaml
-with open("pocketcode/plugins/coder/plugin.yaml") as f:
+with open(".pocketcode/plugins/coder/plugin.yaml") as f:
     data = yaml.safe_load(f)
 handoffs = data["agents"]["coder"].get("handoff_agents", [])
 for h in handoffs:
@@ -119,7 +119,7 @@ EOF
 
 ### Implementation for User Story 3
 
-- [x] T010 [US3] Update pocketcode/plugins/micromanager/plugin.yaml — replace stale dot-notation references (`core.coder`, `core.architect`, `core.ask`) with fully-qualified form: `coder::coder`, `architect::architect`, `asker::ask` in handoff_agents (FR-007, FR-008, research §6, data-model Removal Checklist)
+- [x] T010 [US3] Update .pocketcode/plugins/micromanager/plugin.yaml — replace stale dot-notation references (`core.coder`, `core.architect`, `core.ask`) with fully-qualified form: `coder::coder`, `architect::architect`, `asker::ask` in handoff_agents (FR-007, FR-008, research §6, data-model Removal Checklist)
 - [x] T011 [US3] Update tests/integration/test_pocketflow_plugin_discovery.py — replace any assertions on `core::coder`, `core::architect`, `core::ask` with the new namespaces `coder::coder`, `architect::architect`, `asker::ask`; extend tests/integration/test_pocketflow_agent_execution.py to assert the SC-004 full round-trip handoff sequence `coder::coder` → `architect::architect` → `coder::coder` completes without error (FR-009 partial, SC-004, research §8)
 
 **Checkpoint**: Handoff format validation passes. Run quickstart Story 3 handoff check and `pytest tests/integration/test_pocketflow_agent_execution.py -v`.

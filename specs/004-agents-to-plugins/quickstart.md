@@ -61,9 +61,9 @@ python - <<'EOF'
 import yaml, pathlib
 
 checks = [
-    ("pocketcode/plugins/coder/plugin.yaml",     "coder",     "coder"),
-    ("pocketcode/plugins/architect/plugin.yaml", "architect", "architect"),
-    ("pocketcode/plugins/asker/plugin.yaml",     "asker",     "ask"),
+    (".pocketcode/plugins/coder/plugin.yaml",     "coder",     "coder"),
+    (".pocketcode/plugins/architect/plugin.yaml", "architect", "architect"),
+    (".pocketcode/plugins/asker/plugin.yaml",     "asker",     "ask"),
 ]
 
 for path, expected_name, expected_agent in checks:
@@ -99,7 +99,7 @@ pytest tests/integration/test_pocketflow_plugin_discovery.py -v
 python - <<'EOF'
 import yaml
 
-manifest_path = "pocketcode/plugins/coder/plugin.yaml"
+manifest_path = ".pocketcode/plugins/coder/plugin.yaml"
 with open(manifest_path) as f:
     data = yaml.safe_load(f)
 
@@ -187,7 +187,7 @@ ls pocketcode/plugins/core/prompts/flows/   # should NOT contain single_agent.md
 ls pocketcode/plugins/core/prompts/nodes/   # should NOT contain single_agent/ dir
 echo ""
 echo "=== domain agent modules ==="
-ls pocketcode/plugins/coder/agents/
-ls pocketcode/plugins/architect/agents/
-ls pocketcode/plugins/asker/agents/
+ls .pocketcode/plugins/coder/agents/
+ls .pocketcode/plugins/architect/agents/
+ls .pocketcode/plugins/asker/agents/
 ```

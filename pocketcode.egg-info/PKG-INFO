@@ -18,6 +18,7 @@ Requires-Dist: PyYAML
 Requires-Dist: watchdog
 Requires-Dist: textual
 Requires-Dist: google-genai
+Requires-Dist: openai
 Requires-Dist: python-dotenv
 Dynamic: license-file
 
@@ -29,70 +30,232 @@ Pocketcode is an extensible terminal AI coding assistant built around PocketFlow
 
 Pocketcode now uses a small plugin-first core:
 
-- Workflows can be graph-based Markdown (`dot`) or custom Python flow runtimes.
-- Agents and workflows are unified as plugin `components` in `plugin.yaml`.
-- Flows can call other flows as nodes for arbitrarily nested composition.
-- Node/flow/agent prompts are external Markdown files with `{{ include:path.md }}` support.
-- Node and flow execution support Python `pre`, `steps`, and `post` handlers.
+- Plugins declare tools, prompts, and flows in `plugin.yaml`.
+- Flows are the primary runtime unit and are implemented as PocketFlow `Flow` factories.
+- Flow prompts live in external Markdown files with `{{ include:path.md }}` support.
+- Flows support Python `pre`, `steps`, and `post` handlers alongside LLM and deterministic execution modes.
+- Agents can override LLM selection, tool allowlists, extra prompts, and confirmation policy for a flow.
 - Tool definitions and routing payloads are exchanged with LLMs as YAML.
-- CLI now uses a Textual TUI for interactive mode.
-- CLI can switch workflow, agent, and LLM profile at runtime.
-- Workflows support agent handoff and multi-LLM routing.
+- CLI now uses a multi-pane Textual workspace for interactive mode.
+- Runtime-driven user interaction now uses a structured protocol that supports free-form text, buttons, radio groups, and checklists from both the basic CLI and the Textual UI.
+- CLI switches flow, agent, and LLM profile at runtime from both commands and UI controls.
+- The runtime supports flow handoff and per-flow/per-handoff LLM overrides.
+- Gemini provider is implemented with the `google.genai` package (`google-genai` dependency).
 
 ## Built-In Runtime
 
-- Built-in plugin: `pocketcode/plugins/core`
-- Built-in workflows:
-  - `orchestrator` (multi-agent handoff)
-  - `single_agent` (simple tool loop)
+- The package-owned `core` plugin lives under `pocketcode/plugins/core/`
+- Repo-shipped workspace plugins live under `.pocketcode/plugins/`
+- The default flow is `core::react`
+- Shared filesystem tool behavior is implemented once in `pocketcode/plugins/core/tools/filesystem.py`; plugin-local filesystem modules re-export that canonical implementation to avoid drift.
+- Git and context elephant store tools now live in separate workspace plugins at `.pocketcode/plugins/workspace_git/` and `.pocketcode/plugins/workspace_context/`; built-in flows reference those workspace plugins explicitly. The remaining public compatibility surface is the `pocketcode.tools` package exports, while `pocketcode.plugins.core.tools.context_elephant_store_tools` remains only as a compatibility shim for context-elephant imports.
+
+## Workspace Resources
+
+Pocketcode also loads workspace-local resources from the workspace root:
+
+- `.pocketcode/plugins/`: workspace plugin folder discovered through `runtime.plugin_paths`
+- `.pocketcode/agents/`: workspace agent YAML files
+- `.pocketcode/tools/`: shared Python tools auto-registered under the `workspace` namespace
+- `.pocketcode/prompts/`: shared prompt files registered under the `workspace` namespace and usable as fallback prompt files for plugin agents and agent `extra_prompts`
+
+For shared workspace tools, Pocketcode auto-discovers public tool exports from Python files in `.pocketcode/tools/`. A module can expose tools either through a `TOOLS` export or through public top-level callables / `BaseTool` classes.
 
 ## Configuration
 
-Main config file: `./pocketcode.yml` (fallback: `./pocketcode.yaml`, then built-in `pocketcode/config/settings.yaml`)
+Main config file: `./pocketcode.yml` (required in workspace root)
 
 Key sections:
 
-- `providers`: provider API keys
-- `llm_profiles`: named LLM configs used by agents/workflows
-- `runtime`: defaults, plugin paths, and tool confirmation policy
+- `llm.providers`: provider credentials/settings
+- `llm.profiles`: named LLM configs used by agents/internal flows
+- `llm.default_profile`: default profile name
+- `runtime`: flow defaults, internal runtime flow, plugin paths, and tool confirmation policy
+
+Supported providers:
+
+- `gemini` (via `google.genai`)
+- OpenAI-compatible: `openai`, `openrouter`, `xai`, `requesty`
+
+Provider entries can be either a plain API key string or an object:
+
+```yaml
+llm:
+  providers:
+    gemini:
+      api_key: ${GEMINI_API_KEY}
+      use_vertexai: false
+      # Set use_vertexai: true for Vertex AI (OAuth/ADC), then also set:
+      # project: your-gcp-project-id
+      # location: global
+    openrouter:
+      api_key: ${OPENROUTER_API_KEY}
+      base_url: https://openrouter.ai/api/v1
+  profiles:
+    gemini_default:
+      provider: gemini
+      model: gemini-2.5-pro-preview-02-25
+  default_profile: gemini_default
+```
+
+Gemini auth behavior:
+
+- `use_vertexai: false` (default): uses Gemini Developer API with `api_key`
+- `use_vertexai: true`: uses Vertex AI and requires OAuth/ADC credentials (API keys are not accepted by Vertex endpoints)
+
+Default OpenAI-compatible base URLs:
+
+- `openai`: OpenAI SDK default
+- `openrouter`: `https://openrouter.ai/api/v1`
+- `xai`: `https://api.x.ai/v1`
+- `requesty`: `https://router.requesty.ai/v1`
 
 Tool confirmation policy supports `allow|confirm|deny` at multiple levels:
 
 - Global defaults: `runtime.tool_confirmation`
 - Global per-tool rules: `runtime.tool_confirmation.tool_policies`
-- Global per-agent defaults and per-agent tool rules: `runtime.tool_confirmation.agent_policies`
+- Global per-flow defaults and per-flow tool rules: `runtime.tool_confirmation.agent_policies`
 - Session overrides via `/confirm ...` commands
 
 Default behavior is confirmation-first (`confirm`) unless you explicitly override it in config or via CLI (`--auto-confirm-tools`).
 
-LLM routing supports layered overrides for multi-agent and nested workflows:
+LLM routing supports layered overrides for multi-flow and nested flows:
 
-- node-level (`workflow.node` or `node`) in config and CLI
-- handoff-level (`source_agent->target_agent`) in config and CLI
-- agent-level in config and CLI
+- handoff-level (`source_flow->target_flow`) in config and CLI
+- flow-level in config and CLI
 - global CLI override and defaults
 
-Precedence is: CLI node > config node > CLI agent > config agent > CLI global > dynamic handoff/agent choice > node attribute > agent default > runtime default.
+Precedence is: CLI flow > config flow > CLI global > dynamic handoff/flow choice > active agent > flow default > `llm.default_profile`.
 
 ## CLI Commands
 
-- `/workflows`, `/workflow <name>`
-- `/agents`, `/agent <name|auto>`
-- `/components`
-- `/llms`, `/llm <profile|none>`
-- `/llm-agent <agent> <profile|none>`
-- `/llm-node <workflow.node|node> <profile|none>`
-- `/llm-handoff <source_agent> <target_agent> <profile|none>`
-- `/tools [agent]`
+- `/list <flows|agents|llms|tools>`
+- `/set <flow|llm|llm-flow|llm-handoff> ...`
+- `/flow <flow_name|auto> [--agent <agent_name>]`
+- `/agent <list|show|switch|clone|edit|tools|policy> ...`
+- `/stop`, `/cancel`
 - `/reload`, `/status`
 - `/context ...`
 - `/confirm ...`
 
+Compatibility aliases remain available:
+
+- `/flows`, `/agents`, `/llms`, `/tools`
+- `/agent-profile` remains as an alias for `/agent`
+- Short aliases: `/ls`, `/fl`, `/ag`, `/ap`, `/lm`, `/lf`, `/la`, `/lh`, `/st`, `/c`, `/r`, `/q`
+
 Textual keyboard shortcuts:
 
 - `Tab`: complete current prompt input
-- `Ctrl+]`: switch to next agent
-- `Ctrl+[`: switch global LLM override (cycles `none` + profiles)
+- `F1`, `F2`, `F3`, `F4`, `F5`: switch `Chat`, `Control`, `Edit Agent`, `Context`, and `Run` views
+- `F6`: switch to the next agent
+- `Shift+F6`: switch to the previous agent
+- `F7` or `Ctrl+P`: switch to the next agent profile for the current agent
+- `Shift+F7` or `Ctrl+Shift+P`: switch to the previous agent profile for the current agent
+- `F8`: switch global LLM override (cycles `none` + profiles)
+- `Shift+F8`: switch global LLM override backwards
+- `F9`: toggle the left navigation panel
+- `F10`: toggle the right inspector panel
+- `F11`: toggle the second header row
+- `Ctrl+W`: cycle workspace mode presets (`Balanced`, `Chat Focus`, `Control Desk`, `Minimal`, `Review`)
+- `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`: fallback view switching
+- `Ctrl+Shift+A`: copy full response console output
+- `Ctrl+Y`: copy last assistant response
+- `Ctrl+Q`: quit Textual UI
+
+Interactive workspace views:
+
+- `Chat`: conversation and command entry
+- `Control`: runtime/session selectors and toggles for workspace mode, theme, flow, agent, LLM, and session confirmation
+- `Control` selectors apply only to live user selections; placeholder values used during refresh are ignored so flow/agent cycling does not re-enter itself
+- `Edit Agent`: dedicated editor for cloning workspace agents, toggling allowed tools, editing per-tool confirmation overrides, and saving extra prompts/LLM/agent defaults
+- `Context`: add, remove, and clear files, folders, URLs, and snippets without slash commands
+- `Run`: inspect the latest runtime path, effective LLM/agent state, token usage, cost, and live in-flight runtime events while a request is still running
+- flow/agent/tool metadata is reused across a single UI refresh so switching the active flow stays responsive
+- the Textual client now derives one UI snapshot per refresh and applies only changed widget state, instead of imperatively rebuilding each pane in multiple passes
+
+Inspector panels:
+
+- `Session Context`: current context counts and the active file/folder/url/snippet list
+- `Agents For Active Flow`: quick agent switcher
+- `Active Tools`: effective tool scope after agent filtering
+- `Prompt Sources`: flow prompt sources plus agent extra prompts
+- the left navigation pane is scrollable, matching the right inspector pane
+
+Interactive workspace presets:
+
+- `Balanced`: chat-first layout with both side panels visible
+- `Chat Focus`: larger chat area with the left navigator hidden
+- `Control Desk`: opens directly into the form-driven control surface
+- `Minimal`: pure chat canvas with both side panels hidden
+- `Review`: jumps to the run inspector for runtime/debugging work
+
+Theme presets:
+
+- `Ocean`: blue/cyan high-contrast default
+- `Forest`: green terminal-inspired workspace
+- `Ember`: warm orange/brown review-focused palette
+
+Agent editing in the Textual UI:
+
+- plugin and synthesised agents are read-only until cloned to a workspace agent
+- workspace-backed agents can edit `llm_profile`, tool allowlists, per-tool confirmation overrides, confirmation defaults, and `extra_prompts`
+- tools and prompts can be changed from lists, toggles, policy selectors, and text boxes instead of editing YAML manually
+
+Output box behavior:
+
+- output text is selectable with mouse/keyboard
+- copy selected text with your terminal copy shortcut (for example `Ctrl+Shift+C`)
+- the TUI retains only the most recent 400 output lines and inserts a trim notice once older history is dropped, which keeps long sessions responsive
+- background runs now append lifecycle updates as they happen, including agent turns, LLM calls, tool execution, handoffs, and confirmation waits
+
+Live request handling:
+
+- the Textual client now starts requests on a background run handle instead of waiting for a single blocking `process_request()` call to finish
+- the main input stays available during a run so it can answer runtime prompts and tool confirmations without falling back to raw terminal `input()`
+- the main input now accepts `/stop` or `/cancel` while a run is active and requests cooperative cancellation of the current run
+- `execute_command` now uses a managed subprocess path, so stop requests can terminate the underlying OS command; broader hard-stop design notes live in `docs/run_cancellation.md`
+- runtime progress is surfaced through a queued event stream today, which also provides the execution seam needed for future token/delta streaming
+- the fallback basic CLI and one-shot `--prompt` mode now print runtime events as they happen, including tool calls, handoffs, handoff returns, agent transition decisions, and cancellation state
+
+Prompt suggestions include commands, flows, agents, and LLM profiles.
+
+Textual copy commands:
+
+- `/copy`: copy the last assistant response
+- `/copy-all`: copy the full response console output
+
+Header rows:
+
+- the first row is always visible and shows runtime flow, flow, agent, LLM, and current view
+- the second row is optional and shows compact runtime stats
+
+Second header row includes:
+
+- aggregated token usage (`in`, `out`, `total`) for the latest request
+- estimated USD cost (if pricing is configured)
+- active session confirmation default
+- it lives in the toggleable second header row instead of a separate top strip
+- it does not repeat the active flow/agent state already shown in the status bar
+
+Context counts and item details now live in the right-hand inspector instead of the top strip.
+
+Terminal font size note:
+
+- Pocketcode can change colors, density, emphasis, borders, and layout inside the TUI
+- the current TUI uses an extra-compact header/footer/sidebar layout with tighter gaps and narrower panels to reduce visual bulk
+- actual font size is still controlled by your terminal emulator rather than the app
+- if you need physically smaller characters, reduce the font size or zoom level in your terminal emulator
+
+Optional cost pricing map:
+
+```yaml
+runtime:
+  llm_pricing:
+    gemini-2.5-flash:
+      input_per_1k: 0.000075
+      output_per_1k: 0.00030
+```
 
 ## Plugin + Workflow Authoring
 
@@ -109,6 +272,7 @@ See: `docs/plugin_architecture.md`
    ```bash
    export GEMINI_API_KEY=...
    ```
+   If your shell or `.env` has `GOOGLE_GENAI_USE_VERTEXAI=True`, either remove it or set `llm.providers.gemini.use_vertexai: true` and configure ADC + project/location.
 4. Run:
    ```bash
    pocketcode
@@ -116,8 +280,46 @@ See: `docs/plugin_architecture.md`
 
 ## Non-Interactive Usage
 
-- Interactive chat mode requires a real TTY.
-- For scripts/CI/non-TTY shells, run a single request and exit:
+- Interactive chat mode requires interactive stdin.
+- If stdout is not a TTY, Pocketcode falls back to the basic line-based CLI.
+- For scripts/CI/non-interactive stdin, run a single request and exit:
   ```bash
   pocketcode --prompt "Summarize the current workspace"
   ```
+- You can also pipe one-shot input without `--prompt`:
+  ```bash
+  echo "Summarize the current workspace" | pocketcode
+  ```
+
+## Plugin Authoring
+
+Plugins follow the unified plugin model (003-unified-plugin-namespace):
+
+- Workspace plugins live in `.pocketcode/plugins/<name>/`.
+- The only package-owned plugin is `pocketcode/plugins/core/`.
+- Declare everything in `plugin.yaml` with `schema_version: 1`.
+- Tools are declared as `local_name: "tools/file.py:ClassName"`.
+- Flows are declared with `module:` + `entry_fn:` pointing to a zero-arg Python
+  factory that returns a PocketFlow `Flow`.
+- Top-level `prompts:` entries are loaded into the plugin prompt registry.
+- All resources are addressable as `plugin_name.resource_name`.
+
+Quick example:
+
+```yaml
+# .pocketcode/plugins/my_plugin/plugin.yaml
+schema_version: 1
+name: my_plugin
+description: My custom plugin.
+
+tools:
+  my_tool: "tools/my_tool.py:MyTool"
+
+flows:
+  my_agent:
+    module: "agents/my_agent.py"
+    entry_fn: "create_flow"
+    tools: [my_tool]
+```
+
+Full walkthrough: [`specs/003-unified-plugin-namespace/quickstart.md`](specs/003-unified-plugin-namespace/quickstart.md)

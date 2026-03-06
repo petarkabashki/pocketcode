@@ -3,4 +3,5 @@ PyYAML
 watchdog
 textual
 google-genai
+openai
 python-dotenv

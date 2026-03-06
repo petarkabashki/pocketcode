@@ -58,7 +58,7 @@ pocketcode/
 └── mode_flows/          # [DELETED/MIGRATED]
 ```
 
-**Structure Decision**: Migration to a multi-plugin directory structure under `pocketcode/plugins/`, where each plugin encapsulates its own assets. Global tools remain in `pocketcode/tools/`. `mode_flows/` will be removed.
+**Structure Decision**: Migration to a multi-plugin directory structure under `.pocketcode/plugins/` for non-core plugins, with the package-owned `core` plugin retained under `pocketcode/plugins/core/`. Global tools remain in `pocketcode/tools/`. `mode_flows/` will be removed.
 
 ## Complexity Tracking
 
