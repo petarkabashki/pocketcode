@@ -761,3 +761,66 @@ FileNotFoundError: [Errno 2] No such file or directory: '/media/mu6mula/Data1/AI
 2026-03-06 20:20:59,010 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
 2026-03-06 20:20:59,013 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
 2026-03-06 20:20:59,013 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:47:22,060 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:47:22,067 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:47:22,069 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:47:22,075 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:47:22,093 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:47:22,096 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:47:22,096 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:48:47,642 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:48:47,649 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:48:47,652 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:48:47,659 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:48:47,678 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:48:47,681 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:48:47,681 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:49:04,844 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:49:04,850 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:49:04,853 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:49:04,859 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:49:04,876 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:49:04,879 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:49:04,879 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:49:21,160 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:49:21,166 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:49:21,169 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:49:21,175 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:49:21,192 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:49:21,195 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:49:21,195 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:50:43,044 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:50:43,053 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:50:43,055 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:50:43,061 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:50:43,079 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:50:43,082 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:50:43,082 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:53:19,884 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:53:19,891 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:53:19,893 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:53:19,900 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:53:19,918 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:53:19,920 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:53:19,920 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:54:05,368 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:54:05,375 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:54:05,377 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:54:05,383 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:54:05,400 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:54:05,403 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:54:05,403 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 20:58:56,323 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 20:58:56,330 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 20:58:56,332 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 20:58:56,338 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 20:58:56,356 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 20:58:56,358 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 20:58:56,358 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0
+2026-03-06 21:01:13,351 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'architect' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/architect
+2026-03-06 21:01:13,357 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'asker' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/asker
+2026-03-06 21:01:13,360 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'coder' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/coder
+2026-03-06 21:01:13,366 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'core' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/core
+2026-03-06 21:01:13,383 - pocketcode.core.plugin_manager - INFO - Loading manifest plugin 'micromanager' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/micromanager
+2026-03-06 21:01:13,387 - pocketcode.core.plugin_manager - INFO - Loading factory plugin 'template' from /media/mu6mula/Data1/AI-Stuff/PocketCoder/pocketcode/plugins/template
+2026-03-06 21:01:13,387 - pocketcode.core.plugin_manager - INFO - Plugin load complete. plugins=6, tools=24, agents=6, llm_profiles=0

@@ -215,10 +215,6 @@ class PocketCodeTextualApp(App[None]):
         border-bottom: solid #0ea5e9;
     }
 
-    Screen.theme-ocean #header-title {
-        color: #eff6ff;
-    }
-
     Screen.theme-ocean Footer {
         background: #111827;
         color: #dbeafe;
@@ -272,10 +268,6 @@ class PocketCodeTextualApp(App[None]):
     Screen.theme-forest #topbar {
         background: #16351f;
         border-bottom: solid #65a30d;
-    }
-
-    Screen.theme-forest #header-title {
-        color: #f0fdf4;
     }
 
     Screen.theme-forest Footer {
@@ -333,10 +325,6 @@ class PocketCodeTextualApp(App[None]):
         border-bottom: solid #fb923c;
     }
 
-    Screen.theme-ember #header-title {
-        color: #fff7ed;
-    }
-
     Screen.theme-ember Footer {
         background: #7c2d12;
         color: #ffedd5;
@@ -383,72 +371,70 @@ class PocketCodeTextualApp(App[None]):
     }
 
     Footer {
+        height: 1;
+        padding: 0 1;
         background: #111827;
         color: #dbeafe;
     }
 
     #topbar {
+        height: auto;
         padding: 0 1;
         background: #082f49;
         border-bottom: solid #0ea5e9;
     }
 
     #topbar-main {
-        height: 3;
+        height: 1;
+        padding: 0;
         content-align: left middle;
     }
 
-    #header-title {
+    #status {
         width: 1fr;
+        height: 1;
+        padding: 0;
+        color: #f8fafc;
+        content-align: left middle;
         text-style: bold;
     }
 
     #toggle-header-button {
         width: auto;
-        min-width: 18;
+        min-width: 14;
         margin: 0;
     }
 
     #header-details {
         height: auto;
-        margin-bottom: 1;
-    }
-
-    #status,
-    #stats {
-        height: 2;
-        padding: 0 1;
-        color: #f8fafc;
-        content-align: left middle;
-    }
-
-    #status {
-        background: #0b4f6c;
-        text-style: bold;
+        margin-bottom: 0;
     }
 
     #stats {
+        height: 1;
+        padding: 0;
         background: #1f2937;
         color: #d1fae5;
+        content-align: left middle;
     }
 
     #workspace {
         height: 1fr;
-        padding: 0 1 1 1;
+        padding: 0;
     }
 
     .sidebar {
-        width: 32;
-        min-width: 24;
+        width: 28;
+        min-width: 20;
         border: round #334155;
         background: #111827;
-        padding: 1;
+        padding: 0;
     }
 
     #main-column {
         width: 1fr;
         min-width: 60;
-        margin: 0 1;
+        margin: 0;
     }
 
     #view-title {
@@ -470,7 +456,7 @@ class PocketCodeTextualApp(App[None]):
         height: 1fr;
         border: round #334155;
         background: #111827;
-        padding: 1;
+        padding: 0 1;
     }
 
     .view-scroll {
@@ -485,48 +471,48 @@ class PocketCodeTextualApp(App[None]):
     }
 
     #main-input {
-        margin-top: 1;
+        margin-top: 0;
         border: round #f59e0b;
     }
 
     .panel-title {
         height: auto;
-        margin-bottom: 1;
+        margin-bottom: 0;
         color: #f8fafc;
         text-style: bold;
     }
 
     .section-title {
-        margin: 1 0 0 0;
+        margin: 0 0 0 0;
         color: #93c5fd;
         text-style: bold;
     }
 
     .field-label {
-        margin-top: 1;
+        margin-top: 0;
         color: #cbd5e1;
     }
 
     .hint {
         color: #fcd34d;
-        margin-bottom: 1;
+        margin-bottom: 0;
     }
 
     .card {
         border: round #475569;
         background: #0b1220;
-        padding: 1;
-        margin-bottom: 1;
+        padding: 0;
+        margin-bottom: 0;
     }
 
     .button-row {
         height: auto;
-        margin-top: 1;
+        margin-top: 0;
     }
 
     Button {
         width: 1fr;
-        margin-bottom: 1;
+        margin-bottom: 0;
     }
 
     #shortcut-list {
@@ -534,20 +520,20 @@ class PocketCodeTextualApp(App[None]):
     }
 
     #profile-list {
-        height: 12;
-        margin-bottom: 1;
+        height: 10;
+        margin-bottom: 0;
         border: round #334155;
         background: #020617;
     }
 
     #profile-tool-list {
-        height: 14;
+        height: 12;
         border: round #334155;
         background: #020617;
     }
 
     #profile-policy-summary {
-        height: 7;
+        height: 6;
         border: round #334155;
         background: #020617;
         color: #e2e8f0;
@@ -570,7 +556,7 @@ class PocketCodeTextualApp(App[None]):
     #inspector-context,
     #inspector-tools,
     #inspector-prompts {
-        height: 12;
+        height: 10;
     }
 
     .hidden {
@@ -611,13 +597,12 @@ class PocketCodeTextualApp(App[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="topbar"):
             with Horizontal(id="topbar-main"):
-                yield Static("Pocketcode Interactive Workspace", id="header-title")
-                yield Button("Hide Header Details", id="toggle-header-button")
-            with Vertical(id="header-details"):
                 yield Static(id="status")
+                yield Button("Hide Details", id="toggle-header-button")
+            with Vertical(id="header-details"):
                 yield Static(id="stats")
         with Horizontal(id="workspace"):
-            with Vertical(id="left-panel", classes="sidebar"):
+            with VerticalScroll(id="left-panel", classes="sidebar"):
                 yield Static("Workspace Views", classes="panel-title")
                 yield Button("Chat", id="view-chat-button", variant="primary")
                 yield Button("Control", id="view-control-button")
@@ -629,7 +614,7 @@ class PocketCodeTextualApp(App[None]):
                     "F1..F5 switch views\n"
                     "F6/F7/F8 cycle agent/profile/LLM\n"
                     "F9/F10 toggle panels\n"
-                    "F11 toggle header details\n"
+                    "F11 toggle second header row\n"
                     "Ctrl+W cycle mode\n"
                     "Alt+1..5 switch views\n"
                     "Ctrl+R reload runtime",
@@ -774,7 +759,7 @@ class PocketCodeTextualApp(App[None]):
         self._refresh_ui()
         self.set_interval(0.1, self._drain_run_events)
         self._write_info(
-            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 cycle agent-profile-LLM, and F11 toggles header details."
+            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 cycle agent-profile-LLM, and F11 toggles the second header row."
         )
         self.query_one("#main-input", Input).focus()
 
@@ -876,7 +861,7 @@ class PocketCodeTextualApp(App[None]):
             left_panel_visible=self._show_left_panel,
             right_panel_visible=self._show_right_panel,
             header_details_visible=self._show_header_details,
-            header_toggle_label="Hide Header Details" if self._show_header_details else "Show Header Details",
+            header_toggle_label="Hide Details" if self._show_header_details else "Show Details",
             status_text=_build_status_text(status, self._current_view),
             stats_text=_build_stats_text(status),
             view_title_text=_build_view_title_text(self._current_view),
@@ -963,7 +948,7 @@ class PocketCodeTextualApp(App[None]):
         self.screen.add_class(f"theme-{theme_name}")
 
     def _apply_panel_visibility(self, *, left_visible: bool, right_visible: bool) -> None:
-        self.query_one("#left-panel", Vertical).display = left_visible
+        self.query_one("#left-panel", VerticalScroll).display = left_visible
         self.query_one("#right-panel", VerticalScroll).display = right_visible
 
     def _apply_view_state(self, view_name: str, view_title_text: str) -> None:
@@ -1808,7 +1793,7 @@ class PocketCodeTextualApp(App[None]):
     def action_toggle_header(self) -> None:
         self._show_header_details = not self._show_header_details
         state = "shown" if self._show_header_details else "hidden"
-        self._write_info(f"Header details {state}.")
+        self._write_info(f"Second header row {state}.")
         self._refresh_ui()
 
     def action_next_workspace_mode(self) -> None:

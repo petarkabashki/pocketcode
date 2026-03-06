@@ -449,7 +449,7 @@ Keyboard shortcuts (Textual UI):
   F8                            Select next global LLM override.
   F9                            Toggle the left navigation panel.
   F10                           Toggle the right inspector panel.
-  F11                           Toggle header details.
+  F11                           Toggle the second header row.
   Ctrl+W                        Cycle workspace mode presets.
   Alt+1 / Alt+2 / Alt+3         Switch Chat / Control / Profiles views.
   Alt+4 / Alt+5                 Switch Context / Run views.
