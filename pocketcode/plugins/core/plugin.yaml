@@ -19,7 +19,7 @@ tools:
   git_pull: tools/git.py:GitPullTool
   git_push: tools/git.py:GitPushTool
 
-agents:
+flows:
   react:
     description: >
       General-purpose ReAct agent. Reasons, calls core tools, and observes

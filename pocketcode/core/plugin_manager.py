@@ -14,7 +14,7 @@ from pocketcode.core.interfaces import Plugin, PluginContext
 from pocketcode.core.manifest_loader import load_manifest
 from pocketcode.core.namespace_registry import NamespaceRegistry, RegistryError, RegistryHolder
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
-from pocketcode.core.runtime_models import AgentDefinition, AgentProfile
+from pocketcode.core.runtime_models import Agent, FlowDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,8 @@ class PluginManager:
         self._workspace_root = Path(workspace_root).resolve()
 
         self.tools: NamespaceRegistry[Any] = NamespaceRegistry()
-        self.agents: NamespaceRegistry[AgentDefinition] = NamespaceRegistry()
+        self.flows: NamespaceRegistry[FlowDefinition] = NamespaceRegistry()
+        self.agents = self.flows
         self.prompts: NamespaceRegistry[str] = NamespaceRegistry()
         self.llm_profiles: Dict[str, Dict[str, Any]] = {}
         self.plugin_roots: Dict[str, Path] = {}
@@ -40,7 +41,8 @@ class PluginManager:
     def clear(self) -> None:
         self._unload_dynamic_modules()
         self.tools = NamespaceRegistry()
-        self.agents = NamespaceRegistry()
+        self.flows = NamespaceRegistry()
+        self.agents = self.flows
         self.prompts = NamespaceRegistry()
         self.llm_profiles.clear()
         self.plugin_roots.clear()
@@ -64,10 +66,10 @@ class PluginManager:
                 logger.error("Failed loading plugin at %s: %s", plugin_root, exc, exc_info=True)
 
         logger.info(
-            "Plugin load complete. plugins=%d, tools=%d, agents=%d, llm_profiles=%d",
+            "Plugin load complete. plugins=%d, tools=%d, flows=%d, llm_profiles=%d",
             len(self.plugin_roots),
             len(self.tools),
-            len(self.agents),
+            len(self.flows),
             len(self.llm_profiles),
         )
         # Atomic registry swap — new sessions immediately see fresh state
@@ -111,9 +113,9 @@ class PluginManager:
                         tool_name,
                     )
             
-            # Register agents (Flows)
+            # Register flows
             for agent_name, flow in plugin.agents.items():
-                agent_def = AgentDefinition(
+                agent_def = FlowDefinition(
                     name=agent_name,
                     description=plugin.description or f"Programmatic agent from {plugin_name}",
                     is_programmatic=True,
@@ -127,10 +129,10 @@ class PluginManager:
                     },
                 )
                 try:
-                    self.agents.register(plugin_name, agent_name, agent_def)
+                    self.flows.register(plugin_name, agent_name, agent_def)
                 except RegistryError:
                     logger.error(
-                        "Plugin '%s' agent '%s' collides with existing registration. Skipping.",
+                        "Plugin '%s' flow '%s' collides with existing registration. Skipping.",
                         plugin_name,
                         agent_name,
                     )
@@ -152,7 +154,7 @@ class PluginManager:
         return self._execute_module_from_file(file_path, module_name)
 
     def resolve_tools_for_agent(self, agent_name: str) -> List[str]:
-        agent = self.agents.get(agent_name)
+        agent = self.flows.get(agent_name)
         if not agent:
             return []
 
@@ -194,6 +196,10 @@ class PluginManager:
                 resolved.append(qname)
 
         return resolved
+
+    def resolve_tools_for_flow(self, flow_name: str) -> List[str]:
+        """Canonical name for resolving tools from a registered flow."""
+        return self.resolve_tools_for_agent(flow_name)
 
     def _iter_plugin_roots(self) -> Iterable[Path]:
         built_in_plugins_root = Path(__file__).resolve().parent.parent / "plugins"
@@ -250,7 +256,7 @@ class PluginManager:
         self._load_plugin_llm_profiles(plugin_name, manifest.llm_profiles)
         self._load_plugin_prompts(plugin_name, plugin_root, manifest.prompts)
         self._load_plugin_tools(plugin_name, plugin_root, manifest.tools)
-        self._load_plugin_agents(plugin_name, plugin_root, manifest.agents)
+        self._load_plugin_agents(plugin_name, plugin_root, manifest.flows)
 
         # Explicitly ignore removed legacy sections.
         raw_manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
@@ -312,7 +318,7 @@ class PluginManager:
                 except Exception as exc:
                     logger.error("Failed to load tool '%s' for agent '%s': %s", tool_id, agent_name, exc)
 
-        agent_def = AgentDefinition(
+        agent_def = FlowDefinition(
             name=agent_name,
             description=str(manifest.get("description", "")),
             tools=agent_tools,
@@ -325,7 +331,7 @@ class PluginManager:
             },
         )
         try:
-            self.agents.register(agent_name, agent_name, agent_def)
+            self.flows.register(agent_name, agent_name, agent_def)
         except RegistryError as exc:
             logger.error("Agent '%s' registry collision: %s — skipping.", agent_name, exc)
 
@@ -524,7 +530,7 @@ class PluginManager:
         if not isinstance(raw_default_handoff_policy, dict):
             raw_default_handoff_policy = {}
 
-        agent_def = AgentDefinition(
+        agent_def = FlowDefinition(
             name=agent_name,
             description=str(definition.get("description", "")),
             llm_profile=str(llm_profile) if llm_profile else None,
@@ -554,8 +560,9 @@ class PluginManager:
                 "plugin_root": str(plugin_root),
             },
         )
-        # Read optional default_agent_profile block (FR-001 / T010).
-        raw_dap = definition.get("default_agent_profile")
+        # Read optional default_agent block, falling back to the legacy
+        # default_agent_profile key for compatibility.
+        raw_dap = definition.get("default_agent") or definition.get("default_agent_profile")
         if isinstance(raw_dap, dict):
             qualified_name = f"{plugin_name}::{agent_name}"
             dap_name = raw_dap.get("name") or qualified_name
@@ -563,7 +570,7 @@ class PluginManager:
             dap_tc_raw = raw_dap.get("tool_confirmation") or {}
             if not isinstance(dap_tc_raw, dict):
                 dap_tc_raw = {}
-            dap_profile = AgentProfile(
+            dap_profile = Agent(
                 name=str(dap_name),
                 agent=qualified_name,
                 description=str(raw_dap.get("description", "")),
@@ -589,19 +596,19 @@ class PluginManager:
                 source="plugin",
                 source_path=None,
             )
-            agent_def.default_agent_profile = dap_profile
+            agent_def.default_agent = dap_profile
             logger.debug(
-                "Plugin '%s' agent '%s': loaded default_agent_profile '%s'.",
+                "Plugin '%s' flow '%s': loaded default_agent '%s'.",
                 plugin_name,
                 agent_name,
                 dap_name,
             )
 
         try:
-            self.agents.register(plugin_name, agent_name, agent_def)
+            self.flows.register(plugin_name, agent_name, agent_def)
         except RegistryError as exc:
             logger.error(
-                "Plugin '%s' agent '%s' registry collision: %s — skipping.",
+                "Plugin '%s' flow '%s' registry collision: %s — skipping.",
                 plugin_name,
                 agent_name,
                 exc,

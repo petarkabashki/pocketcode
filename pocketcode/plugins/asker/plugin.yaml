@@ -5,7 +5,7 @@ description: Clarification agent that prompts the user for missing information a
 tools:
   ask_user: tools/user_input.py:AskUserInputTool
 
-agents:
+flows:
   ask:
     description: Repository Q&A and clarification specialist.
     module: agents/asker_agent.py

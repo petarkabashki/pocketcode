@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from pocketcode.core.agent_profile_manager import AgentProfileManager
+from pocketcode.core.agent_manager import AgentManager
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
@@ -28,8 +28,8 @@ class PocketCodeEngine:
         self._plugins = PluginManager(config=config, workspace_root=self._workspace_root)
         self._plugins.load()
 
-        # T011: instantiate AgentProfileManager after plugins are loaded.
-        self._agent_profile_manager = AgentProfileManager(self._workspace_root)
+        # T011: instantiate AgentManager after plugins are loaded.
+        self._agent_profile_manager = AgentManager(self._workspace_root)
         self._agent_profile_manager.load(dict(self._plugins.agents))
         self.active_agent_profile = None  # type: ignore[assignment]  # AgentProfile | None
 
@@ -129,15 +129,32 @@ class PocketCodeEngine:
             self.handoff_llm_overrides.pop(handoff_key, None)
 
     def list_agents(self) -> List[str]:
+        """Backward-compatible alias for registered flow names."""
         return sorted(self._plugins.agents.keys())
+
+    def list_flows(self) -> List[str]:
+        return self.list_agents()
 
     def list_llm_profiles(self) -> List[str]:
         return self._llm_router.list_profile_names()
 
     def get_current_agent(self):
+        """Backward-compatible alias for the current flow name."""
         return self.current_agent
 
+    def get_current_flow(self):
+        return self.get_current_agent()
+
+    @property
+    def active_agent(self):
+        return self.active_agent_profile
+
+    @active_agent.setter
+    def active_agent(self, value):
+        self.active_agent_profile = value
+
     def set_agent(self, agent_name: Optional[str]) -> None:
+        """Backward-compatible alias for selecting the current flow."""
         if not agent_name:
             self.current_agent = None
             self.active_agent_profile = None
@@ -147,6 +164,9 @@ class PocketCodeEngine:
         self.current_agent = agent_name
         # T012: auto-activate the agent's default profile.
         self._activate_default_profile_for(agent_name)
+
+    def set_flow(self, flow_name: Optional[str]) -> None:
+        self.set_agent(flow_name)
 
     def set_active_agent_profile(self, name: Optional[str]) -> None:
         """Activate a named agent profile, or clear the active profile if name is None."""
@@ -167,6 +187,9 @@ class PocketCodeEngine:
         self.current_agent = profile.agent
         self.active_agent_profile = profile
 
+    def set_active_agent(self, name: Optional[str]) -> None:
+        self.set_active_agent_profile(name)
+
     def list_agent_profiles(self, agent_name: Optional[str] = None) -> List[str]:
         """Return known agent profile names, optionally filtered by target agent."""
         profiles = self._agent_profile_manager.list()
@@ -174,15 +197,24 @@ class PocketCodeEngine:
             profiles = [profile for profile in profiles if profile.agent == agent_name]
         return [p.name for p in profiles]
 
+    def list_available_agents(self, flow_name: Optional[str] = None) -> List[str]:
+        return self.list_agent_profiles(flow_name)
+
     def get_agent_profile(self, name: Optional[str] = None) -> Any:
         """Return a named agent profile, or the active one when *name* is None."""
         if name is None:
             return self.active_agent_profile
         return self._agent_profile_manager.get(name)
 
+    def get_agent(self, name: Optional[str] = None) -> Any:
+        return self.get_agent_profile(name)
+
     def clone_agent_profile(self, src_name: str, new_name: str) -> Any:
         """Clone an agent profile and return the new workspace-backed profile."""
         return self._agent_profile_manager.clone(src_name, new_name)
+
+    def clone_agent(self, src_name: str, new_name: str) -> Any:
+        return self.clone_agent_profile(src_name, new_name)
 
     def update_agent_profile(
         self,
@@ -239,6 +271,25 @@ class PocketCodeEngine:
             self.active_agent_profile = refreshed
         return refreshed
 
+    def update_agent(
+        self,
+        name: str,
+        *,
+        llm_profile: Optional[str],
+        tools: Optional[List[str]],
+        extra_prompts: List[str],
+        tool_confirmation_default: Optional[str],
+        tool_confirmation_overrides: Optional[Dict[str, Optional[str]]] = None,
+    ) -> Any:
+        return self.update_agent_profile(
+            name,
+            llm_profile=llm_profile,
+            tools=tools,
+            extra_prompts=extra_prompts,
+            tool_confirmation_default=tool_confirmation_default,
+            tool_confirmation_overrides=tool_confirmation_overrides,
+        )
+
     def list_tools_for_agent(
         self,
         agent_name: str,
@@ -265,6 +316,14 @@ class PocketCodeEngine:
             self._agent_tools_cache[agent_name] = list(sorted_tool_names)
         return sorted_tool_names
 
+    def list_tools_for_flow(
+        self,
+        flow_name: str,
+        *,
+        apply_active_agent: bool = False,
+    ) -> List[str]:
+        return self.list_tools_for_agent(flow_name, apply_active_profile=apply_active_agent)
+
     def describe_agent(self, agent_name: Optional[str] = None) -> Dict[str, Any]:
         """Expose agent metadata for the control-oriented TUI."""
         target = agent_name or self.current_agent
@@ -289,6 +348,9 @@ class PocketCodeEngine:
             "tools": self.list_tools_for_agent(target),
         }
 
+    def describe_flow(self, flow_name: Optional[str] = None) -> Dict[str, Any]:
+        return self.describe_agent(flow_name)
+
     def get_agent_prompt_sources(self, agent_name: Optional[str] = None) -> List[str]:
         """Return prompt source paths for the target agent."""
         target = agent_name or self.current_agent
@@ -298,6 +360,9 @@ class PocketCodeEngine:
         if definition is None:
             raise KeyError(f"Unknown agent '{target}'.")
         return list(definition.prompt_sources)
+
+    def get_flow_prompt_sources(self, flow_name: Optional[str] = None) -> List[str]:
+        return self.get_agent_prompt_sources(flow_name)
 
     def _activate_default_profile_for(self, agent_name: str) -> None:
         """Set active_agent_profile to the agent's default profile."""
@@ -336,6 +401,9 @@ class PocketCodeEngine:
         self._llm_router.resolve_profile_config(profile_name)
         self.agent_llm_overrides[agent_name] = profile_name
 
+    def set_flow_llm_override(self, flow_name: str, profile_name: Optional[str]) -> None:
+        self.set_agent_llm_override(flow_name, profile_name)
+
     def set_handoff_llm_override(
         self,
         source_agent: str,
@@ -364,6 +432,9 @@ class PocketCodeEngine:
         if active_profile is not None and active_profile.agent == agent_name and active_profile.tools is not None:
             tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
         return self._tool_runtime.describe_tools(tool_names)
+
+    def describe_tools_for_flow(self, flow_name: str) -> List[Dict[str, Any]]:
+        return self.describe_tools_for_agent(flow_name)
 
     def start_request(
         self,
@@ -417,6 +488,7 @@ class PocketCodeEngine:
             "initial_request": user_input,
             "cli_context": self._copy_cli_context(cli_context),
             "formatted_cli_context": self._format_cli_context(cli_context),
+            "active_flow": initial_agent,
             "active_agent": initial_agent,
             "default_llm_profile": self.default_llm_profile,
             "cli_llm_override": self.global_llm_override,
@@ -461,10 +533,12 @@ class PocketCodeEngine:
 
     def status(self) -> Dict[str, Any]:
         return {
-            "agent": self.current_agent,
+            "flow": self.current_agent,
+            "agent": self.active_agent_profile.name if self.active_agent_profile else None,
             "runtime_workflow": self._runtime_config.get("agent_runtime_workflow"),
             # T013: expose active agent profile name.
             "active_agent_profile": self.active_agent_profile.name if self.active_agent_profile else None,
+            "active_agent": self.active_agent_profile.name if self.active_agent_profile else None,
             "global_llm_override": self.global_llm_override,
             "agent_llm_overrides": dict(self.agent_llm_overrides),
             "handoff_llm_overrides": dict(self.handoff_llm_overrides),
@@ -472,7 +546,8 @@ class PocketCodeEngine:
             "default_llm_profile": self.default_llm_profile,
             "tool_confirmation": self._tool_confirmation_config,
             "session_tool_confirmation_overrides": self._copy_session_confirmation_overrides(),
-            "available_agents": self.list_agents(),
+            "available_flows": self.list_flows(),
+            "available_agents": self.list_available_agents(),
             "available_llm_profiles": self.list_llm_profiles(),
             "last_run_summary": dict(self.last_run_summary),
         }

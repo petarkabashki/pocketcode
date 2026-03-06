@@ -1,7 +1,7 @@
 # Plugin Architecture
 
 PocketCoder plugins are self-contained directories that declare tools, prompts, and
-agents in a single `plugin.yaml` manifest. Every resource is addressed by a
+flows in a single `plugin.yaml` manifest. Every resource is addressed by a
 two-part qualified name: `plugin_name.resource_name`.
 
 ---
@@ -9,7 +9,7 @@ two-part qualified name: `plugin_name.resource_name`.
 ## Unified Plugin Model
 
 As of the 003-unified-plugin-namespace release, all plugins share one manifest format
-and one namespace. There are no separate workflow YAML files — agent logic is expressed
+and one namespace. There are no separate workflow YAML files — flow logic is expressed
 as a [PocketFlow](pocketflow_agents.md) `Flow` factory.
 
 ### Plugin Directory Layout
@@ -40,11 +40,11 @@ description: "What this plugin does."
 tools:
   my_tool: "tools/my_tools.py:MyTool"
 
-agents:
+flows:
   my_agent:
     module: "agents/my_agent.py"
     entry_fn: "create_flow"
-    description: "Agent that does X."
+    description: "Flow that does X."
     tools: [my_tool]
     prompt_files: ["prompts/system.md"]   # `prompts:` is also accepted as an alias
 
@@ -58,14 +58,14 @@ prompts:
 | `name` | Optional | Defaults to the directory name. |
 | `description` | Optional | Human-readable summary. |
 | `tools` | Optional | `local_name: "file.py:ClassName"` mappings. |
-| `agents` | Optional | Agent blocks with `module` + `entry_fn`. |
+| `flows` | Optional | Flow blocks with `module` + `entry_fn`. |
 | `prompts` | Optional | Top-level prompt registry entries: `local_name: "prompts/file.md"`. |
 
 ---
 
-## Agent Factory (`agents/my_agent.py`)
+## Flow Factory (`agents/my_agent.py`)
 
-Each agent is a zero-argument factory function that returns a PocketFlow `Flow`.
+Each flow is a zero-argument factory function that returns a PocketFlow `Flow`.
 
 ```python
 from __future__ import annotations
@@ -87,10 +87,10 @@ def create_flow() -> Flow:
     return Flow(start=MyThinkNode())
 ```
 
-Register the factory in `plugin.yaml` under `agents:`:
+Register the factory in `plugin.yaml` under `flows:`:
 
 ```yaml
-agents:
+flows:
   my_agent:
     module: "agents/my_agent.py"
     entry_fn: "create_flow"
@@ -106,7 +106,7 @@ Every resource is registered as `{plugin_name}.{local_name}`:
 | Local reference | Qualified name | Resolves to |
 |-----------------|----------------|-------------|
 | `my_tool` (from `my_plugin`) | `my_plugin.my_tool` | `MyTool` impl |
-| `my_agent` | `my_plugin.my_agent` | `AgentDefinition` with Flow |
+| `my_agent` | `my_plugin.my_agent` | `FlowDefinition` with Flow |
 
 Unqualified bare-name resolution:
 - **Unique owner** → resolved with a `WARNING` suggesting qualification.
@@ -116,7 +116,7 @@ Unqualified bare-name resolution:
 
 ## Core Plugin (`pocketcode/plugins/core`)
 
-The built-in `core` plugin ships all standard tools and three base agents:
+The built-in `core` plugin ships all standard tools and three base flows:
 
 | Qualified name | Description |
 |----------------|-------------|
@@ -126,9 +126,9 @@ The built-in `core` plugin ships all standard tools and three base agents:
 | `core.execute_command` | Run a shell command |
 | `core.git_diff` | Show a git diff |
 | `core.ask_user` | Prompt the user for input |
-| `core.coder` | Code-writing agent |
-| `core.architect` | Planning & architecture agent |
-| `core.ask` | Clarification/question agent |
+| `core.coder` | Code-writing flow |
+| `core.architect` | Planning & architecture flow |
+| `core.ask` | Clarification/question flow |
 
 ---
 
@@ -145,7 +145,7 @@ the `RegistryHolder` — live sessions transparently see the updated registry wi
 
 Plugins that still use `agent.yaml` are loaded via a one-release compatibility shim
 that emits `WARNING` log records and returns `schema_version=0`. They **will not** be
-loaded as PocketFlow agents until migrated.
+loaded as PocketFlow flows until migrated.
 
 Migration steps:
 
@@ -153,7 +153,7 @@ Migration steps:
 2. Add `schema_version: 1` as the first key.
 3. Convert the `tools:` list to a `tools:` dict: `local_name: "file.py:Class"`.
 4. Create an `agents/` directory with a `create_flow()` factory module.
-5. Add an `agents:` block pointing to the factory.
+5. Add a `flows:` block pointing to the factory.
 6. Remove `workflows:`, `components:`, and `node_definitions:` legacy sections.
 
 See [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)

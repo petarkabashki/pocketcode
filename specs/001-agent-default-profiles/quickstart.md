@@ -81,26 +81,36 @@ Saved to: .pocketcode/agent-profiles/react-safe.yaml
 
 ## Step 5: Edit the cloned profile
 
-Open `.pocketcode/agent-profiles/react-safe.yaml` and customise it:
+You can now edit the allowed tool list and tool policies directly from the CLI:
+
+```
+/agent-profile tools react-safe set core::read_file core::glob_files core::search_files core::write_to_file
+/agent-profile policy default react-safe allow
+/agent-profile policy tool react-safe core::write_to_file confirm
+/agent-profile policy tool react-safe core::delete_file deny
+/agent-profile policy tool react-safe core::run_shell_command deny
+```
+
+Equivalent YAML after those commands:
 
 ```yaml
 name: react-safe
 agent: core::react
 description: "Read-only ReAct profile with write confirmation."
-
 tools:
-  - core::read_file
   - core::glob_files
+  - core::read_file
   - core::search_files
-  - core::write_to_file       # kept but with confirmation below
-
+  - core::write_to_file
 tool_confirmation:
   default: allow
   overrides:
-    core::write_to_file: confirm
     core::delete_file: deny
     core::run_shell_command: deny
+    core::write_to_file: confirm
 ```
+
+Manual edits to `.pocketcode/agent-profiles/react-safe.yaml` still work; the CLI commands just save the same fields for you.
 
 ---
 

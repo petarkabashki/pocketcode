@@ -7,7 +7,7 @@ tools:
   create_directory: tools/filesystem.py:CreateDirectoryTool
   git_diff: tools/git.py:GitDiffTool
 
-agents:
+flows:
   coder:
     description: Code implementation and editing specialist.
     module: agents/coder_agent.py

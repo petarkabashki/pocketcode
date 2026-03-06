@@ -4,24 +4,24 @@ Always for python load the local python environment by running `source` on .venv
 
 ---
 
-## Agent Profile System
+## Agent System
 
 ### Concept
 
-An **AgentProfile** is a named configuration object that governs how an agent behaves during a session:
+An **Agent** is a named configuration object that governs how a flow behaves during a session:
 - Which **LLM profile** to use (overrides engine defaults at tier 4.5)
 - Which **tools** are permitted (allowlist — `None` means all tools)
-- Extra **system prompt files** appended to the agent's base prompt (`extra_prompts`)
+- Extra **system prompt files** appended to the flow's base prompt (`extra_prompts`)
 - **Tool confirmation** policy defaults and per-tool overrides
 
-Every agent automatically gets a *synthesised* default profile on startup. Workspace-local YAML files and plugin-declared blocks can override defaults.
+Every flow automatically gets a *synthesised* default agent on startup. Workspace-local YAML files and plugin-declared blocks can override defaults.
 
-### AgentProfile Fields
+### Agent Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | `str` | — | Unique profile identifier |
-| `agent` | `str` | — | Qualified agent name this profile targets (`plugin::agent`) |
+| `name` | `str` | — | Unique agent identifier |
+| `flow` | `str` | — | Qualified flow name this agent targets (`plugin::flow`) |
 | `description` | `str` | `""` | Human-readable description |
 | `llm_profile` | `str \| None` | `None` | LLM profile name; `None` inherits from engine |
 | `extra_prompts` | `List[str]` | `[]` | File paths to append to system prompt |
@@ -36,26 +36,26 @@ Plugin-declared > Workspace file > Synthesised default
 
 ### LLM Resolution Tier Order
 
-1. CLI per-agent override
-2. Config per-agent override
+1. CLI per-flow override
+2. Config per-flow override
 3. CLI global override
-4. Dynamic per-agent override
-4.5 **Active agent profile** `llm_profile`
-5. Agent definition `llm_profile`
+4. Dynamic per-flow override
+4.5 **Active agent** `llm_profile`
+5. Flow definition `llm_profile`
 6. Default LLM profile
 7. LLM router default
 
 ### Tool Confirmation Tier Order
 
-**PRE-CHECK**: Tool not in `profile.tools` → deny immediately (no confirmation prompt)
+**PRE-CHECK**: Tool not in `agent.tools` → deny immediately (no confirmation prompt)
 
-1. Session `[agent][tool]`
-1.5 **Profile** `tool_confirmation.overrides[tool]`
-2. Config `[agent][tool]`
+1. Session `[flow][tool]`
+1.5 **Agent** `tool_confirmation.overrides[tool]`
+2. Config `[flow][tool]`
 3. Session global `[tool]`
-4. Session `[agent].default`
-4.5 **Profile** `tool_confirmation.default`
-5. Config `[agent].default`
+4. Session `[flow].default`
+4.5 **Agent** `tool_confirmation.default`
+5. Config `[flow].default`
 6. Config global `[tool]`
 7. Session global default
 8. Config global default
@@ -63,39 +63,39 @@ Plugin-declared > Workspace file > Synthesised default
 ### CLI Commands
 
 ```
-/agent-profile list                         List all available agent profiles.
-/agent-profile show [profile_name]          Show details (default: active profile).
-/agent-profile switch <profile_name>        Activate an agent profile.
-/agent-profile clone <source> <new_name>    Clone a profile to a new workspace file.
-/agent-profile help                         Show help.
+/agent list                                 List all available agents.
+/agent show [agent_name]                    Show details (default: active agent).
+/agent switch <agent_name>                  Activate an agent.
+/agent clone <source> <new_name>            Clone an agent to a new workspace file.
+/agent help                                 Show help.
 
-/agent <agent_name> [--agent-profile <profile_name>]   Set agent + optionally activate a profile.
+/flow <flow_name> [--agent <agent_name>]    Set flow + optionally activate an agent.
 ```
 
-Short alias: `/ap` → `/agent-profile`
+Compatibility alias: `/agent-profile` → `/agent`
 
 ### Status Bar Format
 
 ```
-Runtime flow: <flow> | Agent: <agent> | Profile: <profile> | LLM: <llm_profile> (<model>)
+Runtime flow: <runtime> | Flow: <flow> | Agent: <agent> | LLM: <llm_profile> (<model>)
 ```
 
-### Workspace Profile YAML Schema
+### Workspace Agent YAML Schema
 
-Stored in `.pocketcode/agent-profiles/<name>.yaml`:
+Stored in `.pocketcode/agents/<name>.yaml`:
 
 ```yaml
-name: my-profile          # required
-agent: plugin::agentname  # required (qualified name)
+name: my-agent          # required
+flow: plugin::flowname  # required (qualified name)
 description: "Optional description"
-llm_profile: gpt-4o       # optional; omit to inherit
-tools:                    # optional; omit for unrestricted
+llm_profile: gpt-4o     # optional; omit to inherit
+tools:                  # optional; omit for unrestricted
   - filesystem::read_file
   - search::web_search
-extra_prompts:            # optional file paths
-  - prompts/safety.md     # relative to this file or .pocketcode/
+extra_prompts:          # optional file paths
+  - prompts/safety.md   # relative to this file or .pocketcode/
 tool_confirmation:
-  default: confirm        # optional: allow | confirm | deny
+  default: confirm      # optional: allow | confirm | deny
   overrides:
     filesystem::delete_file: deny
 ```
@@ -103,12 +103,12 @@ tool_confirmation:
 ### Plugin plugin.yaml Inline Block
 
 ```yaml
-agents:
-  myagent:
-    # ... existing agent fields ...
-    default_agent_profile:
-      name: myplugin::myagent:safe   # optional; defaults to qualified agent name
-      description: "Safe mode profile"
+flows:
+  myflow:
+    # ... existing flow fields ...
+    default_agent:
+      name: myplugin::myflow:safe
+      description: "Safe mode agent"
       llm_profile: gpt-4o-mini
       tools:
         - search::web_search
@@ -120,13 +120,14 @@ agents:
 
 | File | Purpose |
 |------|---------|
-| `pocketcode/core/agent_profile_manager.py` | Profile registry: load, get, list, clone, save |
-| `pocketcode/core/runtime_models.py` | `AgentProfile` and `AgentDefinition` dataclasses |
-| `pocketcode/core/engine.py` | `active_agent_profile`, `set_active_agent_profile()`, `list_agent_profiles()` |
+| `pocketcode/core/agent_manager.py` | Agent registry exports |
+| `pocketcode/core/agent_profile_manager.py` | Agent registry implementation: load, get, list, clone, save |
+| `pocketcode/core/runtime_models.py` | `Agent` and `FlowDefinition` dataclasses |
+| `pocketcode/core/engine.py` | `set_flow()`, `set_active_agent()`, `list_flows()`, `list_available_agents()` |
 | `pocketcode/core/agent_runtime.py` | LLM tier 4.5, tool filtering, extra_prompts injection |
 | `pocketcode/core/tool_runtime.py` | Confirmation tiers 1.5/4.5, tool allowlist pre-check |
-| `pocketcode/cli/command_handler.py` | `/agent-profile` CLI surface, `--agent-profile` flag |
-| `pocketcode/cli/completers.py` | `AgentProfileCompleter` for tab-completion |
-| `pocketcode/cli/textual_app.py` | Status bar Profile segment, suggestion list |
-| `tests/unit/test_agent_profile_manager.py` | Manager unit tests |
+| `pocketcode/cli/command_handler.py` | `/flow` and `/agent` CLI surface, plus `/agent-profile` compatibility alias |
+| `pocketcode/cli/completers.py` | `AgentCompleter` for tab-completion |
+| `pocketcode/cli/textual_app.py` | Status bar Flow/Agent segments, suggestion list |
+| `tests/unit/test_agent_profile_manager.py` | Agent manager unit tests |
 | `tests/unit/test_agent_profile_resolution.py` | LLM/confirmation/allowlist unit tests |
