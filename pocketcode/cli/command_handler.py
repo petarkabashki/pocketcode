@@ -63,6 +63,9 @@ def handle_command(
     if command == "/confirm":
         return _handle_confirm_command(args, engine)
 
+    if command == "/agent-profile":
+        return _handle_agent_profile_command(args, engine)
+
     print(f"Unknown command: {command}")
     print_help()
     return None
@@ -75,6 +78,7 @@ def _normalize_command(command: str) -> str:
         "/st": "/status",
         "/ls": "/list",
         "/ag": "/agent",
+        "/ap": "/agent-profile",
         "/lm": "/llm",
         "/la": "/llm-agent",
         "/lh": "/llm-handoff",
@@ -146,10 +150,14 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
 
     if command == "/agent":
         if not args:
-            print(f"Current agent: {engine.get_current_agent() or 'auto'}")
-            print("Usage: /agent <agent_name|auto>")
+            current_agent = engine.get_current_agent()
+            current_profile = engine.active_agent_profile
+            print(f"Current agent: {current_agent or 'auto'}")
+            if current_profile:
+                print(f"Current agent profile: {current_profile.name}")
+            print("Usage: /agent <agent_name|auto> [--agent-profile <profile_name>]")
             return None
-        target = args[0]
+        target, profile_name = _parse_agent_profile_flag(args)
         try:
             if target.lower() == "auto":
                 engine.set_agent(None)
@@ -157,6 +165,12 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
             else:
                 engine.set_agent(target)
                 print(f"Selected agent: {target}")
+            if profile_name is not None:
+                try:
+                    engine.set_active_agent_profile(profile_name)
+                    print(f"Agent profile activated: {profile_name}")
+                except ValueError as exc:
+                    print(f"Warning: {exc}")
         except Exception as exc:
             print(f"Error: {exc}")
         return None
@@ -362,6 +376,7 @@ Pocketcode Commands:
   /status                        Show runtime status.
   /context <cmd> [opts]          Manage context. Run '/context help'.
   /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
+  /agent-profile <cmd> [opts]    Manage agent profiles. Run '/agent-profile help'.
   /copy, /copy-all               Copy response text (Textual UI).
   /exit, /quit                   Exit Pocketcode.
 
@@ -370,6 +385,7 @@ Compatibility aliases:
   /llms      -> /list llms
   /tools     -> /list tools
   /agent     -> /set agent
+  /ap        -> /agent-profile
   /llm       -> /set llm
   /llm-agent -> /set llm-agent
   /llm-handoff -> /set llm-handoff
@@ -519,3 +535,118 @@ def print_confirm_help() -> None:
   /confirm help
 """
     print(confirm_help)
+
+
+def _parse_agent_profile_flag(args: list[str]) -> tuple[str, str | None]:
+    """Extract ``--agent-profile <name>`` from *args*.
+
+    Returns a tuple of ``(positional_target, profile_name)`` where
+    *positional_target* is the first non-flag argument and *profile_name* is
+    the value following ``--agent-profile`` (or ``None`` if not supplied).
+    """
+    profile_name: str | None = None
+    cleaned: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] in {"--agent-profile", "--profile"} and i + 1 < len(args):
+            profile_name = args[i + 1]
+            i += 2
+        else:
+            cleaned.append(args[i])
+            i += 1
+    return (cleaned[0] if cleaned else ""), profile_name
+
+
+def _handle_agent_profile_command(
+    args: list[str],
+    engine: PocketCodeEngine,
+) -> Optional[str]:
+    """Dispatch /agent-profile sub-commands: list | show | switch | clone."""
+    if not args:
+        print_agent_profile_help()
+        return None
+
+    subcommand = args[0].lower()
+    sub_args = args[1:]
+
+    if subcommand == "help":
+        print_agent_profile_help()
+        return None
+
+    if subcommand == "list":
+        profiles = engine.list_agent_profiles()
+        if not profiles:
+            print("No agent profiles available.")
+            return None
+        active = engine.active_agent_profile
+        print("Available agent profiles:")
+        for name in profiles:
+            marker = "*" if (active and active.name == name) else " "
+            print(f"  {marker} {name}")
+        return None
+
+    if subcommand == "show":
+        if sub_args:
+            profile = engine._agent_profile_manager.get(sub_args[0])
+            if profile is None:
+                print(f"Agent profile not found: {sub_args[0]}")
+                return None
+        else:
+            profile = engine.active_agent_profile
+            if not profile:
+                print("No agent profile is currently active.")
+                return None
+        print(f"Agent Profile: {profile.name}")
+        print(f"  Agent    : {profile.agent}")
+        print(f"  Desc     : {profile.description or '\u2014'}")
+        print(f"  LLM      : {profile.llm_profile or '(inherit)'}")
+        print(f"  Tools    : {', '.join(profile.tools) if profile.tools is not None else '(all)'}")
+        print(f"  Extra    : {profile.extra_prompts or []}")
+        print(f"  Confirm  : {profile.tool_confirmation or {}}")
+        print(f"  Source   : {profile.source}")
+        if profile.source_path:
+            print(f"  Path     : {profile.source_path}")
+        return None
+
+    if subcommand == "switch":
+        if not sub_args:
+            print("Usage: /agent-profile switch <profile_name>")
+            return None
+        name = sub_args[0]
+        try:
+            engine.set_active_agent_profile(name)
+            print(f"Agent profile activated: {name}")
+        except ValueError as exc:
+            print(f"Error: {exc}")
+        return None
+
+    if subcommand == "clone":
+        if len(sub_args) < 2:
+            print("Usage: /agent-profile clone <source_profile> <new_profile_name>")
+            return None
+        src, new_name = sub_args[0], sub_args[1]
+        try:
+            engine._agent_profile_manager.clone(src, new_name)
+            print(f"Cloned profile '{src}' \u2192 '{new_name}'.")
+        except (KeyError, ValueError) as exc:
+            print(f"Error: {exc}")
+        return None
+
+    print(f"Unknown /agent-profile subcommand: {subcommand}")
+    print_agent_profile_help()
+    return None
+
+
+def print_agent_profile_help() -> None:
+    text = """
+/agent-profile Commands:
+  /agent-profile list                         List all available agent profiles.
+  /agent-profile show [profile_name]          Show details of a profile (default: active).
+  /agent-profile switch <profile_name>        Activate an agent profile.
+  /agent-profile clone <source> <new_name>    Clone a profile to a new workspace profile.
+  /agent-profile help                         Show this help message.
+
+Usage with /agent:
+  /agent <agent_name> [--agent-profile <profile_name>]
+"""
+    print(text)

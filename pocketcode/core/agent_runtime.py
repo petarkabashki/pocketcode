@@ -215,6 +215,10 @@ class AgentRuntime:
             # Pre-compute tool definitions for the active agent each turn.
             try:
                 _allowed = self._plugins.resolve_tools_for_agent(agent_name)
+                # T016: intersect with active profile tool allowlist (FR-008).
+                _pf_profile = shared_store.get("active_agent_profile")
+                if _pf_profile is not None and _pf_profile.tools is not None:
+                    _allowed = [t for t in _allowed if t in _pf_profile.tools]
                 shared_store["_agent_tool_definitions"] = self._tool_runtime.describe_tools(_allowed)
             except Exception:
                 shared_store.setdefault("_agent_tool_definitions", [])
@@ -226,6 +230,13 @@ class AgentRuntime:
                 )
             except Exception:
                 pass
+
+            # T017: inject system prompt with extra_prompts for pocketflow agents.
+            _pf_base_prompt = self._build_agent_system_prompt(agent_name=agent_name)
+            _pf_extra = self._resolve_extra_prompts_content(shared_store.get("active_agent_profile"))
+            shared_store["_agent_system_prompt"] = (
+                _pf_base_prompt + "\n\n" + _pf_extra if _pf_extra else _pf_base_prompt
+            )
 
             # PocketFlow returns the transition string or None
             # T011, T028 implementation
@@ -343,6 +354,10 @@ class AgentRuntime:
         shared_store: Dict[str, Any],
     ) -> str:
         allowed_tools = self._plugins.resolve_tools_for_agent(agent_name)
+        # T016: intersect with active profile tool allowlist (FR-008).
+        _llm_prof = shared_store.get("active_agent_profile")
+        if _llm_prof is not None and _llm_prof.tools is not None:
+            allowed_tools = [t for t in allowed_tools if t in _llm_prof.tools]
         tool_definitions = self._tool_runtime.describe_tools(allowed_tools)
 
         llm_profile = self._resolve_llm_profile(agent_name, agent_definition, shared_store)
@@ -391,6 +406,10 @@ class AgentRuntime:
         }
 
         system_prompt = self._build_agent_system_prompt(agent_name=agent_name)
+        # T017: append extra_prompts from active agent profile.
+        _ep_content = self._resolve_extra_prompts_content(shared_store.get("active_agent_profile"))
+        if _ep_content:
+            system_prompt = system_prompt + "\n\n" + _ep_content
         prompt = "\n\n".join(
             [
                 system_prompt,
@@ -659,6 +678,11 @@ class AgentRuntime:
             profile = shared_store.get("cli_llm_override")
         if not profile and isinstance(dynamic_overrides, dict):
             profile = dynamic_overrides.get(agent_name)
+        # Tier 4.5: active agent profile llm_profile (FR-012 / T015).
+        if not profile:
+            _active_prof = shared_store.get("active_agent_profile")
+            if _active_prof and _active_prof.agent == agent_name and _active_prof.llm_profile:
+                profile = _active_prof.llm_profile
         if not profile:
             profile = agent_definition.llm_profile
         if not profile:
@@ -937,3 +961,43 @@ class AgentRuntime:
         if mode in {"delegated", "scoped", "partial"}:
             return "delegated"
         return "whole"
+
+    def _resolve_extra_prompts_content(self, profile: Any) -> str:
+        """Read and concatenate extra_prompts files from *profile*.
+
+        Resolves each path:
+        1. Relative to ``profile.source_path.parent`` (workspace YAML file dir).
+        2. Relative to ``<workspace_root>/.pocketcode/``.
+
+        Logs a WARNING and skips any path that cannot be resolved or read.
+        """
+        if profile is None or not profile.extra_prompts:
+            return ""
+        workspace_pocketcode = self._plugins.workspace_root / ".pocketcode"
+        parts: List[str] = []
+        for path_str in profile.extra_prompts:
+            resolved = None
+            if profile.source_path is not None:
+                candidate = profile.source_path.parent / path_str
+                if candidate.is_file():
+                    resolved = candidate
+            if resolved is None:
+                candidate = workspace_pocketcode / path_str
+                if candidate.is_file():
+                    resolved = candidate
+            if resolved is None:
+                logger.warning(
+                    "extra_prompts: could not resolve '%s' for profile '%s'. Skipping.",
+                    path_str,
+                    profile.name,
+                )
+                continue
+            try:
+                parts.append(resolved.read_text(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "extra_prompts: failed to read '%s': %s. Skipping.",
+                    resolved,
+                    exc,
+                )
+        return "\n\n".join(parts)

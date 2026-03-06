@@ -1,7 +1,52 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class AgentProfile:
+    """A named configuration bundle that governs how an agent is invoked.
+
+    Every agent has at least one profile: either explicitly declared in
+    ``plugin.yaml`` under ``default_agent_profile``, or synthesised from the
+    agent's top-level fields by ``AgentProfileManager``.
+
+    Fields
+    ------
+    name : str
+        Unique identifier (e.g. ``"core::react"`` or ``"react-safe"``).
+    agent : str
+        Qualified agent reference this profile targets (e.g. ``"core::react"``).
+    description : str
+        Human-readable description. Default ``""``.
+    llm_profile : str | None
+        LLM configuration profile name. ``None`` means inherit from lower tiers.
+    extra_prompts : List[str]
+        Ordered list of file paths whose contents are appended to the system
+        prompt each turn. Default ``[]``.
+    tools : List[str] | None
+        Explicit tool allowlist (qualified names). ``None`` means inherit all.
+    tool_confirmation : Dict[str, Any]
+        ``{"default": str | None, "overrides": Dict[str, str]}``.
+        Absent keys mean "no opinion at this tier". Default ``{}``.
+    source : str
+        Provenance: ``"synthesised"``, ``"plugin"``, or ``"workspace"``.
+    source_path : Path | None
+        Absolute path to the YAML file for workspace profiles. ``None`` for
+        synthesised and plugin profiles.
+    """
+
+    name: str
+    agent: str
+    description: str = ""
+    llm_profile: Optional[str] = None
+    extra_prompts: List[str] = field(default_factory=list)
+    tools: Optional[List[str]] = None
+    tool_confirmation: Dict[str, Any] = field(default_factory=dict)
+    source: str = "synthesised"
+    source_path: Optional[Path] = None
 
 
 @dataclass
@@ -26,3 +71,4 @@ class AgentDefinition:
     entry_fn: Optional[str] = None
     flow_instance: Any = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    default_agent_profile: Optional[AgentProfile] = None

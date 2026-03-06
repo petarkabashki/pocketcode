@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from pocketcode.core.agent_profile_manager import AgentProfileManager
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
@@ -24,6 +25,11 @@ class PocketCodeEngine:
 
         self._plugins = PluginManager(config=config, workspace_root=self._workspace_root)
         self._plugins.load()
+
+        # T011: instantiate AgentProfileManager after plugins are loaded.
+        self._agent_profile_manager = AgentProfileManager(self._workspace_root)
+        self._agent_profile_manager.load(dict(self._plugins.agents))
+        self.active_agent_profile = None  # type: ignore[assignment]  # AgentProfile | None
 
         self._llm_router = LlmRouter(config=config, plugin_llm_profiles=self._plugins.llm_profiles)
         self._tool_runtime = ToolRuntime(
@@ -46,7 +52,7 @@ class PocketCodeEngine:
         self.config_llm_overrides = self._build_llm_overrides_config()
 
         self.current_agent = self._runtime_config.get("default_agent")
-        self.global_llm_override: Optional[str] = None
+        self.global_llm_override = None  # type: ignore[assignment]
         self.agent_llm_overrides: Dict[str, str] = {}
         self.handoff_llm_overrides: Dict[str, str] = {}
         self.auto_confirm_tools = bool(self._runtime_config.get("auto_confirm_tools", False))
@@ -69,6 +75,18 @@ class PocketCodeEngine:
 
     def reload(self) -> None:
         self._plugins.load()
+        # T014: reload APM after plugins reload.
+        self._agent_profile_manager.reload(dict(self._plugins.agents))
+        # Re-apply active profile by name if it still exists; else fall back to
+        # the current agent's default profile.
+        if self.active_agent_profile is not None:
+            still_exists = self._agent_profile_manager.get(self.active_agent_profile.name)
+            if still_exists is not None:
+                self.active_agent_profile = still_exists
+            elif self.current_agent:
+                self._activate_default_profile_for(self.current_agent)
+            else:
+                self.active_agent_profile = None
         self._llm_router = LlmRouter(config=self._config, plugin_llm_profiles=self._plugins.llm_profiles)
         self.config_llm_overrides = self._build_llm_overrides_config()
         self._tool_confirmation_config = self._build_tool_confirmation_config()
@@ -118,10 +136,50 @@ class PocketCodeEngine:
     def set_agent(self, agent_name: Optional[str]) -> None:
         if not agent_name:
             self.current_agent = None
+            self.active_agent_profile = None
             return
         if agent_name not in self._plugins.agents:
             raise KeyError(f"Unknown agent '{agent_name}'.")
         self.current_agent = agent_name
+        # T012: auto-activate the agent's default profile.
+        self._activate_default_profile_for(agent_name)
+
+    def set_active_agent_profile(self, name: Optional[str]) -> None:
+        """Activate a named agent profile, or clear the active profile if name is None."""
+        if name is None:
+            self.active_agent_profile = None
+            return
+        profile = self._agent_profile_manager.get(name)
+        if profile is None:
+            available = [p.name for p in self._agent_profile_manager.list()]
+            raise ValueError(
+                f"Unknown agent profile '{name}'. "
+                f"Available: {available}"
+            )
+        self.active_agent_profile = profile
+
+    def list_agent_profiles(self) -> List[str]:
+        """Return all known agent profile names, sorted."""
+        return [p.name for p in self._agent_profile_manager.list()]
+
+    def _activate_default_profile_for(self, agent_name: str) -> None:
+        """Set active_agent_profile to the agent's default profile."""
+        defn = self._plugins.agents.get(agent_name)
+        if defn is None:
+            return
+        explicit = getattr(defn, "default_agent_profile", None)
+        if explicit is not None:
+            default_name = explicit.name
+        else:
+            default_name = agent_name  # synthesised profile is named after the agent
+        profile = self._agent_profile_manager.get(default_name)
+        if profile is None:
+            # Fall back to any profile whose agent field matches.
+            for p in self._agent_profile_manager.list():
+                if p.agent == agent_name:
+                    profile = p
+                    break
+        self.active_agent_profile = profile
 
     def set_global_llm_override(self, profile_name: Optional[str]) -> None:
         if not profile_name:
@@ -187,6 +245,8 @@ class PocketCodeEngine:
             "config_handoff_llm_overrides": dict(self.config_llm_overrides.get("handoffs", {})),
             "auto_confirm_tools": self.auto_confirm_tools,
             "session_tool_confirmation": self._copy_session_confirmation_overrides(),
+            # T013: inject active agent profile so AgentRuntime / ToolRuntime can read it.
+            "active_agent_profile": self.active_agent_profile,
         }
 
         self._agent_runtime.run(shared_store)
@@ -215,6 +275,8 @@ class PocketCodeEngine:
     def status(self) -> Dict[str, Any]:
         return {
             "agent": self.current_agent,
+            # T013: expose active agent profile name.
+            "active_agent_profile": self.active_agent_profile.name if self.active_agent_profile else None,
             "global_llm_override": self.global_llm_override,
             "agent_llm_overrides": dict(self.agent_llm_overrides),
             "handoff_llm_overrides": dict(self.handoff_llm_overrides),
