@@ -443,15 +443,16 @@ Compatibility aliases:
 
 Keyboard shortcuts (Textual UI):
   Tab                           Complete current prompt input.
-  Ctrl+]                        Select next agent.
-  Ctrl+P                        Select next profile for the current agent.
-  Ctrl+[                        Select next global LLM override.
-  Ctrl+B                        Toggle the left navigation panel.
-  Ctrl+I                        Toggle the right inspector panel.
+  F1 / F2 / F3 / F4 / F5        Switch Chat / Control / Profiles / Context / Run views.
+  F6                            Select next agent.
+  F7 or Ctrl+P                  Select next profile for the current agent.
+  F8                            Select next global LLM override.
+  F9                            Toggle the left navigation panel.
+  F10                           Toggle the right inspector panel.
+  F11                           Toggle header details.
   Ctrl+W                        Cycle workspace mode presets.
-  Ctrl+T                        Toggle top stats panel.
-  Alt+1 / Alt+2 / Alt+3 / Alt+4 Switch Chat / Control / Context / Run views.
-  Ctrl+Space                    Complete current prompt input.
+  Alt+1 / Alt+2 / Alt+3         Switch Chat / Control / Profiles views.
+  Alt+4 / Alt+5                 Switch Context / Run views.
   Ctrl+Shift+A                  Copy full response console output.
   Ctrl+Y                        Copy last assistant response.
   Ctrl+Q                        Quit Textual UI.

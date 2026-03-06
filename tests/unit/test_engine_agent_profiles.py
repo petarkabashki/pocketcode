@@ -143,6 +143,53 @@ class TestEngineAgentProfiles:
         assert updated is manager.saved_profile
         assert engine.active_agent_profile is manager.saved_profile
 
+    def test_update_agent_profile_replaces_tool_confirmation_overrides_when_provided(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        profile = AgentProfile(
+            name="coder.safe",
+            agent="coder::coder",
+            llm_profile=None,
+            extra_prompts=[],
+            tools=["filesystem::read_file"],
+            tool_confirmation={"default": "confirm", "overrides": {"filesystem::delete_file": "deny"}},
+            source="workspace",
+            source_path=Path("/tmp/coder.safe.yaml"),
+        )
+        manager = _EditableProfileManagerStub({"coder.safe": profile})
+        engine._agent_profile_manager = manager
+        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
+        )()
+        engine.active_agent_profile = profile
+        engine._normalize_confirmation_policy = PocketCodeEngine._normalize_confirmation_policy.__get__(
+            engine,
+            PocketCodeEngine,
+        )
+
+        engine.update_agent_profile(
+            "coder.safe",
+            llm_profile=None,
+            tools=["filesystem::read_file"],
+            extra_prompts=[],
+            tool_confirmation_default="confirm",
+            tool_confirmation_overrides={
+                "filesystem::delete_file": "allow",
+                "search::web_search": "deny",
+            },
+        )
+
+        assert manager.saved_profile is not None
+        assert manager.saved_profile.tool_confirmation == {
+            "default": "confirm",
+            "overrides": {
+                "filesystem::delete_file": "allow",
+                "search::web_search": "deny",
+            },
+        }
+
     def test_list_tools_for_agent_caches_unfiltered_results(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._plugins = _PluginsWithToolResolution()

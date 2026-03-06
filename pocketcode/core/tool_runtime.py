@@ -334,6 +334,15 @@ class ToolRuntime:
         if agent_name:
             question += f" from agent '{agent_name}'"
         question += f" with arguments {arguments!r}?"
+        event_handler = shared_store.get("runtime_event_handler")
+        if callable(event_handler):
+            event_handler(
+                "tool_confirmation_requested",
+                tool=tool_name,
+                agent=agent_name,
+                arguments=arguments,
+                prompt=question,
+            )
 
         response = self._confirm_tool.execute(
             prompt=question,
