@@ -3,6 +3,10 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
+import os
+import signal
+import subprocess
+import time
 from typing import Any, Dict, List
 
 from pocketcode.core.interfaces import BaseTool
@@ -11,6 +15,7 @@ from pocketcode.tools.user_input import ConfirmUserInputTool
 logger = logging.getLogger(__name__)
 
 VALID_CONFIRMATION_POLICIES = {"allow", "confirm", "deny"}
+VALID_EXECUTION_MODES = {"inline", "managed_subprocess"}
 
 
 class ToolRuntime:
@@ -108,11 +113,24 @@ class ToolRuntime:
                 }
 
         tool_impl = self._resolve_tool(tool_name)
+        tool_instance = self._instantiate_tool(tool_impl)
+        execution_mode = self._resolve_execution_mode(tool_impl, tool_instance)
 
-        if isinstance(tool_impl, type) and issubclass(tool_impl, BaseTool):
-            return tool_impl().execute(**arguments)
-        if isinstance(tool_impl, BaseTool):
-            return tool_impl.execute(**arguments)
+        if execution_mode == "managed_subprocess":
+            if tool_instance is None:
+                raise TypeError(
+                    f"Tool '{tool_name}' uses execution_mode='managed_subprocess' but is not a BaseTool implementation."
+                )
+            return self._execute_managed_subprocess_tool(
+                tool=tool_instance,
+                tool_name=tool_name,
+                arguments=arguments,
+                shared_store=shared_store,
+                agent_name=agent_name,
+            )
+
+        if tool_instance is not None:
+            return self._call_tool_instance(tool_instance, arguments, shared_store)
         if callable(tool_impl):
             return self._call_callable_tool(tool_impl, arguments, shared_store)
 
@@ -161,6 +179,151 @@ class ToolRuntime:
             kwargs["shared_store"] = shared_store
 
         return callable_tool(**kwargs)
+
+    def _call_tool_instance(
+        self,
+        tool_instance: BaseTool,
+        arguments: Dict[str, Any],
+        shared_store: Dict[str, Any],
+    ) -> Any:
+        signature = inspect.signature(tool_instance.execute)
+        params = signature.parameters
+
+        kwargs = dict(arguments)
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in params.values()
+        )
+        if accepts_kwargs or "shared_store" in params:
+            kwargs["shared_store"] = shared_store
+
+        return tool_instance.execute(**kwargs)
+
+    def _instantiate_tool(self, tool_impl: Any) -> BaseTool | None:
+        if isinstance(tool_impl, type) and issubclass(tool_impl, BaseTool):
+            return tool_impl()
+        if isinstance(tool_impl, BaseTool):
+            return tool_impl
+        return None
+
+    def _resolve_execution_mode(self, tool_impl: Any, tool_instance: BaseTool | None) -> str:
+        if tool_instance is not None:
+            mode = getattr(tool_instance, "execution_mode", "inline")
+        else:
+            mode = getattr(tool_impl, "execution_mode", "inline")
+
+        normalized = str(mode or "inline").strip().lower()
+        if normalized not in VALID_EXECUTION_MODES:
+            logger.warning("Unknown execution mode '%s'. Falling back to inline execution.", normalized)
+            return "inline"
+        return normalized
+
+    def _execute_managed_subprocess_tool(
+        self,
+        *,
+        tool: BaseTool,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        shared_store: Dict[str, Any],
+        agent_name: str | None,
+    ) -> Any:
+        event_handler = shared_store.get("runtime_event_handler")
+        process = tool.spawn_subprocess(**arguments)
+        timeout_seconds = tool.timeout_seconds
+        started_at = time.monotonic()
+        shared_store["active_tool_execution"] = {
+            "tool": tool_name,
+            "mode": "managed_subprocess",
+            "pid": process.pid,
+            "started_at": started_at,
+        }
+
+        if callable(event_handler):
+            event_handler(
+                "tool_subprocess_started",
+                tool=tool_name,
+                agent=agent_name,
+                pid=process.pid,
+            )
+
+        try:
+            while process.poll() is None:
+                if self._is_cancel_requested(shared_store):
+                    self._stop_subprocess(process)
+                    if callable(event_handler):
+                        event_handler(
+                            "tool_subprocess_terminated",
+                            tool=tool_name,
+                            agent=agent_name,
+                            pid=process.pid,
+                            reason="cancelled",
+                        )
+                    return {
+                        "success": False,
+                        "error": f"Tool '{tool_name}' was terminated by cancellation.",
+                        "cancelled": True,
+                    }
+
+                if timeout_seconds is not None and (time.monotonic() - started_at) > float(timeout_seconds):
+                    self._stop_subprocess(process)
+                    if callable(event_handler):
+                        event_handler(
+                            "tool_timeout",
+                            tool=tool_name,
+                            agent=agent_name,
+                            pid=process.pid,
+                            timeout_seconds=float(timeout_seconds),
+                        )
+                    return {
+                        "success": False,
+                        "error": f"Tool '{tool_name}' exceeded timeout ({float(timeout_seconds)}s).",
+                        "timed_out": True,
+                    }
+
+                time.sleep(0.05)
+
+            stdout, stderr = process.communicate()
+            return tool.handle_subprocess_result(
+                returncode=int(process.returncode or 0),
+                stdout=stdout,
+                stderr=stderr,
+                **arguments,
+            )
+        finally:
+            shared_store.pop("active_tool_execution", None)
+
+    def _stop_subprocess(self, process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+
+        if os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+        else:
+            process.terminate()
+
+        try:
+            process.wait(timeout=1.0)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        if os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return
+        else:
+            process.kill()
+        process.wait(timeout=1.0)
+
+    def _is_cancel_requested(self, shared_store: Dict[str, Any]) -> bool:
+        value = shared_store.get("run_cancel_requested")
+        if callable(value):
+            return bool(value())
+        return bool(value)
 
     def _schema_from_callable(self, callable_tool: Any) -> Dict[str, Any]:
         signature = inspect.signature(callable_tool)

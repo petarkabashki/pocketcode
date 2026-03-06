@@ -14,6 +14,7 @@ import yaml
 
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.run_handle import RunCancelledError
 from pocketcode.core.runtime_models import AgentDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
 
@@ -55,6 +56,7 @@ class AgentRuntime:
         max_steps = int(self._runtime_config.get("max_agent_steps", 64))
 
         for _ in range(max_steps):
+            self._raise_if_cancelled(shared_store)
             agent_name = str(shared_store.get("active_agent") or "").strip()
             if not agent_name:
                 shared_store["error_message"] = "No active agent could be resolved."
@@ -135,6 +137,24 @@ class AgentRuntime:
         handler = shared_store.get("runtime_event_handler")
         if callable(handler):
             handler(event_type, **payload)
+
+    def _is_cancel_requested(self, shared_store: Dict[str, Any]) -> bool:
+        value = shared_store.get("run_cancel_requested")
+        if callable(value):
+            return bool(value())
+        return bool(value)
+
+    def _get_cancel_reason(self, shared_store: Dict[str, Any]) -> str:
+        value = shared_store.get("run_cancel_reason")
+        if callable(value):
+            value = value()
+        if isinstance(value, str) and value.strip():
+            return value
+        return "Run cancelled by user."
+
+    def _raise_if_cancelled(self, shared_store: Dict[str, Any]) -> None:
+        if self._is_cancel_requested(shared_store):
+            raise RunCancelledError(self._get_cancel_reason(shared_store))
 
     def _run_agent_turn(self, agent_name: str, shared_store: Dict[str, Any]) -> str:
         agent_definition = self._plugins.agents[agent_name]
@@ -447,7 +467,9 @@ class AgentRuntime:
             agent=agent_name,
             profile=llm_profile,
         )
+        self._raise_if_cancelled(shared_store)
         response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
+        self._raise_if_cancelled(shared_store)
         llm_generation_info = self._llm_router.get_last_generation_info()
         shared_store["last_llm_generation"] = llm_generation_info
         shared_store["last_llm_profile"] = llm_profile
@@ -508,6 +530,7 @@ class AgentRuntime:
         )
 
     def _run_tool_call(self, shared_store: Dict[str, Any]) -> None:
+        self._raise_if_cancelled(shared_store)
         pending_tool = shared_store.get("pending_tool", {})
         if not isinstance(pending_tool, dict):
             pending_tool = {}
@@ -538,6 +561,7 @@ class AgentRuntime:
             auto_confirm=bool(shared_store.get("auto_confirm_tools", False)),
             agent_name=str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None,
         )
+        self._raise_if_cancelled(shared_store)
 
         route_payload = {
             "tool": str(tool_name),
@@ -665,6 +689,13 @@ class AgentRuntime:
         shared_store["active_agent"] = str(source_agent)
         shared_store.pop("active_handoff_context", None)
         shared_store["active_handoff_context_mode"] = "whole"
+        self._emit_event(
+            shared_store,
+            "handoff_return",
+            source_agent=str(source_agent),
+            target_agent=str(target_agent),
+            return_transition=str(top.get("return_transition") or "continue"),
+        )
 
         return True
 
@@ -872,6 +903,7 @@ class AgentRuntime:
         plugin_root = Path(str(plugin_root_value)).resolve() if plugin_root_value else None
 
         for handler_reference in handler_references:
+            self._raise_if_cancelled(shared_store)
             handler = self._resolve_python_handler(
                 handler_reference=handler_reference,
                 plugin_root=plugin_root,
@@ -1042,12 +1074,15 @@ class AgentRuntime:
 
         Resolves each path:
         1. Relative to ``profile.source_path.parent`` (workspace YAML file dir).
-        2. Relative to ``<workspace_root>/.pocketcode/``.
+        2. Relative to the active plugin root, when available.
+        3. Relative to ``<workspace_root>/``, ``<workspace_root>/.pocketcode/``,
+           and ``<workspace_root>/.pocketcode/prompts/``.
 
         Logs a WARNING and skips any path that cannot be resolved or read.
         """
         if profile is None or not profile.extra_prompts:
             return ""
+        workspace_root = self._plugins.workspace_root
         workspace_pocketcode = self._plugins.workspace_root / ".pocketcode"
         plugin_root = self._resolve_profile_plugin_root(profile)
         parts: List[str] = []
@@ -1062,9 +1097,11 @@ class AgentRuntime:
                 if candidate.is_file():
                     resolved = candidate
             if resolved is None:
-                candidate = workspace_pocketcode / path_str
-                if candidate.is_file():
-                    resolved = candidate
+                for base_dir in (workspace_root, workspace_pocketcode, workspace_pocketcode / "prompts"):
+                    candidate = base_dir / path_str
+                    if candidate.is_file():
+                        resolved = candidate
+                        break
             if resolved is None:
                 logger.warning(
                     "extra_prompts: could not resolve '%s' for profile '%s'. Skipping.",

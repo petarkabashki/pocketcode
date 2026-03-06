@@ -116,7 +116,7 @@ Unqualified bare-name resolution:
 
 ## Core Plugin (`pocketcode/plugins/core`)
 
-The built-in `core` plugin ships all standard tools and three base flows:
+The built-in `core` plugin ships the default runtime flow plus the shared interactive tool family. Git and context elephant store tools are implemented and registered from the workspace plugins at `.pocketcode/plugins/workspace_git` and `.pocketcode/plugins/workspace_context`. The only remaining compatibility surface for git is the `pocketcode.tools` package export; the old core git module is gone:
 
 | Qualified name | Description |
 |----------------|-------------|
@@ -124,11 +124,22 @@ The built-in `core` plugin ships all standard tools and three base flows:
 | `core.write_to_file` | Write content to a file |
 | `core.search_code` | Search the codebase |
 | `core.execute_command` | Run a shell command |
-| `core.git_diff` | Show a git diff |
-| `core.ask_user` | Prompt the user for input |
-| `core.coder` | Code-writing flow |
-| `core.architect` | Planning & architecture flow |
-| `core.ask` | Clarification/question flow |
+| `core.ask_user_input` | Prompt the user for free-form text |
+| `core.ask_user_buttons` | Prompt the user with button-style options |
+| `core.ask_user_radio_group` | Prompt the user with a single-choice selector |
+| `core.ask_user_checklist` | Prompt the user with a multi-select checklist |
+| `core.confirm_user_input` | Prompt the user for yes/no confirmation |
+| `core.react` | Default ReAct flow |
+
+Workspace plugin example:
+
+| Qualified name | Description |
+|----------------|-------------|
+| `workspace_git.git_diff` | Show a git diff |
+| `workspace_git.git_status` | Show git status |
+| `workspace_context.read_context_elephant_store_file` | Read a context elephant store file |
+
+For built-in plugins that share tool behavior, prefer re-export shims over copy-pasted tool modules. The filesystem tools are the reference pattern: `pocketcode/plugins/core/tools/filesystem.py` is canonical, while plugin-local `tools/filesystem.py` modules can re-export those symbols so manifest-local handler paths remain stable without duplicating implementation.
 
 ---
 

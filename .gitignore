@@ -17,3 +17,4 @@ STUFF/
 Thumbs.db
 *.tmp
 *.swp
+.pytest*

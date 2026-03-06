@@ -1,4 +1,5 @@
 #%%
+import os
 import subprocess
 import logging
 from typing import Dict, Any
@@ -82,6 +83,10 @@ class ExecuteCommandTool(BaseTool):
         return "Executes a shell command and returns its output (stdout, stderr) and return code."
 
     @property
+    def execution_mode(self) -> str:
+        return "managed_subprocess"
+
+    @property
     def schema(self) -> Dict:
         return {
             "type": "object",
@@ -91,6 +96,32 @@ class ExecuteCommandTool(BaseTool):
             },
             "required": ["command"]
         }
+
+    def spawn_subprocess(self, **kwargs) -> Any:
+        command = kwargs.get("command")
+        if command is None:
+            raise ValueError("Missing required argument 'command'.")
+
+        return subprocess.Popen(
+            str(command),
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=os.name != "nt",
+        )
+
+    def handle_subprocess_result(self, *, returncode: int, stdout: str, stderr: str, **kwargs) -> Any:
+        result = {
+            "stdout": stdout,
+            "stderr": stderr,
+            "returncode": returncode,
+            "error": None,
+            "success": returncode == 0,
+        }
+        if returncode != 0:
+            result["error"] = stderr.strip() or f"Command exited with status {returncode}."
+        return result
 
     def execute(self, **kwargs) -> Any:
         command = kwargs.get("command")

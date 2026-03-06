@@ -62,8 +62,10 @@ class BaseRuntimeNode(Node):
 
     def _run(self, shared_store: Dict[str, Any]) -> str | None:
         try:
+            self.runtime._raise_if_cancelled(shared_store)
             p = self.prep(shared_store)
             if p.get("halt"):
+                self.runtime._raise_if_cancelled(shared_store)
                 return self.post(shared_store, p, None)
             
             # Run "steps" as part of core logic or as actual exec
@@ -77,9 +79,12 @@ class BaseRuntimeNode(Node):
             )
 
             if step_halt:
-                 return self.post(shared_store, p, step_transition)
+                                self.runtime._raise_if_cancelled(shared_store)
+                                return self.post(shared_store, p, step_transition)
 
+                        self.runtime._raise_if_cancelled(shared_store)
             e = self.exec(shared_store) # Passing shared_store as prep_res for now to simplify
+                        self.runtime._raise_if_cancelled(shared_store)
             return self.post(shared_store, p, e if e is not None else step_transition)
         except Exception as exc:
             logger.error(

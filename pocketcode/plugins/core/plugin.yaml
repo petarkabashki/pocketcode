@@ -11,13 +11,10 @@ tools:
   search_code: tools/search.py:SearchCodeTool
   execute_command: tools/system.py:ExecuteCommandTool
   ask_user_input: tools/user_input.py:AskUserInputTool
+  ask_user_buttons: tools/user_input.py:AskUserButtonsTool
+  ask_user_radio_group: tools/user_input.py:AskUserRadioGroupTool
+  ask_user_checklist: tools/user_input.py:AskUserChecklistTool
   confirm_user_input: tools/user_input.py:ConfirmUserInputTool
-  git_status: tools/git.py:GitStatusTool
-  git_diff: tools/git.py:GitDiffTool
-  git_add: tools/git.py:GitAddTool
-  git_commit: tools/git.py:GitCommitTool
-  git_pull: tools/git.py:GitPullTool
-  git_push: tools/git.py:GitPushTool
 
 flows:
   react:
@@ -36,10 +33,18 @@ flows:
       - search_code
       - execute_command
       - ask_user_input
+      - ask_user_buttons
+      - ask_user_radio_group
+      - ask_user_checklist
       - confirm_user_input
-      - git_status
-      - git_diff
-      - git_add
-      - git_commit
-      - git_pull
-      - git_push
+      - workspace_git::git_status
+      - workspace_git::git_diff
+      - workspace_git::git_add
+      - workspace_git::git_commit
+      - workspace_git::git_pull
+      - workspace_git::git_push
+      - workspace_context::read_context_elephant_store_file
+      - workspace_context::write_context_elephant_store_file
+      - workspace_context::append_to_context_elephant_store_file
+      - workspace_context::get_context_elephant_store_summary
+      - workspace_context::check_context_elephant_store_status

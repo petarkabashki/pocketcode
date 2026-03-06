@@ -16,6 +16,12 @@ An **Agent** is a named configuration object that governs how a flow behaves dur
 
 Every flow automatically gets a *synthesised* default agent on startup. Workspace-local YAML files and plugin-declared blocks can override defaults.
 
+Workspace-local customisation also lives under `.pocketcode/`:
+- `.pocketcode/agents/` for workspace agent YAML files
+- `.pocketcode/plugins/` for workspace plugins
+- `.pocketcode/tools/` for shared tools auto-registered under the `workspace` namespace and visible to every flow whose tool scope is unrestricted
+- `.pocketcode/prompts/` for shared prompt files; files are registered under the `workspace` namespace and are also valid fallback prompt sources for plugin agents and agent `extra_prompts`
+
 ### Agent Fields
 
 | Field | Type | Default | Description |
@@ -67,6 +73,9 @@ Plugin-declared > Workspace file > Synthesised default
 /agent show [agent_name]                    Show details (default: active agent).
 /agent switch <agent_name>                  Activate an agent.
 /agent clone <source> <new_name>            Clone an agent to a new workspace file.
+/agent edit llm <agent> <profile|inherit>   Set or clear the agent LLM override.
+/agent edit prompts <agent> <paths...>      Replace extra prompt paths.
+/agent edit prompts <agent> clear           Clear extra prompt paths.
 /agent help                                 Show help.
 
 /flow <flow_name> [--agent <agent_name>]    Set flow + optionally activate an agent.

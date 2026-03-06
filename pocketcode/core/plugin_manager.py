@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import logging
 import sys
 import types
@@ -10,13 +11,15 @@ from typing import Any, Dict, Iterable, List
 
 import yaml
 
-from pocketcode.core.interfaces import Plugin, PluginContext
+from pocketcode.core.interfaces import BaseTool, Plugin, PluginContext
 from pocketcode.core.manifest_loader import load_manifest
 from pocketcode.core.namespace_registry import NamespaceRegistry, RegistryError, RegistryHolder
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
 from pocketcode.core.runtime_models import Agent, FlowDefinition
 
 logger = logging.getLogger(__name__)
+
+WORKSPACE_NAMESPACE = "workspace"
 
 
 class PluginManager:
@@ -64,6 +67,8 @@ class PluginManager:
                 self._load_plugin(plugin_root)
             except Exception as exc:
                 logger.error("Failed loading plugin at %s: %s", plugin_root, exc, exc_info=True)
+
+        self._load_workspace_resources()
 
         logger.info(
             "Plugin load complete. plugins=%d, tools=%d, flows=%d, llm_profiles=%d",
@@ -268,6 +273,142 @@ class PluginManager:
                         plugin_name,
                         legacy_key,
                     )
+
+    def _load_workspace_resources(self) -> None:
+        workspace_pocketcode = self._workspace_root / ".pocketcode"
+        if not workspace_pocketcode.is_dir():
+            return
+        self._load_workspace_prompts(workspace_pocketcode / "prompts")
+        self._load_workspace_tools(workspace_pocketcode / "tools")
+
+    def _load_workspace_prompts(self, prompts_root: Path) -> None:
+        if not prompts_root.is_dir():
+            return
+
+        for prompt_path in sorted(path for path in prompts_root.rglob("*") if path.is_file()):
+            prompt_name = self._workspace_resource_name(prompts_root, prompt_path)
+            if not prompt_name:
+                continue
+            try:
+                self.prompts.register(
+                    WORKSPACE_NAMESPACE,
+                    prompt_name,
+                    prompt_path.read_text(encoding="utf-8"),
+                )
+            except RegistryError as exc:
+                logger.warning(
+                    "Workspace prompt '%s' at '%s' collides with an existing registration: %s",
+                    prompt_name,
+                    prompt_path,
+                    exc,
+                )
+
+    def _load_workspace_tools(self, tools_root: Path) -> None:
+        if not tools_root.is_dir():
+            return
+
+        for tool_file in sorted(tools_root.rglob("*.py")):
+            if tool_file.name == "__init__.py":
+                continue
+            try:
+                module = self._load_module_from_file(tool_file)
+            except Exception as exc:
+                logger.error("Failed loading workspace tool module '%s': %s", tool_file, exc, exc_info=True)
+                continue
+
+            found_any = False
+            for tool_name, tool_impl in self._iter_workspace_tool_exports(module):
+                found_any = True
+                try:
+                    self.tools.register(WORKSPACE_NAMESPACE, tool_name, tool_impl)
+                except RegistryError as exc:
+                    logger.warning(
+                        "Workspace tool '%s' from '%s' collides with an existing registration: %s",
+                        tool_name,
+                        tool_file,
+                        exc,
+                    )
+            if not found_any:
+                logger.warning(
+                    "Workspace tool module '%s' defines no public tool exports. Skipping.",
+                    tool_file,
+                )
+
+    def _workspace_resource_name(self, root: Path, path: Path) -> str:
+        relative = path.resolve().relative_to(root.resolve())
+        return ".".join(relative.with_suffix("").parts)
+
+    def _iter_workspace_tool_exports(self, module: types.ModuleType) -> Iterable[tuple[str, Any]]:
+        exports = getattr(module, "TOOLS", None)
+        if exports is not None:
+            yield from self._normalize_workspace_tool_exports(module, exports)
+            return
+
+        seen: set[str] = set()
+        for name, value in sorted(module.__dict__.items()):
+            if name.startswith("_"):
+                continue
+            if not self._is_workspace_tool_candidate(module, value):
+                continue
+            if name in seen:
+                continue
+            seen.add(name)
+            yield name, value
+
+    def _normalize_workspace_tool_exports(
+        self,
+        module: types.ModuleType,
+        exports: Any,
+    ) -> Iterable[tuple[str, Any]]:
+        if isinstance(exports, dict):
+            for raw_name, raw_value in exports.items():
+                if not isinstance(raw_name, str) or not raw_name.strip():
+                    continue
+                resolved = self._resolve_workspace_tool_export(module, raw_value)
+                if resolved is not None:
+                    yield raw_name.strip(), resolved
+            return
+
+        if isinstance(exports, (list, tuple, set)):
+            for raw_value in exports:
+                resolved_name, resolved_value = self._resolve_workspace_tool_export_entry(module, raw_value)
+                if resolved_name and resolved_value is not None:
+                    yield resolved_name, resolved_value
+
+    def _resolve_workspace_tool_export_entry(
+        self,
+        module: types.ModuleType,
+        raw_value: Any,
+    ) -> tuple[str | None, Any | None]:
+        if isinstance(raw_value, str):
+            candidate = getattr(module, raw_value, None)
+            if candidate is not None and self._is_workspace_tool_candidate(module, candidate):
+                return raw_value, candidate
+            return None, None
+
+        if self._is_workspace_tool_candidate(module, raw_value):
+            inferred_name = getattr(raw_value, "__name__", getattr(raw_value, "name", None))
+            if isinstance(inferred_name, str) and inferred_name.strip():
+                return inferred_name.strip(), raw_value
+        return None, None
+
+    def _resolve_workspace_tool_export(self, module: types.ModuleType, raw_value: Any) -> Any | None:
+        if isinstance(raw_value, str):
+            raw_value = getattr(module, raw_value, None)
+        if raw_value is not None and self._is_workspace_tool_candidate(module, raw_value):
+            return raw_value
+        return None
+
+    def _is_workspace_tool_candidate(self, module: types.ModuleType, value: Any) -> bool:
+        if inspect.isfunction(value):
+            return value.__module__ == module.__name__
+        if isinstance(value, type) and issubclass(value, BaseTool) and value is not BaseTool:
+            return value.__module__ == module.__name__
+        if isinstance(value, BaseTool):
+            return value.__class__.__module__ == module.__name__
+        if callable(value):
+            return getattr(value.__class__, "__module__", None) == module.__name__
+        return False
 
     def _load_agent_plugin(self, plugin_root: Path) -> None:
         manifest_path = plugin_root / "agent.yaml"
@@ -497,6 +638,7 @@ class PluginManager:
             file_keys=("system_prompt_file", "prompt_file"),
             files_key="prompt_files",
             default_files=[f"prompts/agents/{agent_name}.md"],
+            fallback_dirs=self._workspace_prompt_fallback_dirs(),
         )
 
         pre_handlers = list(
@@ -664,6 +806,11 @@ class PluginManager:
                 exc_info=True,
             )
             return None
+
+    def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
+        workspace_root = self._workspace_root
+        workspace_pocketcode = workspace_root / ".pocketcode"
+        return (workspace_root, workspace_pocketcode, workspace_pocketcode / "prompts")
 
     def _load_reference(self, reference: Any, plugin_root: Path) -> Any:
         if not isinstance(reference, str):

@@ -9,7 +9,7 @@ from pocketcode.core.agent_manager import AgentManager
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
-from pocketcode.core.run_handle import RunHandle
+from pocketcode.core.run_handle import RunCancelledError, RunHandle
 from pocketcode.core.tool_runtime import ToolRuntime
 
 logger = logging.getLogger(__name__)
@@ -448,7 +448,9 @@ class PocketCodeEngine:
             user_input=user_input,
             cli_context=cli_context,
             event_handler=handle.emit,
+            interaction_handler=handle.request_interaction if bridge_user_input else None,
             user_input_handler=handle.request_user_input if bridge_user_input else None,
+            run_handle=handle,
         )
 
         def runner() -> None:
@@ -459,9 +461,14 @@ class PocketCodeEngine:
                     agent=shared_store.get("active_agent") or "auto",
                 )
                 result = self._execute_request(shared_store=shared_store, cli_context=cli_context)
-                handle.complete(result=result, summary=dict(self.last_run_summary))
+                handle.complete(result=result, summary=self._build_run_summary(shared_store, cli_context))
+            except RunCancelledError as exc:
+                summary = self._build_run_summary(shared_store, cli_context)
+                self.last_run_summary = dict(summary)
+                handle.cancelled(reason=str(exc), summary=summary)
             except Exception as exc:
                 logger.error("Request processing failed: %s", exc, exc_info=True)
+                self.last_run_summary = dict(self._build_run_summary(shared_store, cli_context))
                 handle.fail(exc)
 
         handle.start(runner)
@@ -476,7 +483,9 @@ class PocketCodeEngine:
         user_input: str,
         cli_context: Dict[str, Any],
         event_handler: Any = None,
+        interaction_handler: Any = None,
         user_input_handler: Any = None,
+        run_handle: RunHandle | None = None,
     ) -> Dict[str, Any]:
         initial_agent = self.current_agent or self._runtime_config.get("default_agent")
         if not initial_agent:
@@ -503,8 +512,13 @@ class PocketCodeEngine:
         }
         if callable(event_handler):
             shared_store["runtime_event_handler"] = event_handler
+        if callable(interaction_handler):
+            shared_store["interaction_handler"] = interaction_handler
         if callable(user_input_handler):
             shared_store["user_input_handler"] = user_input_handler
+        if run_handle is not None:
+            shared_store["run_cancel_requested"] = lambda: run_handle.is_cancel_requested
+            shared_store["run_cancel_reason"] = lambda: run_handle.cancel_reason
         return shared_store
 
     def _execute_request(self, *, shared_store: Dict[str, Any], cli_context: Dict[str, Any]) -> str:
@@ -513,7 +527,12 @@ class PocketCodeEngine:
         if shared_store.get("active_agent"):
             self.current_agent = shared_store["active_agent"]
 
-        self.last_run_summary = {
+        self.last_run_summary = self._build_run_summary(shared_store, cli_context)
+
+        return str(shared_store.get("final_output") or shared_store.get("final_answer") or "No output generated.")
+
+    def _build_run_summary(self, shared_store: Dict[str, Any], cli_context: Dict[str, Any]) -> Dict[str, Any]:
+        return {
             "agent_path": self._build_agent_path(shared_store),
             "current_agent": shared_store.get("active_agent") or self.current_agent,
             "current_llm_profile": shared_store.get("last_llm_profile"),
@@ -528,8 +547,6 @@ class PocketCodeEngine:
             "llm_cost_usd": float(shared_store.get("llm_cost_usd_total", 0.0)),
             "context_stats": self._build_context_stats(cli_context),
         }
-
-        return str(shared_store.get("final_output") or shared_store.get("final_answer") or "No output generated.")
 
     def status(self) -> Dict[str, Any]:
         return {

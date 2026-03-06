@@ -7,6 +7,27 @@ from typing import Any, Iterable, List, Sequence, Tuple
 _INCLUDE_RE = re.compile(r"\{\{\s*include\s*:\s*([^}]+?)\s*\}\}")
 
 
+def _resolve_prompt_path(
+    *,
+    base_dir: Path,
+    prompt_file: str,
+    fallback_dirs: Sequence[Path] = (),
+) -> Path:
+    prompt_path = Path(prompt_file)
+    if prompt_path.is_absolute():
+        return prompt_path.resolve()
+
+    candidates = [(base_dir / prompt_file).resolve()]
+    for fallback_dir in fallback_dirs:
+        candidates.append((fallback_dir / prompt_file).resolve())
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    return candidates[0]
+
+
 def coerce_str_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -28,12 +49,15 @@ def load_prompt_markdown(
     base_dir: Path,
     prompt_file: str,
     _stack: set[Path] | None = None,
+    fallback_dirs: Sequence[Path] = (),
 ) -> Tuple[str, List[str]]:
     stack = _stack if _stack is not None else set()
 
-    prompt_path = Path(prompt_file)
-    if not prompt_path.is_absolute():
-        prompt_path = (base_dir / prompt_file).resolve()
+    prompt_path = _resolve_prompt_path(
+        base_dir=base_dir,
+        prompt_file=prompt_file,
+        fallback_dirs=fallback_dirs,
+    )
 
     if not prompt_path.is_file():
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
@@ -52,6 +76,7 @@ def load_prompt_markdown(
             base_dir=prompt_path.parent,
             prompt_file=include_target,
             _stack=stack,
+            fallback_dirs=fallback_dirs,
         )
         sources.extend(included_sources)
         return included_text
@@ -71,6 +96,7 @@ def resolve_prompt_bundle(
     file_keys: Sequence[str] = ("prompt_file",),
     files_key: str = "prompt_files",
     default_files: Iterable[str] | None = None,
+    fallback_dirs: Sequence[Path] = (),
 ) -> Tuple[str, List[str]]:
     sections: List[str] = []
     sources: List[str] = []
@@ -87,12 +113,20 @@ def resolve_prompt_bundle(
 
     if not explicit_files and default_files:
         for candidate in default_files:
-            candidate_path = (base_dir / candidate).resolve()
+            candidate_path = _resolve_prompt_path(
+                base_dir=base_dir,
+                prompt_file=candidate,
+                fallback_dirs=fallback_dirs,
+            )
             if candidate_path.is_file():
                 explicit_files.append(candidate)
 
     for prompt_file in explicit_files:
-        loaded_text, loaded_sources = load_prompt_markdown(base_dir=base_dir, prompt_file=prompt_file)
+        loaded_text, loaded_sources = load_prompt_markdown(
+            base_dir=base_dir,
+            prompt_file=prompt_file,
+            fallback_dirs=fallback_dirs,
+        )
         if loaded_text:
             sections.append(loaded_text)
         sources.extend(loaded_sources)

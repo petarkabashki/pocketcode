@@ -25,6 +25,12 @@ from textual.widgets import (
 )
 
 from pocketcode.cli.command_handler import handle_command, list_command_suggestions
+from pocketcode.cli.runtime_events import format_runtime_event
+from pocketcode.cli.user_interaction import (
+    describe_interaction_request,
+    interaction_placeholder,
+    parse_interaction_response,
+)
 from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.core.run_handle import RunHandle
 
@@ -40,7 +46,7 @@ MAX_OUTPUT_LINES = 400
 VIEW_TITLES = {
     "chat": "Chat Workspace",
     "control": "Control Center",
-    "profiles": "Flow/Agent Config",
+    "profiles": "Edit Agent",
     "context": "Context Builder",
     "run": "Run Inspector",
 }
@@ -94,7 +100,7 @@ def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
 def _build_view_title_text(view_name: str) -> str:
     return (
         f"{VIEW_TITLES.get(view_name, view_name)} | "
-        "Runtime controls live in Control. Flow/agent edits live in Profiles."
+        "Runtime controls live in Control. Agent edits live in Edit Agent."
     )
 
 
@@ -185,24 +191,24 @@ class PocketCodeTextualApp(App[None]):
         Binding("tab", "complete_input", "Complete Input", priority=True),
         Binding("f1", "view_chat", "Chat", priority=True),
         Binding("f2", "view_control", "Control", priority=True),
-        Binding("f3", "view_profiles", "Profiles", priority=True),
+        Binding("f3", "view_profiles", "Edit Agent", priority=True),
         Binding("f4", "view_context", "Context", priority=True),
         Binding("f5", "view_run", "Run", priority=True),
         Binding("f6", "next_agent", "Next Agent", priority=True),
         Binding("shift+f6", "prev_agent", "Prev Agent", priority=True),
-        Binding("f7", "next_profile", "Next Profile", priority=True),
-        Binding("shift+f7", "prev_profile", "Prev Profile", priority=True),
+        Binding("f7", "next_profile", "Next Agent Profile", priority=True),
+        Binding("shift+f7", "prev_profile", "Prev Agent Profile", priority=True),
         Binding("f8", "next_llm", "Next LLM", priority=True),
         Binding("shift+f8", "prev_llm", "Prev LLM", priority=True),
         Binding("f9", "toggle_left_panel", "Toggle Nav"),
         Binding("f10", "toggle_right_panel", "Toggle Inspector"),
         Binding("f11", "toggle_header", "Toggle Header"),
-        Binding("ctrl+p", "next_profile", "Next Profile", priority=True),
-        Binding("ctrl+shift+p", "prev_profile", "Prev Profile", priority=True),
+        Binding("ctrl+p", "next_profile", "Next Agent Profile", priority=True),
+        Binding("ctrl+shift+p", "prev_profile", "Prev Agent Profile", priority=True),
         Binding("ctrl+w", "next_workspace_mode", "Next Mode"),
         Binding("alt+1", "view_chat", "Chat"),
         Binding("alt+2", "view_control", "Control"),
-        Binding("alt+3", "view_profiles", "Profiles"),
+        Binding("alt+3", "view_profiles", "Edit Agent"),
         Binding("alt+4", "view_context", "Context"),
         Binding("alt+5", "view_run", "Run"),
         Binding("ctrl+shift+a", "copy_output", "Copy Output"),
@@ -620,14 +626,14 @@ class PocketCodeTextualApp(App[None]):
                 yield Static("Workspace Views", classes="panel-title")
                 yield Button("Chat", id="view-chat-button", variant="primary")
                 yield Button("Control", id="view-control-button")
-                yield Button("Profiles", id="view-profiles-button")
+                yield Button("Edit Agent", id="view-profiles-button")
                 yield Button("Context", id="view-context-button")
                 yield Button("Run", id="view-run-button")
                 yield Static("Shortcuts", classes="section-title")
                 yield Static(
                     "F1..F5 switch views\n"
-                    "F6/F7/F8 next flow/agent/LLM\n"
-                    "Shift+F6/F7/F8 previous flow/agent/LLM\n"
+                    "F6/F7/F8 next agent/agent profile/LLM\n"
+                    "Shift+F6/F7/F8 previous agent/agent profile/LLM\n"
                     "F9/F10 toggle panels\n"
                     "F11 toggle second header row\n"
                     "Ctrl+W cycle mode\n"
@@ -659,7 +665,7 @@ class PocketCodeTextualApp(App[None]):
                         )
                         yield Static("Active Agent", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="agent-select", allow_blank=False)
-                        yield Static("Active Profile", classes="field-label")
+                        yield Static("Active Agent Profile", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="profile-select", allow_blank=False)
                         yield Static("Global LLM Override", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="llm-select", allow_blank=False)
@@ -678,17 +684,17 @@ class PocketCodeTextualApp(App[None]):
                         yield Switch(value=False, id="auto-confirm-switch")
                         with Horizontal(classes="button-row"):
                             yield Button("Reload Runtime", id="reload-button", variant="primary")
-                            yield Button("Open Profiles", id="goto-profiles-button")
+                            yield Button("Open Edit Agent", id="goto-profiles-button")
                             yield Button("Open Run Inspector", id="goto-run-button")
                     with VerticalScroll(id="view-profiles", classes="view view-scroll"):
                         yield Static("Active agent settings save back to workspace YAML.", classes="hint")
                         yield Static("", id="profile-editor-hint", classes="hint")
-                        yield Static("Clone Active Profile To Workspace", classes="field-label")
+                        yield Static("Clone Active Agent To Workspace", classes="field-label")
                         yield Input(id="clone-profile-name", placeholder="my-agent-safe")
                         yield Button("Clone Active Agent", id="clone-profile-button", variant="primary")
-                        yield Static("Profile LLM", classes="field-label")
+                        yield Static("Agent LLM", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="profile-llm-select", allow_blank=False)
-                        yield Static("Profile Confirmation Default", classes="field-label")
+                        yield Static("Agent Confirmation Default", classes="field-label")
                         yield Select(
                             [
                                 ("inherit", INHERIT_POLICY),
@@ -752,7 +758,7 @@ class PocketCodeTextualApp(App[None]):
                 yield Input(
                     id="main-input",
                     placeholder=(
-                        "Type a request or /command. F1..F5=view F6/F7/F8 next flow/agent/LLM "
+                        "Type a request or /command. F1..F5=view F6/F7/F8 next agent/profile/LLM "
                         "F9/F10=panels F11=header"
                     ),
                 )
@@ -774,7 +780,7 @@ class PocketCodeTextualApp(App[None]):
         self._refresh_ui()
         self.set_interval(0.1, self._drain_run_events)
         self._write_info(
-            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 move forward through flow-agent-LLM, Shift+F6/F7/F8 move backward, and F11 toggles the second header row."
+            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 move forward through agent-agent profile-LLM, Shift+F6/F7/F8 move backward, and F11 toggles the second header row."
         )
         self.query_one("#main-input", Input).focus()
 
@@ -808,7 +814,7 @@ class PocketCodeTextualApp(App[None]):
 
     def _render_profile_policy_summary(self, overrides: dict[str, str]) -> str:
         if not overrides:
-            return "No per-tool confirmation overrides. Tools inherit the profile default."
+            return "No per-tool confirmation overrides. Tools inherit the agent default."
         lines = ["Per-tool confirmation overrides:"]
         for tool_name in sorted(overrides):
             lines.append(f"- {tool_name}: {overrides[tool_name]}")
@@ -1345,6 +1351,17 @@ class PocketCodeTextualApp(App[None]):
             self._remember_run_event(message)
             self._write_info(message)
 
+        if event_type == "interaction_requested":
+            self._pending_input_request = event
+            self._live_run_status = "waiting_for_input"
+            self._set_main_input_placeholder(interaction_placeholder(event))
+            if event.get("kind") != "text":
+                self._write_info(describe_interaction_request(event))
+            return True
+        if event_type == "interaction_received":
+            self._live_run_status = "running"
+            self._set_main_input_placeholder()
+            return True
         if event_type == "user_input_requested":
             self._pending_input_request = event
             self._live_run_status = "waiting_for_input"
@@ -1372,44 +1389,22 @@ class PocketCodeTextualApp(App[None]):
             self._write_error(str(event.get("error") or "Request failed."))
             self._sync_ui_from_engine()
             return False
+        if event_type == "run_cancelled":
+            self._busy = False
+            self._active_run = None
+            self._pending_input_request = None
+            self._live_run_status = "idle"
+            self._set_main_input_placeholder()
+            self._sync_ui_from_engine()
+            return False
         if event_type in {"run_started", "agent_turn_started", "llm_call_started", "tool_started", "handoff"}:
             self._live_run_status = "running"
+        if event_type == "run_cancel_requested":
+            self._live_run_status = "stopping"
         return True
 
     def _format_runtime_event(self, event: Dict[str, Any]) -> str:
-        event_type = str(event.get("type") or "")
-        if event_type == "run_started":
-            return f"Run started for agent {event.get('agent') or 'auto'}."
-        if event_type == "agent_turn_started":
-            return f"Agent turn started: {event.get('agent')}."
-        if event_type == "agent_turn_completed":
-            return f"Agent turn completed: {event.get('agent')} -> {event.get('transition')}."
-        if event_type == "llm_call_started":
-            return f"LLM call started for {event.get('agent')} using profile {event.get('profile')}."
-        if event_type == "llm_call_completed":
-            model = event.get("model") or "-"
-            usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
-            return f"LLM call completed on {model} ({usage.get('total_tokens', 0)} tokens)."
-        if event_type == "tool_confirmation_requested":
-            return f"Tool confirmation requested: {event.get('tool')}."
-        if event_type == "tool_started":
-            return f"Tool started: {event.get('tool')}."
-        if event_type == "tool_finished":
-            state = "succeeded" if event.get("success") else "failed"
-            return f"Tool {event.get('tool')} {state}."
-        if event_type == "handoff":
-            return f"Handoff: {event.get('source_agent') or '-'} -> {event.get('target_agent')}."
-        if event_type == "ask_user":
-            return f"Agent requested user answer: {event.get('question')}."
-        if event_type == "final_answer":
-            return "Final answer prepared."
-        if event_type == "user_input_requested":
-            return f"Input required: {event.get('prompt')}."
-        if event_type == "runtime_error":
-            return f"Runtime error: {event.get('message')}."
-        if event_type == "run_completed":
-            return "Run completed."
-        return ""
+        return format_runtime_event(event)
 
     def _sync_profile_policy_controls(self) -> None:
         selected_tool = str(self.query_one("#profile-policy-tool-select", Select).value)
@@ -1451,13 +1446,28 @@ class PocketCodeTextualApp(App[None]):
         input_widget.value = ""
         if self._pending_input_request is not None and self._active_run is not None:
             self._write_user(text)
-            prompt_id = str(self._pending_input_request.get("prompt_id") or "")
-            if not prompt_id or not self._active_run.resolve_user_input(prompt_id, text):
+            request_id = str(
+                self._pending_input_request.get("request_id")
+                or self._pending_input_request.get("prompt_id")
+                or ""
+            )
+            if self._pending_input_request.get("type") == "interaction_requested":
+                try:
+                    response_payload = parse_interaction_response(self._pending_input_request, text)
+                except ValueError as exc:
+                    self._write_error(str(exc))
+                    self._set_main_input_placeholder(interaction_placeholder(self._pending_input_request))
+                    return
+                resolved = bool(request_id) and self._active_run.resolve_interaction(request_id, response_payload)
+            else:
+                resolved = bool(request_id) and self._active_run.resolve_user_input(request_id, text)
+            if not resolved:
                 self._write_error("The pending prompt is no longer active.")
             self._pending_input_request = None
             self._set_main_input_placeholder()
             return
-        if self._busy:
+        normalized_text = text.lower()
+        if self._busy and normalized_text not in {"/stop", "/cancel"}:
             self._write_info("A run is already in progress.")
             return
 
@@ -1505,6 +1515,7 @@ class PocketCodeTextualApp(App[None]):
                 command_input=command_input,
                 engine=self._engine,
                 cli_context=self._cli_context,
+                active_run=self._active_run,
             )
 
         text = output.getvalue().strip()
@@ -1574,7 +1585,7 @@ class PocketCodeTextualApp(App[None]):
                     current_agent = self._engine.get_current_agent()
                     if current_agent:
                         self._engine.set_agent(current_agent)
-                        self._write_info(f"Activated default profile for {current_agent}.")
+                        self._write_info(f"Activated default agent for {current_agent}.")
                 else:
                     active_profile = self._engine.active_agent_profile
                     if (
@@ -1584,7 +1595,7 @@ class PocketCodeTextualApp(App[None]):
                     ):
                         return
                     self._engine.set_active_agent_profile(value)
-                    self._write_info(f"Activated profile: {value}")
+                    self._write_info(f"Activated agent: {value}")
             elif widget_id == "llm-select":
                 target_llm = None if value == NO_LLM else value
                 if target_llm == self._engine.global_llm_override:
@@ -1647,7 +1658,10 @@ class PocketCodeTextualApp(App[None]):
             return
         if self._syncing_controls:
             return
-        option = event.selection_list.get_option_at_index(event.index)
+        option_index = getattr(event, "selection_index", getattr(event, "index", None))
+        if option_index is None:
+            return
+        option = event.selection_list.get_option_at_index(option_index)
         checked = bool(option.value in event.selection_list.selected)
         state = "allowed" if checked else "blocked"
         self._write_info(f"Tool {option.value} marked {state} for the active profile draft.")
@@ -1655,12 +1669,13 @@ class PocketCodeTextualApp(App[None]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id != "profile-list":
             return
-        if event.index >= len(self._profile_list_names):
+        option_index = getattr(event, "option_index", getattr(event, "index", None))
+        if option_index is None or option_index >= len(self._profile_list_names):
             return
-        profile_name = self._profile_list_names[event.index]
+        profile_name = self._profile_list_names[option_index]
         try:
             self._engine.set_active_agent_profile(profile_name)
-            self._write_info(f"Activated profile: {profile_name}")
+            self._write_info(f"Activated agent: {profile_name}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -1669,7 +1684,7 @@ class PocketCodeTextualApp(App[None]):
     def _clone_active_profile(self) -> None:
         active_profile = self._engine.active_agent_profile
         if active_profile is None:
-            self._write_error("No active profile to clone.")
+            self._write_error("No active agent to clone.")
             return
 
         new_name = self.query_one("#clone-profile-name", Input).value.strip()
@@ -1678,11 +1693,16 @@ class PocketCodeTextualApp(App[None]):
             return
 
         try:
-            self._engine.clone_agent_profile(active_profile.name, new_name)
+            cloner = getattr(self._engine, "clone_agent", None) or getattr(self._engine, "clone_agent_profile")
+            cloned = cloner(active_profile.name, new_name)
             self._engine.set_active_agent_profile(new_name)
             self._draft_profile_name = None
             self.query_one("#clone-profile-name", Input).value = ""
-            self._write_info(f"Cloned active profile to workspace profile '{new_name}'.")
+            target_path = getattr(cloned, "source_path", None)
+            if target_path:
+                self._write_info(f"Cloned active agent to {target_path}.")
+            else:
+                self._write_info(f"Cloned active agent to workspace agent '{new_name}'.")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -1692,7 +1712,10 @@ class PocketCodeTextualApp(App[None]):
     def _save_active_profile(self) -> None:
         active_profile = self._engine.active_agent_profile
         if active_profile is None:
-            self._write_error("No active profile selected.")
+            self._write_error("No active agent selected.")
+            return
+        if active_profile.source != "workspace":
+            self._write_error(f"Agent '{active_profile.name}' must be cloned to the workspace before saving edits.")
             return
 
         try:
@@ -1706,7 +1729,8 @@ class PocketCodeTextualApp(App[None]):
             ]
             llm_value = str(self.query_one("#profile-llm-select", Select).value)
             confirm_value = str(self.query_one("#profile-confirm-select", Select).value)
-            self._engine.update_agent_profile(
+            updater = getattr(self._engine, "update_agent", None) or getattr(self._engine, "update_agent_profile")
+            updater(
                 active_profile.name,
                 llm_profile=None if llm_value == NO_LLM else llm_value,
                 tools=tools,
@@ -1715,7 +1739,7 @@ class PocketCodeTextualApp(App[None]):
                 tool_confirmation_overrides=dict(self._draft_profile_tool_overrides),
             )
             self._draft_profile_name = None
-            self._write_info(f"Saved workspace profile '{active_profile.name}'.")
+            self._write_info(f"Saved workspace agent '{active_profile.name}'.")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -1879,12 +1903,12 @@ class PocketCodeTextualApp(App[None]):
     def action_next_profile(self) -> None:
         current_agent = self._engine.get_current_agent()
         if not current_agent:
-            self._write_error("Select an agent before cycling profiles.")
+            self._write_error("Select a flow before cycling agents.")
             return
 
         profiles = self._engine.list_agent_profiles(current_agent)
         if not profiles:
-            self._write_error(f"No profiles are available for {current_agent}.")
+            self._write_error(f"No agents are available for {current_agent}.")
             return
 
         current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
@@ -1892,7 +1916,7 @@ class PocketCodeTextualApp(App[None]):
 
         try:
             self._engine.set_active_agent_profile(next_profile)
-            self._write_info(f"Activated profile: {next_profile}")
+            self._write_info(f"Activated agent: {next_profile}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -1901,12 +1925,12 @@ class PocketCodeTextualApp(App[None]):
     def action_prev_profile(self) -> None:
         current_agent = self._engine.get_current_agent()
         if not current_agent:
-            self._write_error("Select an agent before cycling profiles.")
+            self._write_error("Select a flow before cycling agents.")
             return
 
         profiles = self._engine.list_agent_profiles(current_agent)
         if not profiles:
-            self._write_error(f"No profiles are available for {current_agent}.")
+            self._write_error(f"No agents are available for {current_agent}.")
             return
 
         current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
@@ -1914,7 +1938,7 @@ class PocketCodeTextualApp(App[None]):
 
         try:
             self._engine.set_active_agent_profile(prev_profile)
-            self._write_info(f"Activated profile: {prev_profile}")
+            self._write_info(f"Activated agent: {prev_profile}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -1964,7 +1988,7 @@ class PocketCodeTextualApp(App[None]):
         try:
             self._engine.reload()
             self._refresh_suggestions()
-            self._write_info("Reloaded plugins, agents, tools, profiles, and LLM mappings.")
+            self._write_info("Reloaded plugins, agents, tools, and LLM mappings.")
         except Exception as exc:
             self._write_error(str(exc))
         finally:

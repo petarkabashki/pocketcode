@@ -22,11 +22,11 @@ flows:
       - core::glob_files
       - core::search_code
       - core::execute_command
-      - core::git_status
-      - core::git_add
-      - core::git_commit
-      - core::git_pull
-      - core::git_push
+      - workspace_git::git_status
+      - workspace_git::git_add
+      - workspace_git::git_commit
+      - workspace_git::git_pull
+      - workspace_git::git_push
     handoff_agents:
       - architect::architect
       - asker::ask

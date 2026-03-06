@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 from pocketcode.cli.textual_app import (
@@ -72,6 +73,7 @@ class TestUiTextHelpers:
 
     def test_view_title_text_matches_named_view(self):
         assert _build_view_title_text("run").startswith("Run Inspector | ")
+        assert "live in Edit Agent" in _build_view_title_text("profiles")
 
     def test_profile_editor_hint_tracks_profile_source(self):
         workspace_profile = SimpleNamespace(name="coder.safe", source="workspace")
@@ -119,13 +121,23 @@ class _TextualEngineStub:
         self.session_confirmation_overrides: dict[str, str | None] = {}
         self.set_agent_calls: list[str | None] = []
         self.set_active_agent_profile_calls: list[str] = []
+        self.clone_agent_profile_calls: list[tuple[str, str]] = []
+        self.update_agent_profile_calls: list[dict[str, object]] = []
+        self._profiles = {
+            "a": self._profile("a", "a"),
+            "a-safe": self._profile("a-safe", "a"),
+            "b": self._profile("b", "b"),
+            "b-safe": self._profile("b-safe", "b"),
+            "c": self._profile("c", "c"),
+            "c-safe": self._profile("c-safe", "c"),
+        }
 
     @staticmethod
     def _profile(name: str, agent: str) -> SimpleNamespace:
         return SimpleNamespace(
             name=name,
             agent=agent,
-            source="synthesised",
+            source="workspace" if name.endswith("-safe") else "synthesised",
             description="",
             llm_profile=None,
             tools=None,
@@ -141,7 +153,11 @@ class _TextualEngineStub:
 
     def list_agent_profiles(self, agent_name=None):
         target = agent_name or self.current_agent
-        return [target, f"{target}-safe"]
+        return [
+            profile.name
+            for profile in self._profiles.values()
+            if profile.agent == target
+        ]
 
     def get_current_agent(self):
         return self.current_agent
@@ -152,11 +168,48 @@ class _TextualEngineStub:
         if agent_name is None:
             self.active_agent_profile = None
             return
-        self.active_agent_profile = self._profile(agent_name, agent_name)
+        self.active_agent_profile = self._profiles.get(agent_name, self._profile(agent_name, agent_name))
 
     def set_active_agent_profile(self, name):
         self.set_active_agent_profile_calls.append(name)
-        self.active_agent_profile = self._profile(name, self.current_agent)
+        self.active_agent_profile = self._profiles.get(name, self._profile(name, self.current_agent))
+
+    def clone_agent_profile(self, src_name, new_name):
+        self.clone_agent_profile_calls.append((src_name, new_name))
+        cloned = SimpleNamespace(
+            name=new_name,
+            agent=self.current_agent,
+            source="workspace",
+            description="",
+            llm_profile=None,
+            tools=None,
+            tool_confirmation={},
+            extra_prompts=[],
+            source_path=Path(f"/tmp/{new_name}.yaml"),
+        )
+        self._profiles[new_name] = cloned
+        return cloned
+
+    def update_agent_profile(
+        self,
+        name,
+        *,
+        llm_profile,
+        tools,
+        extra_prompts,
+        tool_confirmation_default,
+        tool_confirmation_overrides,
+    ):
+        self.update_agent_profile_calls.append(
+            {
+                "name": name,
+                "llm_profile": llm_profile,
+                "tools": tools,
+                "extra_prompts": extra_prompts,
+                "tool_confirmation_default": tool_confirmation_default,
+                "tool_confirmation_overrides": tool_confirmation_overrides,
+            }
+        )
 
     def list_tools_for_agent(self, agent_name):
         return ["tool.read", "tool.write"]
@@ -233,5 +286,80 @@ class TestTextualSelectStability:
                 )
                 assert engine.set_agent_calls == ["b"]
                 assert engine.set_active_agent_profile_calls == []
+
+        asyncio.run(exercise())
+
+
+class TestProfileToolSelectionToggle:
+    def test_selection_toggle_uses_selection_index_event_field(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+        messages: list[str] = []
+        app._write_info = messages.append
+        app._syncing_controls = False
+
+        selection_list = SimpleNamespace(
+            id="profile-tool-list",
+            selected={"core.ask_user_input"},
+            get_option_at_index=lambda index: SimpleNamespace(value="core.ask_user_input"),
+        )
+        event = SimpleNamespace(selection_list=selection_list, selection_index=0)
+
+        app.on_selection_list_selection_toggled(event)
+
+        assert messages == ["Tool core.ask_user_input marked allowed for the active profile draft."]
+
+
+class TestProfileCloneAndSave:
+    def test_clone_active_profile_promotes_workspace_agent(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.query_one("#clone-profile-name").value = "a-workspace"
+
+                app._clone_active_profile()
+                await pilot.pause(0.05)
+
+                assert engine.clone_agent_profile_calls == [("a", "a-workspace")]
+                assert engine.active_agent_profile.name == "a-workspace"
+
+        asyncio.run(exercise())
+
+    def test_save_active_profile_persists_workspace_agent_edits(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.query_one("#profile-prompts").text = "prompts/review.md\nprompts/safety.md"
+                app._draft_profile_tool_overrides = {"tool.write": "deny"}
+
+                app._save_active_profile()
+                await pilot.pause(0.05)
+
+                assert engine.update_agent_profile_calls == [
+                    {
+                        "name": "a-safe",
+                        "llm_profile": None,
+                        "tools": None,
+                        "extra_prompts": ["prompts/review.md", "prompts/safety.md"],
+                        "tool_confirmation_default": None,
+                        "tool_confirmation_overrides": {"tool.write": "deny"},
+                    }
+                ]
 
         asyncio.run(exercise())

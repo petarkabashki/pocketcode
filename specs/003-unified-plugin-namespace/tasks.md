@@ -49,14 +49,14 @@
 
 - [X] T007 [P] [US1] Copy `pocketcode/tools/filesystem.py` → `pocketcode/plugins/core/tools/filesystem.py`; update any intra-package imports from `pocketcode.tools.*` to `pocketcode.plugins.core.tools.*`
 - [X] T008 [P] [US1] Copy `pocketcode/tools/system.py` → `pocketcode/plugins/core/tools/system.py`; update intra-package imports
-- [X] T009 [P] [US1] Copy `pocketcode/tools/git.py` → `pocketcode/plugins/core/tools/git.py`; update the `execute_shell_command` import to `from pocketcode.plugins.core.tools.system import execute_shell_command` (canonical, not the shim)
+- [X] T009 [P] [US1] Historical step: git tooling was first moved under `pocketcode/plugins/core/tools/git.py`; the current codebase has since moved the implementation again to `.pocketcode/plugins/workspace_git/tools/git.py`, with only the `pocketcode.tools` package exports retained as compatibility surface.
 - [X] T010 [P] [US1] Copy `pocketcode/tools/search.py` → `pocketcode/plugins/core/tools/search.py`; update intra-package imports
 - [X] T011 [P] [US1] Copy `pocketcode/tools/user_input.py` → `pocketcode/plugins/core/tools/user_input.py`; update intra-package imports
 - [X] T011a [P] [US1] Copy `pocketcode/tools/context_elephant_store_tools.py` → `pocketcode/plugins/core/tools/context_elephant_store_tools.py`; update any intra-package imports; **note**: this file contains 5 `BaseTool` subclasses (`ReadContextElephantStoreFileTool`, `WriteContextElephantStoreFileTool`, `AppendToContextElephantStoreFileTool`, `GetContextElephantStoreSummaryTool`, `CheckContextElephantStoreStatusTool`) and is NOT currently registered in any `plugin.yaml` — do not add it to core tool registrations without an explicit decision; the wrapper in T011b is still required because code may import from the old path
 - [X] T011b [P] [US1] Replace `pocketcode/tools/context_elephant_store_tools.py` with a backward-compat re-export wrapper forwarding all public `BaseTool` subclasses and exception types from `pocketcode.plugins.core.tools.context_elephant_store_tools` (depends on T011a)
 - [X] T012 [US1] Replace `pocketcode/tools/filesystem.py` with a backward-compat re-export wrapper: `from pocketcode.plugins.core.tools.filesystem import *` plus explicit `__all__` listing every public symbol (depends on T007)
 - [X] T013 [P] [US1] Replace `pocketcode/tools/system.py` with re-export wrapper — MUST re-export both `ExecuteCommandTool` and bare function `execute_shell_command` (consumed by `coder/tools/git.py`) (depends on T008)
-- [X] T014 [P] [US1] Replace `pocketcode/tools/git.py` with re-export wrapper (depends on T009)
+- [X] T014 [P] [US1] Historical step: `pocketcode/tools/git.py` was once a re-export wrapper; the current codebase has removed that module and exposes git tools directly from the `pocketcode.tools` package.
 - [X] T015 [P] [US1] Replace `pocketcode/tools/search.py` with re-export wrapper (depends on T010)
 - [X] T016 [P] [US1] Replace `pocketcode/tools/user_input.py` with re-export wrapper (depends on T011)
 - [X] T017 [US1] Update `pocketcode/plugins/core/plugin.yaml` — change all tool entry values from dotted-module paths (`pocketcode.tools.filesystem.ReadFileTool`) to file-relative format (`tools/filesystem.py:ReadFileTool`); add `schema_version: 1` as the first key; remove or comment out `components:`, `workflows:`, and `node_definitions:` legacy sections
@@ -182,14 +182,14 @@ Task T006: Update pocketcode/core/runtime_models.py
 # Batch 1 — copy implementations to canonical location:
 Task T007: Copy filesystem.py → core/tools/filesystem.py
 Task T008: Copy system.py → core/tools/system.py
-Task T009: Copy git.py → core/tools/git.py
+Task T009: Historical migration step for git.py; superseded by the later move into `.pocketcode/plugins/workspace_git/tools/git.py`
 Task T010: Copy search.py → core/tools/search.py
 Task T011: Copy user_input.py → core/tools/user_input.py
 
 # Batch 2 — replace originals with wrappers (after Batch 1 complete):
 Task T012: Replace pocketcode/tools/filesystem.py with re-export wrapper
 Task T013: Replace pocketcode/tools/system.py with re-export wrapper
-Task T014: Replace pocketcode/tools/git.py with re-export wrapper
+Task T014: Historical wrapper step for pocketcode/tools/git.py; superseded by removal of that module
 Task T015: Replace pocketcode/tools/search.py with re-export wrapper
 Task T016: Replace pocketcode/tools/user_input.py with re-export wrapper
 ```

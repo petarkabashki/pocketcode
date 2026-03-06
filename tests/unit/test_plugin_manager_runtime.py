@@ -65,6 +65,96 @@ class TestPluginManagerRuntimeLoading:
 
         assert manager.prompts.resolve("promptplug.system") == "You are promptplug.\n"
 
+    def test_workspace_prompt_registry_loads_dot_pocketcode_prompts(self, tmp_path):
+        _write(tmp_path / ".pocketcode" / "prompts" / "shared.md", "Shared workspace prompt.\n")
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.prompts.resolve("workspace.shared") == "Shared workspace prompt.\n"
+
+    def test_workspace_prompt_files_are_available_to_plugin_agents(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "workspacepromptplug"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: workspacepromptplug",
+                    'description: "workspace prompt fallback test"',
+                    "agents:",
+                    "  planner:",
+                    '    module: "agents/planner.py"',
+                    '    entry_fn: "create_flow"',
+                    "    prompt_files:",
+                    '      - "shared.md"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "agents" / "planner.py",
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n",
+        )
+        _write(tmp_path / ".pocketcode" / "prompts" / "shared.md", "Use the shared workspace instructions.\n")
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.agents.resolve("workspacepromptplug.planner").system_prompt == "Use the shared workspace instructions."
+
+    def test_workspace_dot_pocketcode_tools_register_and_are_visible_to_all_agents(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "workspaceplug"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: workspaceplug",
+                    'description: "workspace tool fallback test"',
+                    "agents:",
+                    "  planner:",
+                    '    module: "agents/planner.py"',
+                    '    entry_fn: "create_flow"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "agents" / "planner.py",
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n",
+        )
+        _write(
+            tmp_path / ".pocketcode" / "tools" / "shared_tools.py",
+            "def workspace_echo(text):\n"
+            "    return {'success': True, 'result': text}\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.tools.resolve("workspace.workspace_echo")("hello") == {
+            "success": True,
+            "result": "hello",
+        }
+        assert "workspace.workspace_echo" in manager.resolve_tools_for_agent("workspaceplug::planner")
+
     def test_agent_prompts_alias_loads_system_prompt(self, tmp_path):
         plugin_root = tmp_path / "plugins" / "agentpromptplug"
         _write(

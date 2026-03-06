@@ -158,10 +158,10 @@ from pocketcode.plugins.core.tools.filesystem import (  # noqa: F401
 
 ### Critical detail: `execute_shell_command`
 `system.py` exports a bare function `execute_shell_command` (not a Tool class) consumed by:
-- `pocketcode/tools/git.py` (intra-package, becomes a wrapper)
+- Historical note: `pocketcode/tools/git.py` once existed as an intra-package wrapper; the current codebase exposes git tools directly from the `pocketcode.tools` package.
 - `pocketcode/plugins/coder/tools/git.py` (cross-plugin import)
 
-The wrapper in `pocketcode/tools/system.py` MUST re-export `execute_shell_command` alongside `ExecuteCommandTool`. The canonical `pocketcode/plugins/core/tools/git.py` must import from `pocketcode.plugins.core.tools.system` (not from the shim) to avoid the implementation depending on its own compatibility layer.
+The wrapper in `pocketcode/tools/system.py` MUST re-export `execute_shell_command` alongside `ExecuteCommandTool`. This note is historical: git tooling no longer lives in `pocketcode/plugins/core/tools/git.py`; the current canonical implementation is `.pocketcode/plugins/workspace_git/tools/git.py`.
 
 ### `plugin.yaml` tool reference format after migration
 ```yaml
@@ -204,7 +204,7 @@ tools:
 | Consumer | Import |
 |---|---|
 | `pocketcode/core/tool_runtime.py` | `from pocketcode.tools.user_input import ConfirmUserInputTool` |
-| `pocketcode/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` (intra-package) |
+| Historical `pocketcode/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` (intra-package) |
 | `pocketcode/plugins/coder/tools/git.py` | `from pocketcode.tools.system import execute_shell_command` |
 | `pocketcode/plugins/core/plugin.yaml` | dotted paths: `pocketcode.tools.filesystem.ReadFileTool`, etc. |
 | `tests/integration/` | **No direct imports from `pocketcode.tools.*`** — only `pocketcode.core.*` |
@@ -234,7 +234,7 @@ Option B keeps the core plugin dependent on an external package (`pocketcode.too
 
 Option A is the only choice where the core plugin's directory contains both the canonical implementation and the registration entry, satisfying SC-006 and FR-002. The `pocketcode/tools/` wrappers are one-liners using `from … import *` or explicit re-exports, so all existing callers (`tool_runtime.py`, `coder/tools/git.py`, and any future code referencing the old path) continue to work with zero changes.
 
-**One implementation detail requires attention**: the intra-package import inside `pocketcode/tools/git.py` (`from pocketcode.tools.system import execute_shell_command`) becomes a no-op concern once `git.py` is a wrapper — but the new **canonical** `pocketcode/plugins/core/tools/git.py` must update its own import to reference `pocketcode.plugins.core.tools.system` rather than the old path, avoiding a dependency on the compatibility shim from within the implementation itself.
+**One implementation detail required attention at the time**: the intra-package import inside `pocketcode/tools/git.py` (`from pocketcode.tools.system import execute_shell_command`) became a no-op concern once `git.py` was turned into a wrapper. This is now superseded by the current architecture, where the canonical implementation lives in `.pocketcode/plugins/workspace_git/tools/git.py` and the `pocketcode.tools` package exports those classes directly.
 
 ---
 
@@ -243,7 +243,7 @@ Option A is the only choice where the core plugin's directory contains both the 
 ### Canonical implementation (new location)
 
 ```python
-# pocketcode/plugins/core/tools/git.py  (example — intra-plugin import updated)
+# Historical example: pocketcode/plugins/core/tools/git.py  (superseded by .pocketcode/plugins/workspace_git/tools/git.py)
 try:
     from pocketcode.plugins.core.tools.system import execute_shell_command
 except ImportError:

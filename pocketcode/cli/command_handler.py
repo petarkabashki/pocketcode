@@ -23,6 +23,8 @@ BASE_COMMAND_SUGGESTIONS = [
     "/llm-handoff",
     "/tools",
     "/reload",
+    "/stop",
+    "/cancel",
     "/status",
     "/context",
     "/confirm",
@@ -30,15 +32,11 @@ BASE_COMMAND_SUGGESTIONS = [
     "/agent show",
     "/agent switch",
     "/agent clone",
+    "/agent edit",
+    "/agent edit llm",
+    "/agent edit prompts",
     "/agent tools",
     "/agent policy",
-    "/agent-profile",
-    "/agent-profile list",
-    "/agent-profile show",
-    "/agent-profile switch",
-    "/agent-profile clone",
-    "/agent-profile tools",
-    "/agent-profile policy",
     "/copy",
     "/copy-all",
     "/exit",
@@ -52,6 +50,7 @@ BASE_COMMAND_SUGGESTIONS = [
     "/la",
     "/lh",
     "/st",
+    "/c",
     "/r",
     "/q",
 ]
@@ -78,6 +77,7 @@ def handle_command(
     command_input: str,
     engine: PocketCodeEngine,
     cli_context: Dict[str, Any],
+    active_run: Any = None,
 ) -> Optional[str]:
     try:
         parts = shlex.split(command_input.strip())
@@ -101,6 +101,9 @@ def handle_command(
         engine.reload()
         print("Reloaded plugins, agents, tools, and LLM profile mappings.")
         return None
+
+    if command in {"/stop", "/cancel"}:
+        return _handle_stop_command(active_run)
 
     if command in {"/status"}:
         status = engine.status()
@@ -136,7 +139,7 @@ def handle_command(
         return _handle_confirm_command(args, engine)
 
     if command == "/agent":
-        management_commands = {"help", "list", "show", "switch", "clone", "tools", "policy"}
+        management_commands = {"help", "list", "show", "switch", "clone", "edit", "tools", "policy"}
         if not args or args[0].lower() in management_commands:
             return _handle_agent_command(args, engine)
         return _handle_set_command(command="/flow", args=args, engine=engine)
@@ -153,6 +156,7 @@ def _normalize_command(command: str) -> str:
     aliases = {
         "/q": "/quit",
         "/r": "/reload",
+        "/c": "/cancel",
         "/st": "/status",
         "/ls": "/list",
         "/fl": "/flow",
@@ -484,6 +488,23 @@ def _handle_context_command(args: list[str], cli_context: Dict[str, Any]) -> Opt
     return None
 
 
+def _handle_stop_command(active_run: Any) -> Optional[str]:
+    if active_run is None:
+        print("No run is currently active.")
+        return None
+
+    cancel = getattr(active_run, "cancel", None)
+    if not callable(cancel):
+        print("Active run does not support cancellation.")
+        return None
+
+    if cancel("Run cancelled from CLI."):
+        print("Stop requested for the active run.")
+    else:
+        print("The active run is already stopping or has completed.")
+    return None
+
+
 def print_help() -> None:
     help_text = """
 Pocketcode Commands:
@@ -495,6 +516,7 @@ Pocketcode Commands:
   /flow <flow_name|auto>         Select the active flow.
                                  Optional: --agent <agent_name>
   /reload                        Reload plugins and runtime catalogs.
+    /stop, /cancel                 Request cancellation of the active run.
   /status                        Show runtime status.
   /context <cmd> [opts]          Manage context. Run '/context help'.
   /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
@@ -515,18 +537,18 @@ Compatibility aliases:
 
 Keyboard shortcuts (Textual UI):
   Tab                           Complete current prompt input.
-  F1 / F2 / F3 / F4 / F5        Switch Chat / Control / Profiles / Context / Run views.
-  F6                            Select next flow.
-  Shift+F6                      Select previous flow.
-  F7 or Ctrl+P                  Select next agent for the current flow.
-  Shift+F7 or Ctrl+Shift+P      Select previous agent for the current flow.
+        F1 / F2 / F3 / F4 / F5        Switch Chat / Control / Edit Agent / Context / Run views.
+    F6                            Select next agent.
+    Shift+F6                      Select previous agent.
+    F7 or Ctrl+P                  Select next agent profile for the current agent.
+    Shift+F7 or Ctrl+Shift+P      Select previous agent profile for the current agent.
   F8                            Select next global LLM override.
   Shift+F8                      Select previous global LLM override.
   F9                            Toggle the left navigation panel.
   F10                           Toggle the right inspector panel.
   F11                           Toggle the second header row.
   Ctrl+W                        Cycle workspace mode presets.
-  Alt+1 / Alt+2 / Alt+3         Switch Chat / Control / Profiles views.
+        Alt+1 / Alt+2 / Alt+3         Switch Chat / Control / Edit Agent views.
   Alt+4 / Alt+5                 Switch Context / Run views.
   Ctrl+Shift+A                  Copy full response console output.
   Ctrl+Y                        Copy last assistant response.
@@ -546,6 +568,7 @@ Shortcut aliases:
   /la   /llm-flow
   /lh   /llm-handoff
   /st   /status
+    /c    /cancel
   /r    /reload
   /q    /quit
 """
@@ -764,14 +787,19 @@ def _handle_agent_command(
             return None
         src, new_name = sub_args[0], sub_args[1]
         try:
-            if hasattr(engine, "clone_agent"):
-                engine.clone_agent(src, new_name)
+            cloner = engine.clone_agent if hasattr(engine, "clone_agent") else engine.clone_agent_profile
+            cloned = cloner(src, new_name)
+            target_path = getattr(cloned, "source_path", None)
+            if target_path:
+                print(f"Cloned agent '{src}' \u2192 '{new_name}' at {target_path}.")
             else:
-                engine.clone_agent_profile(src, new_name)
-            print(f"Cloned agent '{src}' \u2192 '{new_name}'.")
+                print(f"Cloned agent '{src}' \u2192 '{new_name}'.")
         except (KeyError, ValueError) as exc:
             print(f"Error: {exc}")
         return None
+
+    if subcommand == "edit":
+        return _handle_agent_edit_command(sub_args, engine)
 
     if subcommand == "tools":
         return _handle_agent_tools_command(sub_args, engine)
@@ -839,6 +867,62 @@ def _handle_agent_tools_command(
             )
     except Exception as exc:
         print(f"Error: {exc}")
+    return None
+
+
+def _handle_agent_edit_command(
+    args: list[str],
+    engine: PocketCodeEngine,
+) -> Optional[str]:
+    if len(args) < 3:
+        print("Usage: /agent edit <llm|prompts> <agent_name> <value...>")
+        return None
+
+    target = args[0].lower()
+    profile_name = args[1]
+    profile = _get_editable_agent_profile(engine, profile_name)
+    if profile is None:
+        return None
+
+    try:
+        updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
+        if target == "llm":
+            llm_profile = None if args[2].lower() in {"inherit", "none", "reset", "auto"} else args[2]
+            updater(
+                profile.name,
+                llm_profile=llm_profile,
+                tools=list(profile.tools) if profile.tools is not None else None,
+                extra_prompts=list(profile.extra_prompts),
+                tool_confirmation_default=_get_profile_confirmation_default(profile),
+                tool_confirmation_overrides=_get_profile_confirmation_overrides(profile),
+            )
+            print(f"Agent '{profile.name}' LLM updated: {llm_profile or 'inherit'}")
+            return None
+
+        if target == "prompts":
+            raw_prompt_args = args[2:]
+            if len(raw_prompt_args) == 1 and raw_prompt_args[0].lower() in {"none", "clear", "reset"}:
+                prompt_paths: list[str] = []
+            else:
+                prompt_paths = [prompt for prompt in raw_prompt_args if prompt.strip()]
+            updater(
+                profile.name,
+                llm_profile=profile.llm_profile,
+                tools=list(profile.tools) if profile.tools is not None else None,
+                extra_prompts=prompt_paths,
+                tool_confirmation_default=_get_profile_confirmation_default(profile),
+                tool_confirmation_overrides=_get_profile_confirmation_overrides(profile),
+            )
+            print(
+                f"Agent '{profile.name}' prompt paths updated: "
+                f"{', '.join(prompt_paths) if prompt_paths else '(none)'}"
+            )
+            return None
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return None
+
+    print("Usage: /agent edit <llm|prompts> <agent_name> <value...>")
     return None
 
 
@@ -966,6 +1050,9 @@ def print_agent_help() -> None:
   /agent show [agent_name]                    Show details of an agent (default: active).
   /agent switch <agent_name>                  Activate an agent.
   /agent clone <source> <new_name>            Clone an agent to a new workspace agent.
+    /agent edit llm <agent> <profile|inherit>   Set or clear the agent LLM override.
+    /agent edit prompts <agent> <paths...>      Replace extra prompt paths.
+    /agent edit prompts <agent> clear           Clear extra prompt paths.
   /agent tools <agent> all                    Allow all tools for a workspace agent.
   /agent tools <agent> none                   Deny all tools for a workspace agent.
   /agent tools <agent> set <tools...>

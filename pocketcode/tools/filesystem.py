@@ -4,6 +4,7 @@
 # continues to work without modification.
 from pocketcode.plugins.core.tools.filesystem import (  # noqa: F401
     ReadFileTool,
+    WriteFileTool,
     WriteToFileTool,
     ListFilesTool,
     CreateDirectoryTool,
@@ -17,6 +18,7 @@ from pocketcode.plugins.core.tools.filesystem import (  # noqa: F401
 
 __all__ = [
     "ReadFileTool",
+    "WriteFileTool",
     "WriteToFileTool",
     "ListFilesTool",
     "CreateDirectoryTool",

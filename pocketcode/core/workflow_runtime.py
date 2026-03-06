@@ -15,6 +15,7 @@ from pocketflow import Flow
 
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.run_handle import RunCancelledError
 from pocketcode.core.runtime_nodes import BaseRuntimeNode, create_runtime_node
 from pocketcode.core.runtime_models import WorkflowDefinition, WorkflowNodeDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
@@ -64,6 +65,24 @@ class BaseWorkflowRuntime:
                 shared_store["_registry"] = self._plugins._holder.get()
             except AttributeError:
                 shared_store["_registry"] = None
+
+    def _is_cancel_requested(self, shared_store: Dict[str, Any]) -> bool:
+        value = shared_store.get("run_cancel_requested")
+        if callable(value):
+            return bool(value())
+        return bool(value)
+
+    def _get_cancel_reason(self, shared_store: Dict[str, Any]) -> str:
+        value = shared_store.get("run_cancel_reason")
+        if callable(value):
+            value = value()
+        if isinstance(value, str) and value.strip():
+            return value
+        return "Run cancelled by user."
+
+    def _raise_if_cancelled(self, shared_store: Dict[str, Any]) -> None:
+        if self._is_cancel_requested(shared_store):
+            raise RunCancelledError(self._get_cancel_reason(shared_store))
 
     def _push_workflow_context(self, shared_store: Dict[str, Any]) -> bool:
         shared_store["active_workflow"] = self.definition.name
@@ -133,7 +152,10 @@ class BaseWorkflowRuntime:
         current_transition = transition
         halt = False
 
+        self._raise_if_cancelled(shared_store)
+
         for handler_reference in handler_references:
+            self._raise_if_cancelled(shared_store)
             handler = self._resolve_python_handler(handler_reference)
             outcome = self._invoke_handler(
                 handler=handler,
@@ -147,6 +169,7 @@ class BaseWorkflowRuntime:
             if transition_override is not None:
                 current_transition = transition_override
             halt = halt or should_halt
+            self._raise_if_cancelled(shared_store)
 
         return current_transition, halt
 
@@ -563,6 +586,7 @@ class WorkflowRuntime(BaseWorkflowRuntime, Flow):
         node_definition: WorkflowNodeDefinition,
         shared_store: Dict[str, Any],
     ) -> str:
+        self._raise_if_cancelled(shared_store)
         pending_tool = shared_store.get("pending_tool", {})
         if not isinstance(pending_tool, dict):
             pending_tool = {}
@@ -593,6 +617,7 @@ class WorkflowRuntime(BaseWorkflowRuntime, Flow):
             auto_confirm=bool(shared_store.get("auto_confirm_tools", False)),
             agent_name=str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None,
         )
+        self._raise_if_cancelled(shared_store)
 
         route_payload = {
             "tool": str(tool_name),
@@ -618,6 +643,7 @@ class WorkflowRuntime(BaseWorkflowRuntime, Flow):
         node_definition: WorkflowNodeDefinition,
         shared_store: Dict[str, Any],
     ) -> str:
+        self._raise_if_cancelled(shared_store)
         target_workflow = (
             node_definition.attributes.get("flow")
             or node_definition.attributes.get("workflow")
@@ -650,6 +676,7 @@ class WorkflowRuntime(BaseWorkflowRuntime, Flow):
         nested_runtime = self._resolve_workflow_runtime(target_workflow)
         prior_error = shared_store.get("error_message")
         nested_transition = nested_runtime.run(shared_store)
+        self._raise_if_cancelled(shared_store)
 
         return_transition = self._finalize_handoff_return(node_definition, shared_store)
         if return_transition:
@@ -685,6 +712,7 @@ class WorkflowRuntime(BaseWorkflowRuntime, Flow):
         node_definition: WorkflowNodeDefinition,
         shared_store: Dict[str, Any],
     ) -> str:
+        self._raise_if_cancelled(shared_store)
         agent_name = (
             node_definition.attributes.get("agent")
             or shared_store.get("active_agent")

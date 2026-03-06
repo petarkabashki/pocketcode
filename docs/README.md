@@ -7,6 +7,7 @@ PocketCoder is an extensible terminal AI coding assistant built around PocketFlo
 ### Core Concepts
 - [Architecture Overview](architecture.md) (Planned)
 - [Prompt Engineering](prompts.md) (Planned)
+- [Run Cancellation](run_cancellation.md)
 
 ### Plugins and Flows
 - [Plugin Architecture](plugin_architecture.md)

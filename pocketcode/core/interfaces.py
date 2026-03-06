@@ -218,10 +218,28 @@ class BaseTool(ABC):
         """Input schema for the tool (e.g., JSON schema)."""
         pass
 
+    @property
+    def execution_mode(self) -> str:
+        """Execution strategy for the tool. Defaults to in-process execution."""
+        return "inline"
+
+    @property
+    def timeout_seconds(self) -> float | None:
+        """Optional timeout for managed subprocess execution."""
+        return None
+
     @abstractmethod
     def execute(self, **kwargs) -> Any:
         """Execute the tool's functionality."""
         pass
+
+    def spawn_subprocess(self, **kwargs) -> Any:
+        """Optional hook for tools that support managed subprocess execution."""
+        raise NotImplementedError(f"Tool '{self.name}' does not implement managed subprocess execution.")
+
+    def handle_subprocess_result(self, *, returncode: int, stdout: str, stderr: str, **kwargs) -> Any:
+        """Optional hook to turn subprocess output into the tool result payload."""
+        raise NotImplementedError(f"Tool '{self.name}' does not implement managed subprocess result handling.")
 
 # BaseWorkflow might be more conceptual or directly use PocketFlow types
 # class BaseWorkflow(ABC): ...

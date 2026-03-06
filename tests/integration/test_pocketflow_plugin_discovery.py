@@ -4,6 +4,10 @@ from pathlib import Path
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.config.loader import load_settings
 from pocketflow import Flow
+from pocketcode.tools import GitStatusTool as PublicGitStatusTool
+from pocketcode.plugins.core.tools.context_elephant_store_tools import (
+    ReadContextElephantStoreFileTool as CoreReadContextTool,
+)
 
 def test_pocketflow_plugin_discovery(monkeypatch):
     """
@@ -104,3 +108,28 @@ def test_agent_namespace_migration(monkeypatch):
     react_agent = plugin_manager.agents["core::react"]
     assert isinstance(react_agent.flow_instance, Flow), \
         "core::react flow_instance must be a pocketflow.Flow"
+
+
+def test_workspace_plugins_are_loaded_from_dot_pocketcode(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "dummy-key")
+
+    workspace_root = Path(__file__).parent.parent.parent.resolve()
+    config = load_settings(workspace_root=workspace_root)
+
+    plugin_manager = PluginManager(config=config, workspace_root=workspace_root)
+    plugin_manager.load()
+
+    all_tools = plugin_manager.tools.list_all()
+
+    assert "workspace_git.git_status" in all_tools
+    assert "workspace_context.read_context_elephant_store_file" in all_tools
+    assert "core.git_status" not in all_tools
+
+    resolved_tools = plugin_manager.resolve_tools_for_agent("core::react")
+    assert "workspace_git.git_status" in resolved_tools
+    assert "workspace_context.check_context_elephant_store_status" in resolved_tools
+
+
+def test_core_tool_import_paths_are_workspace_shims():
+    assert "workspace_loader" in PublicGitStatusTool.__module__
+    assert "workspace_loader" in CoreReadContextTool.__module__

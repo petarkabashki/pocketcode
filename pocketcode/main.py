@@ -4,10 +4,13 @@ import argparse
 import logging
 import os
 import sys
+import time
 from typing import Any, Dict
 
 from dotenv import load_dotenv
 
+from pocketcode.cli.runtime_events import format_runtime_event
+from pocketcode.cli.user_interaction import request_interaction_from_console
 from pocketcode.cli.command_handler import handle_command
 from pocketcode.config.loader import load_settings, resolve_settings_path
 from pocketcode.core.engine import PocketCodeEngine
@@ -72,11 +75,83 @@ def _run_basic_interactive_cli(engine: PocketCodeEngine, cli_context: Dict[str, 
             continue
 
         try:
-            response = engine.process_request(user_input=user_input, cli_context=cli_context)
+            response = _run_request_with_live_events(
+                engine=engine,
+                user_input=user_input,
+                cli_context=cli_context,
+                bridge_user_input=True,
+            )
             print(response)
         except Exception as exc:
             logger.error("Request processing failed: %s", exc, exc_info=True)
             print(f"Error processing request: {exc}")
+
+
+def _run_request_with_live_events(
+    *,
+    engine: PocketCodeEngine,
+    user_input: str,
+    cli_context: Dict[str, Any],
+    bridge_user_input: bool,
+) -> str:
+    handle = engine.start_request(
+        user_input=user_input,
+        cli_context=cli_context,
+        bridge_user_input=bridge_user_input,
+    )
+    resolved_prompts: set[str] = set()
+
+    try:
+        while not handle.is_done:
+            _drain_live_events(handle=handle, resolved_prompts=resolved_prompts, bridge_user_input=bridge_user_input)
+            if not handle.is_done:
+                time.sleep(0.05)
+    except KeyboardInterrupt:
+        if handle.cancel("Run cancelled from CLI interrupt."):
+            print("\nStop requested. Waiting for the active step to yield...")
+        while not handle.is_done:
+            _drain_live_events(handle=handle, resolved_prompts=resolved_prompts, bridge_user_input=bridge_user_input)
+            if not handle.is_done:
+                time.sleep(0.05)
+
+    _drain_live_events(handle=handle, resolved_prompts=resolved_prompts, bridge_user_input=bridge_user_input)
+    return handle.wait(timeout=1.0)
+
+
+def _drain_live_events(
+    *,
+    handle: Any,
+    resolved_prompts: set[str],
+    bridge_user_input: bool,
+) -> None:
+    for event in handle.drain_events():
+        message = format_runtime_event(event)
+        if message:
+            print(f"[runtime] {message}")
+
+        if not bridge_user_input:
+            continue
+
+        if event.get("type") == "interaction_requested":
+            request_id = str(event.get("request_id") or "")
+            if not request_id or request_id in resolved_prompts:
+                continue
+
+            response = request_interaction_from_console(event)
+            if handle.resolve_interaction(request_id, response):
+                resolved_prompts.add(request_id)
+            continue
+
+        if event.get("type") != "user_input_requested":
+            continue
+
+        prompt_id = str(event.get("prompt_id") or "")
+        if not prompt_id or prompt_id in resolved_prompts:
+            continue
+
+        response = input(str(event.get("prompt") or "Provide input"))
+        if handle.resolve_user_input(prompt_id, response):
+            resolved_prompts.add(prompt_id)
 
 
 def run() -> None:
@@ -182,11 +257,17 @@ def run() -> None:
                     command_input=request,
                     engine=engine,
                     cli_context=cli_context,
+                    active_run=None,
                 )
                 if command_result not in (None, "__exit__"):
                     print(command_result)
             else:
-                response = engine.process_request(user_input=request, cli_context=cli_context)
+                response = _run_request_with_live_events(
+                    engine=engine,
+                    user_input=request,
+                    cli_context=cli_context,
+                    bridge_user_input=False,
+                )
                 print(response)
         except Exception as exc:
             logger.error("Request processing failed: %s", exc, exc_info=True)
