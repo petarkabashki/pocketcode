@@ -58,12 +58,20 @@ class AgentRuntime:
             agent_name = str(shared_store.get("active_agent") or "").strip()
             if not agent_name:
                 shared_store["error_message"] = "No active agent could be resolved."
+                self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
                 break
             if agent_name not in self._plugins.agents:
                 shared_store["error_message"] = f"Agent '{agent_name}' is not registered."
+                self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"], agent=agent_name)
                 break
 
             transition = self._run_agent_turn(agent_name=agent_name, shared_store=shared_store)
+            self._emit_event(
+                shared_store,
+                "agent_turn_completed",
+                agent=agent_name,
+                transition=transition,
+            )
 
             if transition == "call_tool":
                 self._run_tool_call(shared_store=shared_store)
@@ -98,6 +106,7 @@ class AgentRuntime:
             shared_store["error_message"] = (
                 f"Agent runtime exceeded max steps ({max_steps})."
             )
+            self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
 
         if not shared_store.get("final_output"):
             shared_store["final_output"] = self._resolve_final_output(shared_store)
@@ -122,11 +131,22 @@ class AgentRuntime:
                 # Defensive: test doubles (MagicMock, etc.) may not have _holder
                 shared_store["_registry"] = None
 
+    def _emit_event(self, shared_store: Dict[str, Any], event_type: str, **payload: Any) -> None:
+        handler = shared_store.get("runtime_event_handler")
+        if callable(handler):
+            handler(event_type, **payload)
+
     def _run_agent_turn(self, agent_name: str, shared_store: Dict[str, Any]) -> str:
         agent_definition = self._plugins.agents[agent_name]
 
         shared_store["active_agent"] = agent_name
         shared_store.setdefault("agent_trace", []).append({"agent": agent_name})
+        self._emit_event(
+            shared_store,
+            "agent_turn_started",
+            agent=agent_name,
+            execution_mode=agent_definition.execution_mode,
+        )
 
         # Inject PluginContext if available for this agent
         plugin_name = agent_definition.metadata.get("plugin_name")
@@ -421,6 +441,12 @@ class AgentRuntime:
             ]
         )
 
+        self._emit_event(
+            shared_store,
+            "llm_call_started",
+            agent=agent_name,
+            profile=llm_profile,
+        )
         response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
         llm_generation_info = self._llm_router.get_last_generation_info()
         shared_store["last_llm_generation"] = llm_generation_info
@@ -460,6 +486,15 @@ class AgentRuntime:
                 "estimated_cost_usd": estimated_cost if isinstance(estimated_cost, (int, float)) else 0.0,
             }
         )
+        self._emit_event(
+            shared_store,
+            "llm_call_completed",
+            agent=agent_name,
+            profile=llm_profile,
+            model=llm_generation_info.get("model") if isinstance(llm_generation_info, dict) else None,
+            usage=usage if isinstance(usage, dict) else {},
+            estimated_cost_usd=estimated_cost if isinstance(estimated_cost, (int, float)) else 0.0,
+        )
 
         decision = self._parse_yaml_mapping(response_text)
         shared_store["last_agent_response_raw"] = response_text
@@ -482,11 +517,20 @@ class AgentRuntime:
 
         if not tool_name:
             shared_store["error_message"] = "Tool action selected but no tool name was provided."
+            self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
             return
         if not isinstance(arguments, dict):
             shared_store["error_message"] = "Tool arguments must be a mapping/object."
+            self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
             return
 
+        self._emit_event(
+            shared_store,
+            "tool_started",
+            agent=str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None,
+            tool=str(tool_name),
+            arguments=arguments,
+        )
         result = self._tool_runtime.execute_tool(
             tool_name=str(tool_name),
             arguments=arguments,
@@ -504,9 +548,18 @@ class AgentRuntime:
         shared_store["last_tool_route_yaml"] = self._to_yaml(route_payload)
         shared_store.setdefault("tool_history", []).append(route_payload)
         shared_store.pop("pending_tool", None)
+        self._emit_event(
+            shared_store,
+            "tool_finished",
+            agent=str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None,
+            tool=str(tool_name),
+            success=not (isinstance(result, dict) and result.get("success") is False),
+            result=result,
+        )
 
         if isinstance(result, dict) and result.get("success") is False:
             shared_store["error_message"] = str(result.get("error") or "Tool reported failure.")
+            self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
 
     def _run_handoff(self, shared_store: Dict[str, Any]) -> None:
         source_agent = str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None
@@ -514,11 +567,13 @@ class AgentRuntime:
 
         if not target_agent:
             shared_store["error_message"] = "Handoff requested but no target agent was provided."
+            self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
             return
 
         target_agent = str(target_agent)
         if target_agent not in self._plugins.agents:
             shared_store["error_message"] = f"Handoff target agent '{target_agent}' is not registered."
+            self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"], target_agent=target_agent)
             return
 
         handoff_policy = self._resolve_handoff_policy(
@@ -565,6 +620,14 @@ class AgentRuntime:
                 "target": target_agent,
                 "policy": handoff_policy,
             }
+        )
+        self._emit_event(
+            shared_store,
+            "handoff",
+            source_agent=source_agent,
+            target_agent=target_agent,
+            context_mode=context_mode,
+            return_to_caller=return_to_caller,
         )
 
     def _finalize_handoff_return(self, shared_store: Dict[str, Any]) -> bool:
@@ -732,11 +795,23 @@ class AgentRuntime:
         if action == "final_answer":
             answer = decision.get("answer")
             shared_store["final_answer"] = str(answer) if answer is not None else ""
+            self._emit_event(
+                shared_store,
+                "final_answer",
+                agent=agent_name,
+                answer=shared_store["final_answer"],
+            )
             return str(transition_override or "final_answer")
 
         if action == "ask_user":
             question = decision.get("question")
             shared_store["question_to_ask"] = str(question) if question is not None else ""
+            self._emit_event(
+                shared_store,
+                "ask_user",
+                agent=agent_name,
+                question=shared_store["question_to_ask"],
+            )
             return str(transition_override or "ask_user")
 
         if action == "handoff":

@@ -106,15 +106,15 @@ Compatibility aliases remain available:
 Textual keyboard shortcuts:
 
 - `Tab`: complete current prompt input
-- `Ctrl+]`: switch to next agent
-- `Ctrl+P`: switch to the next profile for the current agent
-- `Ctrl+[`: switch global LLM override (cycles `none` + profiles)
-- `Ctrl+B`: toggle the left navigation panel
-- `Ctrl+I`: toggle the right inspector panel
+- `F1`, `F2`, `F3`, `F4`, `F5`: switch `Chat`, `Control`, `Profiles`, `Context`, and `Run` views
+- `F6`: switch to next agent
+- `F7` or `Ctrl+P`: switch to the next profile for the current agent
+- `F8`: switch global LLM override (cycles `none` + profiles)
+- `F9`: toggle the left navigation panel
+- `F10`: toggle the right inspector panel
+- `F11`: toggle header details
 - `Ctrl+W`: cycle workspace mode presets (`Balanced`, `Chat Focus`, `Control Desk`, `Minimal`, `Review`)
-- `Ctrl+T`: toggle top stats panel
-- `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`: switch `Chat`, `Control`, `Context`, and `Run` views
-- `Ctrl+Space`: complete current prompt input
+- `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`: fallback view switching
 - `Ctrl+Shift+A`: copy full response console output
 - `Ctrl+Y`: copy last assistant response
 - `Ctrl+Q`: quit Textual UI
@@ -122,9 +122,10 @@ Textual keyboard shortcuts:
 Interactive workspace views:
 
 - `Chat`: conversation and command entry
-- `Control`: form-based selectors and toggles for agent, profile, global LLM, session confirmation, and editable workspace-backed profiles
+- `Control`: runtime/session selectors and toggles for workspace mode, theme, agent, profile, LLM, and session confirmation
+- `Profiles`: dedicated editor for cloning workspace profiles, toggling allowed tools, editing per-tool confirmation overrides, and saving extra prompts/LLM/profile defaults
 - `Context`: add, remove, and clear files, folders, URLs, and snippets without slash commands
-- `Run`: inspect the latest runtime path, effective LLM/profile state, token usage, and cost
+- `Run`: inspect the latest runtime path, effective LLM/profile state, token usage, cost, and live in-flight runtime events while a request is still running
 - agent/profile/tool metadata is reused across a single UI refresh so switching the active agent stays responsive
 - the Textual client now derives one UI snapshot per refresh and applies only changed widget state, instead of imperatively rebuilding each pane in multiple passes
 
@@ -152,14 +153,21 @@ Theme presets:
 Profile editing in the Textual UI:
 
 - plugin and synthesised profiles are read-only until cloned to a workspace profile
-- workspace-backed profiles can edit `llm_profile`, tool allowlists, confirmation defaults, and `extra_prompts`
-- tools and prompts can be changed from lists, toggles, and text boxes instead of editing YAML manually
+- workspace-backed profiles can edit `llm_profile`, tool allowlists, per-tool confirmation overrides, confirmation defaults, and `extra_prompts`
+- tools and prompts can be changed from lists, toggles, policy selectors, and text boxes instead of editing YAML manually
 
 Output box behavior:
 
 - output text is selectable with mouse/keyboard
 - copy selected text with your terminal copy shortcut (for example `Ctrl+Shift+C`)
 - the TUI retains only the most recent 400 output lines and inserts a trim notice once older history is dropped, which keeps long sessions responsive
+- background runs now append lifecycle updates as they happen, including agent turns, LLM calls, tool execution, handoffs, and confirmation waits
+
+Live request handling:
+
+- the Textual client now starts requests on a background run handle instead of waiting for a single blocking `process_request()` call to finish
+- the main input stays available during a run so it can answer runtime prompts and tool confirmations without falling back to raw terminal `input()`
+- runtime progress is surfaced through a queued event stream today, which also provides the execution seam needed for future token/delta streaming
 
 Prompt suggestions include commands, agents, agent profiles, and LLM profiles.
 
@@ -173,6 +181,7 @@ Top stats panel includes:
 - aggregated token usage (`in`, `out`, `total`) for the latest request
 - estimated USD cost (if pricing is configured)
 - active session confirmation default
+- it now lives inside the collapsible header details area instead of a separate top strip
 - it does not repeat the active agent/profile state already shown in the status bar
 
 Context counts and item details now live in the right-hand inspector instead of the top strip.

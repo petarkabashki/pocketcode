@@ -15,7 +15,6 @@ from textual.widgets import (
     Button,
     ContentSwitcher,
     Footer,
-    Header,
     Input,
     OptionList,
     Select,
@@ -27,6 +26,7 @@ from textual.widgets import (
 
 from pocketcode.cli.command_handler import handle_command, list_command_suggestions
 from pocketcode.core.engine import PocketCodeEngine
+from pocketcode.core.run_handle import RunHandle
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +35,12 @@ DEFAULT_PROFILE = "__default__"
 NO_LLM = "__none__"
 INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
+NO_TOOL = "__no_tool__"
 MAX_OUTPUT_LINES = 400
 VIEW_TITLES = {
     "chat": "Chat Workspace",
     "control": "Control Center",
+    "profiles": "Agent/Profile Config",
     "context": "Context Builder",
     "run": "Run Inspector",
 }
@@ -92,7 +94,7 @@ def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
 def _build_view_title_text(view_name: str) -> str:
     return (
         f"{VIEW_TITLES.get(view_name, view_name)} | "
-        "Lists, toggles, and editors are available in Control and Context views."
+        "Runtime controls live in Control. Agent/profile edits live in Profiles."
     )
 
 
@@ -132,7 +134,8 @@ class TextualUIState:
     current_view: str
     left_panel_visible: bool
     right_panel_visible: bool
-    stats_visible: bool
+    header_details_visible: bool
+    header_toggle_label: str
     status_text: str
     stats_text: str
     view_title_text: str
@@ -151,6 +154,9 @@ class TextualUIState:
     profile_allow_all_tools_disabled: bool
     profile_tool_options: tuple[tuple[str, str, bool], ...]
     profile_tool_list_disabled: bool
+    profile_policy_tool_select: SelectViewState
+    profile_policy_value_select: SelectViewState
+    profile_policy_summary_text: str
     profile_prompts_text: str
     profile_prompts_disabled: bool
     save_profile_disabled: bool
@@ -167,18 +173,24 @@ class TextualUIState:
 class PocketCodeTextualApp(App[None]):
     BINDINGS = [
         Binding("tab", "complete_input", "Complete Input", priority=True),
-        Binding("ctrl+space", "complete_input", "Complete Input"),
-        Binding("ctrl+]", "next_agent", "Next Agent", priority=True),
+        Binding("f1", "view_chat", "Chat", priority=True),
+        Binding("f2", "view_control", "Control", priority=True),
+        Binding("f3", "view_profiles", "Profiles", priority=True),
+        Binding("f4", "view_context", "Context", priority=True),
+        Binding("f5", "view_run", "Run", priority=True),
+        Binding("f6", "next_agent", "Next Agent", priority=True),
+        Binding("f7", "next_profile", "Next Profile", priority=True),
+        Binding("f8", "next_llm", "Next LLM", priority=True),
+        Binding("f9", "toggle_left_panel", "Toggle Nav"),
+        Binding("f10", "toggle_right_panel", "Toggle Inspector"),
+        Binding("f11", "toggle_header", "Toggle Header"),
         Binding("ctrl+p", "next_profile", "Next Profile", priority=True),
-        Binding("ctrl+[", "next_llm", "Next LLM", priority=True),
-        Binding("ctrl+b", "toggle_left_panel", "Toggle Nav"),
-        Binding("ctrl+i", "toggle_right_panel", "Toggle Inspector"),
         Binding("ctrl+w", "next_workspace_mode", "Next Mode"),
-        Binding("ctrl+t", "toggle_stats", "Toggle Stats"),
         Binding("alt+1", "view_chat", "Chat"),
         Binding("alt+2", "view_control", "Control"),
-        Binding("alt+3", "view_context", "Context"),
-        Binding("alt+4", "view_run", "Run"),
+        Binding("alt+3", "view_profiles", "Profiles"),
+        Binding("alt+4", "view_context", "Context"),
+        Binding("alt+5", "view_run", "Run"),
         Binding("ctrl+shift+a", "copy_output", "Copy Output"),
         Binding("ctrl+y", "copy_last_response", "Copy Last"),
         Binding("ctrl+r", "reload_runtime", "Reload"),
@@ -198,8 +210,12 @@ class PocketCodeTextualApp(App[None]):
         color: #e2e8f0;
     }
 
-    Screen.theme-ocean Header {
-        background: #1d4ed8;
+    Screen.theme-ocean #topbar {
+        background: #082f49;
+        border-bottom: solid #0ea5e9;
+    }
+
+    Screen.theme-ocean #header-title {
         color: #eff6ff;
     }
 
@@ -253,8 +269,12 @@ class PocketCodeTextualApp(App[None]):
         color: #ecfccb;
     }
 
-    Screen.theme-forest Header {
-        background: #166534;
+    Screen.theme-forest #topbar {
+        background: #16351f;
+        border-bottom: solid #65a30d;
+    }
+
+    Screen.theme-forest #header-title {
         color: #f0fdf4;
     }
 
@@ -308,8 +328,12 @@ class PocketCodeTextualApp(App[None]):
         color: #ffedd5;
     }
 
-    Screen.theme-ember Header {
-        background: #c2410c;
+    Screen.theme-ember #topbar {
+        background: #3b1d10;
+        border-bottom: solid #fb923c;
+    }
+
+    Screen.theme-ember #header-title {
         color: #fff7ed;
     }
 
@@ -358,31 +382,54 @@ class PocketCodeTextualApp(App[None]):
         border: round #fb923c;
     }
 
-    Header {
-        background: #1d4ed8;
-        color: #eff6ff;
-    }
-
     Footer {
         background: #111827;
         color: #dbeafe;
     }
 
-    #status {
+    #topbar {
+        padding: 0 1;
+        background: #082f49;
+        border-bottom: solid #0ea5e9;
+    }
+
+    #topbar-main {
+        height: 3;
+        content-align: left middle;
+    }
+
+    #header-title {
+        width: 1fr;
+        text-style: bold;
+    }
+
+    #toggle-header-button {
+        width: auto;
+        min-width: 18;
+        margin: 0;
+    }
+
+    #header-details {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #status,
+    #stats {
         height: 2;
         padding: 0 1;
-        background: #0b4f6c;
         color: #f8fafc;
         content-align: left middle;
+    }
+
+    #status {
+        background: #0b4f6c;
         text-style: bold;
     }
 
     #stats {
-        height: 2;
-        padding: 0 1;
         background: #1f2937;
         color: #d1fae5;
-        content-align: left middle;
     }
 
     #workspace {
@@ -499,6 +546,13 @@ class PocketCodeTextualApp(App[None]):
         background: #020617;
     }
 
+    #profile-policy-summary {
+        height: 7;
+        border: round #334155;
+        background: #020617;
+        color: #e2e8f0;
+    }
+
     #profile-prompts,
     #context-preview,
     #run-preview,
@@ -529,7 +583,11 @@ class PocketCodeTextualApp(App[None]):
         self._engine = engine
         self._cli_context = cli_context
         self._busy = False
-        self._show_stats = True
+        self._active_run: RunHandle | None = None
+        self._pending_input_request: dict[str, Any] | None = None
+        self._live_run_status = "idle"
+        self._live_run_events: list[str] = []
+        self._show_header_details = True
         self._show_left_panel = True
         self._show_right_panel = True
         self._current_view = "chat"
@@ -545,26 +603,35 @@ class PocketCodeTextualApp(App[None]):
         self._text_state_cache: dict[str, str] = {}
         self._option_list_state_cache: dict[str, tuple[str, ...]] = {}
         self._selection_list_state_cache: dict[str, tuple[tuple[str, str, bool], ...]] = {}
+        self._draft_profile_name: str | None = None
+        self._draft_profile_tool_overrides: dict[str, str] = {}
+        self._selected_profile_policy_tool: str | None = None
         self._ui_state: TextualUIState | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        yield Static(id="status")
-        yield Static(id="stats")
+        with Vertical(id="topbar"):
+            with Horizontal(id="topbar-main"):
+                yield Static("Pocketcode Interactive Workspace", id="header-title")
+                yield Button("Hide Header Details", id="toggle-header-button")
+            with Vertical(id="header-details"):
+                yield Static(id="status")
+                yield Static(id="stats")
         with Horizontal(id="workspace"):
             with Vertical(id="left-panel", classes="sidebar"):
                 yield Static("Workspace Views", classes="panel-title")
                 yield Button("Chat", id="view-chat-button", variant="primary")
                 yield Button("Control", id="view-control-button")
+                yield Button("Profiles", id="view-profiles-button")
                 yield Button("Context", id="view-context-button")
                 yield Button("Run", id="view-run-button")
                 yield Static("Shortcuts", classes="section-title")
                 yield Static(
-                    "Ctrl+P next profile\n"
-                    "Ctrl+B toggle nav\n"
-                    "Ctrl+I toggle inspector\n"
+                    "F1..F5 switch views\n"
+                    "F6/F7/F8 cycle agent/profile/LLM\n"
+                    "F9/F10 toggle panels\n"
+                    "F11 toggle header details\n"
                     "Ctrl+W cycle mode\n"
-                    "Alt+1..4 switch views\n"
+                    "Alt+1..5 switch views\n"
                     "Ctrl+R reload runtime",
                     id="shortcut-list",
                     classes="card",
@@ -611,9 +678,10 @@ class PocketCodeTextualApp(App[None]):
                         yield Switch(value=False, id="auto-confirm-switch")
                         with Horizontal(classes="button-row"):
                             yield Button("Reload Runtime", id="reload-button", variant="primary")
+                            yield Button("Open Profiles", id="goto-profiles-button")
                             yield Button("Open Run Inspector", id="goto-run-button")
-
-                        yield Static("Editable Active Profile", classes="section-title")
+                    with VerticalScroll(id="view-profiles", classes="view view-scroll"):
+                        yield Static("Active profile settings save back to workspace YAML.", classes="hint")
                         yield Static("", id="profile-editor-hint", classes="hint")
                         yield Static("Clone Active Profile To Workspace", classes="field-label")
                         yield Input(id="clone-profile-name", placeholder="my-agent-safe")
@@ -635,6 +703,21 @@ class PocketCodeTextualApp(App[None]):
                         yield Switch(value=True, id="profile-all-tools-switch")
                         yield Static("Allowed Tools", classes="field-label")
                         yield SelectionList(id="profile-tool-list")
+                        yield Static("Tool Policy Target", classes="field-label")
+                        yield Select([("(no tools)", NO_TOOL)], id="profile-policy-tool-select", allow_blank=False)
+                        yield Static("Selected Tool Policy Override", classes="field-label")
+                        yield Select(
+                            [
+                                ("inherit", INHERIT_POLICY),
+                                ("allow", "allow"),
+                                ("confirm", "confirm"),
+                                ("deny", "deny"),
+                            ],
+                            id="profile-tool-policy-select",
+                            allow_blank=False,
+                        )
+                        yield Static("Tool Policy Overrides", classes="field-label")
+                        yield TextArea("", id="profile-policy-summary", read_only=True)
                         yield Static("Extra Prompt Paths (one path per line)", classes="field-label")
                         yield TextArea("", id="profile-prompts")
                         yield Button("Save Profile", id="save-profile-button", variant="success")
@@ -669,8 +752,8 @@ class PocketCodeTextualApp(App[None]):
                 yield Input(
                     id="main-input",
                     placeholder=(
-                        "Type a request or /command. Ctrl+P=profile Alt+1..4=view "
-                        "Ctrl+B/Ctrl+I=toggle panels"
+                        "Type a request or /command. F1..F5=view F6/F7/F8=agent/profile/LLM "
+                        "F9/F10=panels F11=header"
                     ),
                 )
             with VerticalScroll(id="right-panel", classes="sidebar"):
@@ -689,8 +772,9 @@ class PocketCodeTextualApp(App[None]):
     def on_mount(self) -> None:
         self._refresh_suggestions()
         self._refresh_ui()
+        self.set_interval(0.1, self._drain_run_events)
         self._write_info(
-            "Pocketcode control workspace ready. Alt+1..4 switches views, Ctrl+P cycles profiles, and Ctrl+W cycles workspace modes."
+            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 cycle agent-profile-LLM, and F11 toggles header details."
         )
         self.query_one("#main-input", Input).focus()
 
@@ -698,6 +782,37 @@ class PocketCodeTextualApp(App[None]):
         words = list_command_suggestions(self._engine)
         self._suggestions = words
         self.query_one("#main-input", Input).suggester = SuggestFromList(words, case_sensitive=False)
+
+    def _ensure_profile_policy_draft(self, active_profile: Any) -> dict[str, str]:
+        profile_name = active_profile.name if active_profile else None
+        if profile_name != self._draft_profile_name:
+            overrides: dict[str, str] = {}
+            if active_profile and isinstance(active_profile.tool_confirmation, dict):
+                raw_overrides = active_profile.tool_confirmation.get("overrides", {})
+                if isinstance(raw_overrides, dict):
+                    overrides = {
+                        str(tool_name): str(policy)
+                        for tool_name, policy in raw_overrides.items()
+                        if policy is not None
+                    }
+            self._draft_profile_name = profile_name
+            self._draft_profile_tool_overrides = overrides
+            self._selected_profile_policy_tool = None
+        return dict(self._draft_profile_tool_overrides)
+
+    def _resolve_profile_policy_tool(self, tool_names: tuple[str, ...]) -> str:
+        if self._selected_profile_policy_tool in tool_names:
+            return str(self._selected_profile_policy_tool)
+        self._selected_profile_policy_tool = tool_names[0] if tool_names else None
+        return self._selected_profile_policy_tool or NO_TOOL
+
+    def _render_profile_policy_summary(self, overrides: dict[str, str]) -> str:
+        if not overrides:
+            return "No per-tool confirmation overrides. Tools inherit the profile default."
+        lines = ["Per-tool confirmation overrides:"]
+        for tool_name in sorted(overrides):
+            lines.append(f"- {tool_name}: {overrides[tool_name]}")
+        return "\n".join(lines)
 
     def _build_ui_state(self) -> TextualUIState:
         status = self._engine.status()
@@ -727,6 +842,13 @@ class PocketCodeTextualApp(App[None]):
         profile_tool_options = tuple(
             (tool_name, tool_name, tool_name in allowed_tools) for tool_name in target_agent_tools
         )
+        profile_tool_overrides = self._ensure_profile_policy_draft(active_profile)
+        selected_policy_tool = self._resolve_profile_policy_tool(target_agent_tools)
+        selected_policy_value = (
+            profile_tool_overrides.get(selected_policy_tool, INHERIT_POLICY)
+            if selected_policy_tool != NO_TOOL
+            else INHERIT_POLICY
+        )
         selected_profile = (
             active_profile.name
             if active_profile is not None and active_profile.agent == current_agent
@@ -753,7 +875,8 @@ class PocketCodeTextualApp(App[None]):
             current_view=self._current_view,
             left_panel_visible=self._show_left_panel,
             right_panel_visible=self._show_right_panel,
-            stats_visible=self._show_stats,
+            header_details_visible=self._show_header_details,
+            header_toggle_label="Hide Header Details" if self._show_header_details else "Show Header Details",
             status_text=_build_status_text(status, self._current_view),
             stats_text=_build_stats_text(status),
             view_title_text=_build_view_title_text(self._current_view),
@@ -807,6 +930,20 @@ class PocketCodeTextualApp(App[None]):
             profile_allow_all_tools_disabled=not editable,
             profile_tool_options=profile_tool_options,
             profile_tool_list_disabled=not editable or profile_allow_all_tools,
+            profile_policy_tool_select=SelectViewState(
+                options=tuple((tool_name, tool_name) for tool_name in target_agent_tools) or (("(no tools)", NO_TOOL),),
+                value=selected_policy_tool,
+            ),
+            profile_policy_value_select=SelectViewState(
+                options=(
+                    ("inherit", INHERIT_POLICY),
+                    ("allow", "allow"),
+                    ("confirm", "confirm"),
+                    ("deny", "deny"),
+                ),
+                value=selected_policy_value,
+            ),
+            profile_policy_summary_text=self._render_profile_policy_summary(profile_tool_overrides),
             profile_prompts_text="\n".join(active_profile.extra_prompts) if active_profile else "",
             profile_prompts_disabled=not editable,
             save_profile_disabled=not editable,
@@ -835,6 +972,7 @@ class PocketCodeTextualApp(App[None]):
         for button_id, target_view in {
             "#view-chat-button": "chat",
             "#view-control-button": "control",
+            "#view-profiles-button": "profiles",
             "#view-context-button": "context",
             "#view-run-button": "run",
         }.items():
@@ -861,11 +999,10 @@ class PocketCodeTextualApp(App[None]):
         ):
             self._apply_view_state(state.current_view, state.view_title_text)
 
+        self.query_one("#header-details", Vertical).display = state.header_details_visible
+        self.query_one("#toggle-header-button", Button).label = state.header_toggle_label
         self._set_static_text(self.query_one("#status", Static), state.status_text)
-        stats_widget = self.query_one("#stats", Static)
-        stats_widget.display = state.stats_visible
-        if state.stats_visible:
-            self._set_static_text(stats_widget, state.stats_text)
+        self._set_static_text(self.query_one("#stats", Static), state.stats_text)
 
         self._syncing_controls = True
         try:
@@ -910,6 +1047,16 @@ class PocketCodeTextualApp(App[None]):
                 state.profile_confirm_select.options,
                 state.profile_confirm_select.value,
             )
+            self._set_select_options(
+                self.query_one("#profile-policy-tool-select", Select),
+                state.profile_policy_tool_select.options,
+                state.profile_policy_tool_select.value,
+            )
+            self._set_select_options(
+                self.query_one("#profile-tool-policy-select", Select),
+                state.profile_policy_value_select.options,
+                state.profile_policy_value_select.value,
+            )
             profile_all_tools = self.query_one("#profile-all-tools-switch", Switch)
             profile_all_tools.value = state.profile_allow_all_tools
         finally:
@@ -926,6 +1073,14 @@ class PocketCodeTextualApp(App[None]):
             state.profile_tool_options,
         )
         self.query_one("#profile-tool-list", SelectionList).disabled = state.profile_tool_list_disabled
+        self.query_one("#profile-policy-tool-select", Select).disabled = state.save_profile_disabled
+        self.query_one("#profile-tool-policy-select", Select).disabled = (
+            state.save_profile_disabled or state.profile_policy_tool_select.value == NO_TOOL
+        )
+        self._set_text_area_text(
+            self.query_one("#profile-policy-summary", TextArea),
+            state.profile_policy_summary_text,
+        )
         self._set_text_area_text(self.query_one("#profile-prompts", TextArea), state.profile_prompts_text)
         self.query_one("#profile-prompts", TextArea).disabled = state.profile_prompts_disabled
         self.query_one("#save-profile-button", Button).disabled = state.save_profile_disabled
@@ -1019,6 +1174,7 @@ class PocketCodeTextualApp(App[None]):
             run_summary = {}
 
         lines = [
+            f"live_run_status: {self._live_run_status}",
             f"runtime_workflow: {status.get('runtime_workflow') or 'internal-flow'}",
             f"active_agent: {status.get('agent') or 'auto'}",
             f"active_profile: {status.get('active_agent_profile') or 'none'}",
@@ -1031,6 +1187,9 @@ class PocketCodeTextualApp(App[None]):
             f"context_stats: {run_summary.get('context_stats', {})}",
             f"session_confirmation: {status.get('session_tool_confirmation_overrides', {})}",
         ]
+        if self._live_run_events:
+            lines.append("live_events:")
+            lines.extend(f"- {item}" for item in self._live_run_events[-8:])
         return "\n".join(lines)
 
     def _render_context_summary(self, status: Dict[str, Any]) -> str:
@@ -1155,6 +1314,123 @@ class PocketCodeTextualApp(App[None]):
     def _sync_ui_from_engine(self) -> None:
         self._refresh_ui()
 
+    def _set_main_input_placeholder(self, prompt: str | None = None) -> None:
+        input_widget = self.query_one("#main-input", Input)
+        input_widget.placeholder = prompt or (
+            "Type a request or /command. F1..F5=view F6/F7/F8=agent/profile/LLM "
+            "F9/F10=panels F11=header"
+        )
+
+    def _remember_run_event(self, text: str) -> None:
+        self._live_run_events.append(text)
+        if len(self._live_run_events) > 25:
+            self._live_run_events = self._live_run_events[-25:]
+
+    def _drain_run_events(self) -> None:
+        if self._active_run is None:
+            return
+        events = self._active_run.drain_events()
+        if not events:
+            return
+        should_refresh = False
+        for event in events:
+            should_refresh = self._consume_run_event(event) or should_refresh
+        if should_refresh:
+            self._refresh_ui()
+
+    def _consume_run_event(self, event: Dict[str, Any]) -> bool:
+        event_type = str(event.get("type") or "")
+        message = self._format_runtime_event(event)
+        if message:
+            self._remember_run_event(message)
+            self._write_info(message)
+
+        if event_type == "user_input_requested":
+            self._pending_input_request = event
+            self._live_run_status = "waiting_for_input"
+            self._set_main_input_placeholder(str(event.get("prompt") or "Provide input"))
+            return True
+        if event_type == "user_input_received":
+            self._live_run_status = "running"
+            self._set_main_input_placeholder()
+            return True
+        if event_type == "run_completed":
+            self._busy = False
+            self._active_run = None
+            self._pending_input_request = None
+            self._live_run_status = "idle"
+            self._set_main_input_placeholder()
+            self._write_assistant(str(event.get("output") or ""))
+            self._sync_ui_from_engine()
+            return False
+        if event_type == "run_failed":
+            self._busy = False
+            self._active_run = None
+            self._pending_input_request = None
+            self._live_run_status = "failed"
+            self._set_main_input_placeholder()
+            self._write_error(str(event.get("error") or "Request failed."))
+            self._sync_ui_from_engine()
+            return False
+        if event_type in {"run_started", "agent_turn_started", "llm_call_started", "tool_started", "handoff"}:
+            self._live_run_status = "running"
+        return True
+
+    def _format_runtime_event(self, event: Dict[str, Any]) -> str:
+        event_type = str(event.get("type") or "")
+        if event_type == "run_started":
+            return f"Run started for agent {event.get('agent') or 'auto'}."
+        if event_type == "agent_turn_started":
+            return f"Agent turn started: {event.get('agent')}."
+        if event_type == "agent_turn_completed":
+            return f"Agent turn completed: {event.get('agent')} -> {event.get('transition')}."
+        if event_type == "llm_call_started":
+            return f"LLM call started for {event.get('agent')} using profile {event.get('profile')}."
+        if event_type == "llm_call_completed":
+            model = event.get("model") or "-"
+            usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+            return f"LLM call completed on {model} ({usage.get('total_tokens', 0)} tokens)."
+        if event_type == "tool_confirmation_requested":
+            return f"Tool confirmation requested: {event.get('tool')}."
+        if event_type == "tool_started":
+            return f"Tool started: {event.get('tool')}."
+        if event_type == "tool_finished":
+            state = "succeeded" if event.get("success") else "failed"
+            return f"Tool {event.get('tool')} {state}."
+        if event_type == "handoff":
+            return f"Handoff: {event.get('source_agent') or '-'} -> {event.get('target_agent')}."
+        if event_type == "ask_user":
+            return f"Agent requested user answer: {event.get('question')}."
+        if event_type == "final_answer":
+            return "Final answer prepared."
+        if event_type == "user_input_requested":
+            return f"Input required: {event.get('prompt')}."
+        if event_type == "runtime_error":
+            return f"Runtime error: {event.get('message')}."
+        if event_type == "run_completed":
+            return "Run completed."
+        return ""
+
+    def _sync_profile_policy_controls(self) -> None:
+        selected_tool = str(self.query_one("#profile-policy-tool-select", Select).value)
+        selected_policy = (
+            self._draft_profile_tool_overrides.get(selected_tool, INHERIT_POLICY)
+            if selected_tool != NO_TOOL
+            else INHERIT_POLICY
+        )
+        self._syncing_controls = True
+        try:
+            self.query_one("#profile-tool-policy-select", Select).value = selected_policy
+        finally:
+            self._syncing_controls = False
+        self.query_one("#profile-tool-policy-select", Select).disabled = (
+            self.query_one("#save-profile-button", Button).disabled or selected_tool == NO_TOOL
+        )
+        self._set_text_area_text(
+            self.query_one("#profile-policy-summary", TextArea),
+            self._render_profile_policy_summary(self._draft_profile_tool_overrides),
+        )
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         widget_id = event.input.id or ""
         if widget_id == "main-input":
@@ -1168,18 +1444,27 @@ class PocketCodeTextualApp(App[None]):
 
     async def _handle_main_input(self, raw_text: str) -> None:
         text = raw_text.strip()
-        if not text or self._busy:
+        if not text:
             return
 
         input_widget = self.query_one("#main-input", Input)
         input_widget.value = ""
-        input_widget.disabled = True
-        self._busy = True
-
-        self._write_user(text)
+        if self._pending_input_request is not None and self._active_run is not None:
+            self._write_user(text)
+            prompt_id = str(self._pending_input_request.get("prompt_id") or "")
+            if not prompt_id or not self._active_run.resolve_user_input(prompt_id, text):
+                self._write_error("The pending prompt is no longer active.")
+            self._pending_input_request = None
+            self._set_main_input_placeholder()
+            return
+        if self._busy:
+            self._write_info("A run is already in progress.")
+            return
 
         try:
             if text.startswith("/"):
+                self._busy = True
+                self._write_user(text)
                 if text.lower() == "/copy":
                     self.action_copy_last_response()
                     return
@@ -1192,21 +1477,26 @@ class PocketCodeTextualApp(App[None]):
                 if should_exit:
                     self.exit()
                     return
+                self._sync_ui_from_engine()
             else:
-                response = await asyncio.to_thread(
-                    self._engine.process_request,
+                self._busy = True
+                self._write_user(text)
+                self._active_run = self._engine.start_request(
                     text,
                     self._cli_context,
+                    bridge_user_input=True,
                 )
-                self._write_assistant(str(response))
+                self._live_run_status = "running"
+                self._refresh_ui()
         except Exception as exc:
             logger.error("Failed to process Textual input: %s", exc, exc_info=True)
             self._write_error(str(exc))
         finally:
-            self._busy = False
-            input_widget.disabled = False
+            if self._active_run is None:
+                self._busy = False
             input_widget.focus()
-            self._sync_ui_from_engine()
+            if self._active_run is None:
+                self._sync_ui_from_engine()
 
     def _run_command_capture(self, command_input: str) -> tuple[str, bool]:
         output = io.StringIO()
@@ -1227,12 +1517,18 @@ class PocketCodeTextualApp(App[None]):
             self.action_view_chat()
         elif button_id == "view-control-button":
             self.action_view_control()
+        elif button_id == "view-profiles-button":
+            self.action_view_profiles()
         elif button_id == "view-context-button":
             self.action_view_context()
         elif button_id == "view-run-button":
             self.action_view_run()
+        elif button_id == "toggle-header-button":
+            self.action_toggle_header()
         elif button_id == "reload-button":
             self.action_reload_runtime()
+        elif button_id == "goto-profiles-button":
+            self.action_view_profiles()
         elif button_id == "goto-run-button":
             self.action_view_run()
         elif button_id == "clone-profile-button":
@@ -1287,6 +1583,19 @@ class PocketCodeTextualApp(App[None]):
                     f"Session confirmation default: "
                     f"{self._engine.session_confirmation_overrides.get('default_policy') or 'inherit'}"
                 )
+            elif widget_id == "profile-policy-tool-select":
+                self._selected_profile_policy_tool = None if value == NO_TOOL else value
+                self._sync_profile_policy_controls()
+                return
+            elif widget_id == "profile-tool-policy-select":
+                selected_tool = str(self.query_one("#profile-policy-tool-select", Select).value)
+                if selected_tool != NO_TOOL:
+                    if value == INHERIT_POLICY:
+                        self._draft_profile_tool_overrides.pop(selected_tool, None)
+                    else:
+                        self._draft_profile_tool_overrides[selected_tool] = value
+                    self._sync_profile_policy_controls()
+                return
             self._sync_ui_from_engine()
         except Exception as exc:
             self._write_error(str(exc))
@@ -1309,6 +1618,16 @@ class PocketCodeTextualApp(App[None]):
             )
             selection_list = self.query_one("#profile-tool-list", SelectionList)
             selection_list.disabled = not editable or bool(event.value)
+
+    def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
+        if event.selection_list.id != "profile-tool-list":
+            return
+        if self._syncing_controls:
+            return
+        option = event.selection_list.get_option_at_index(event.index)
+        checked = bool(option.value in event.selection_list.selected)
+        state = "allowed" if checked else "blocked"
+        self._write_info(f"Tool {option.value} marked {state} for the active profile draft.")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id != "profile-list":
@@ -1338,6 +1657,7 @@ class PocketCodeTextualApp(App[None]):
         try:
             self._engine.clone_agent_profile(active_profile.name, new_name)
             self._engine.set_active_agent_profile(new_name)
+            self._draft_profile_name = None
             self.query_one("#clone-profile-name", Input).value = ""
             self._write_info(f"Cloned active profile to workspace profile '{new_name}'.")
         except Exception as exc:
@@ -1369,7 +1689,9 @@ class PocketCodeTextualApp(App[None]):
                 tools=tools,
                 extra_prompts=prompt_lines,
                 tool_confirmation_default=None if confirm_value == INHERIT_POLICY else confirm_value,
+                tool_confirmation_overrides=dict(self._draft_profile_tool_overrides),
             )
+            self._draft_profile_name = None
             self._write_info(f"Saved workspace profile '{active_profile.name}'.")
         except Exception as exc:
             self._write_error(str(exc))
@@ -1459,6 +1781,10 @@ class PocketCodeTextualApp(App[None]):
         self._current_view = "control"
         self._refresh_ui()
 
+    def action_view_profiles(self) -> None:
+        self._current_view = "profiles"
+        self._refresh_ui()
+
     def action_view_context(self) -> None:
         self._current_view = "context"
         self._refresh_ui()
@@ -1477,6 +1803,12 @@ class PocketCodeTextualApp(App[None]):
         self._show_right_panel = not self._show_right_panel
         self._workspace_mode = "balanced"
         self._write_info(f"Inspector panel {'shown' if self._show_right_panel else 'hidden'}.")
+        self._refresh_ui()
+
+    def action_toggle_header(self) -> None:
+        self._show_header_details = not self._show_header_details
+        state = "shown" if self._show_header_details else "hidden"
+        self._write_info(f"Header details {state}.")
         self._refresh_ui()
 
     def action_next_workspace_mode(self) -> None:
@@ -1575,12 +1907,6 @@ class PocketCodeTextualApp(App[None]):
         self._trimmed_output_line_count = 0
         self._load_text_area_text(self.query_one("#output", TextArea), "")
         self._write_info("Cleared output.")
-
-    def action_toggle_stats(self) -> None:
-        self._show_stats = not self._show_stats
-        state = "shown" if self._show_stats else "hidden"
-        self._write_info(f"Top stats {state}.")
-        self._refresh_ui()
 
     def action_copy_output(self) -> None:
         if not self._output_lines:

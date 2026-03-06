@@ -9,6 +9,7 @@ from pocketcode.core.agent_profile_manager import AgentProfileManager
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.run_handle import RunHandle
 from pocketcode.core.tool_runtime import ToolRuntime
 
 logger = logging.getLogger(__name__)
@@ -191,6 +192,7 @@ class PocketCodeEngine:
         tools: Optional[List[str]],
         extra_prompts: List[str],
         tool_confirmation_default: Optional[str],
+        tool_confirmation_overrides: Optional[Dict[str, Optional[str]]] = None,
     ) -> Any:
         """Persist updates to a workspace-backed agent profile and refresh runtime state."""
         profile = self._agent_profile_manager.get(name)
@@ -204,15 +206,24 @@ class PocketCodeEngine:
             self._llm_router.resolve_profile_config(llm_profile)
 
         confirmation = dict(profile.tool_confirmation or {})
-        overrides = dict(confirmation.get("overrides", {}))
         if tool_confirmation_default is None:
             confirmation.pop("default", None)
         else:
             confirmation["default"] = self._normalize_confirmation_policy(tool_confirmation_default)
-        if overrides:
-            confirmation["overrides"] = overrides
+        if tool_confirmation_overrides is None:
+            raw_overrides = dict(confirmation.get("overrides", {}))
+        else:
+            raw_overrides = dict(tool_confirmation_overrides)
+
+        normalized_overrides = {
+            str(tool_name): normalized
+            for tool_name, policy in raw_overrides.items()
+            if (normalized := self._normalize_confirmation_policy(policy)) is not None
+        }
+        if normalized_overrides:
+            confirmation["overrides"] = normalized_overrides
         elif "overrides" in confirmation:
-            confirmation["overrides"] = {}
+            confirmation.pop("overrides", None)
 
         updated = dataclasses.replace(
             profile,
@@ -354,7 +365,48 @@ class PocketCodeEngine:
             tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
         return self._tool_runtime.describe_tools(tool_names)
 
+    def start_request(
+        self,
+        user_input: str,
+        cli_context: Dict[str, Any],
+        *,
+        bridge_user_input: bool = False,
+    ) -> RunHandle:
+        handle = RunHandle()
+        shared_store = self._build_shared_store(
+            user_input=user_input,
+            cli_context=cli_context,
+            event_handler=handle.emit,
+            user_input_handler=handle.request_user_input if bridge_user_input else None,
+        )
+
+        def runner() -> None:
+            try:
+                handle.emit(
+                    "run_started",
+                    request=user_input,
+                    agent=shared_store.get("active_agent") or "auto",
+                )
+                result = self._execute_request(shared_store=shared_store, cli_context=cli_context)
+                handle.complete(result=result, summary=dict(self.last_run_summary))
+            except Exception as exc:
+                logger.error("Request processing failed: %s", exc, exc_info=True)
+                handle.fail(exc)
+
+        handle.start(runner)
+        return handle
+
     def process_request(self, user_input: str, cli_context: Dict[str, Any]) -> str:
+        return self.start_request(user_input=user_input, cli_context=cli_context).wait()
+
+    def _build_shared_store(
+        self,
+        *,
+        user_input: str,
+        cli_context: Dict[str, Any],
+        event_handler: Any = None,
+        user_input_handler: Any = None,
+    ) -> Dict[str, Any]:
         initial_agent = self.current_agent or self._runtime_config.get("default_agent")
         if not initial_agent:
             agents = self.list_agents()
@@ -377,7 +429,13 @@ class PocketCodeEngine:
             # T013: inject active agent profile so AgentRuntime / ToolRuntime can read it.
             "active_agent_profile": self.active_agent_profile,
         }
+        if callable(event_handler):
+            shared_store["runtime_event_handler"] = event_handler
+        if callable(user_input_handler):
+            shared_store["user_input_handler"] = user_input_handler
+        return shared_store
 
+    def _execute_request(self, *, shared_store: Dict[str, Any], cli_context: Dict[str, Any]) -> str:
         self._agent_runtime.run(shared_store)
 
         if shared_store.get("active_agent"):
