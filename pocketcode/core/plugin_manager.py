@@ -12,7 +12,7 @@ import yaml
 from pocketcode.core.interfaces import Plugin, PluginContext
 from pocketcode.core.namespace_registry import NamespaceRegistry, RegistryError, RegistryHolder
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
-from pocketcode.core.runtime_models import AgentDefinition
+from pocketcode.core.runtime_models import AgentDefinition, AgentProfile
 
 logger = logging.getLogger(__name__)
 
@@ -505,6 +505,49 @@ class PluginManager:
                 "plugin_root": str(plugin_root),
             },
         )
+        # Read optional default_agent_profile block (FR-001 / T010).
+        raw_dap = definition.get("default_agent_profile")
+        if isinstance(raw_dap, dict):
+            qualified_name = f"{plugin_name}::{agent_name}"
+            dap_name = raw_dap.get("name") or qualified_name
+            dap_tools_raw = raw_dap.get("tools")
+            dap_tc_raw = raw_dap.get("tool_confirmation") or {}
+            if not isinstance(dap_tc_raw, dict):
+                dap_tc_raw = {}
+            dap_profile = AgentProfile(
+                name=str(dap_name),
+                agent=qualified_name,
+                description=str(raw_dap.get("description", "")),
+                llm_profile=str(raw_dap["llm_profile"]) if raw_dap.get("llm_profile") else None,
+                extra_prompts=[
+                    str(p)
+                    for p in raw_dap.get("extra_prompts", [])
+                    if isinstance(p, str)
+                ],
+                tools=(
+                    [str(t) for t in dap_tools_raw if isinstance(t, str)]
+                    if isinstance(dap_tools_raw, list)
+                    else None
+                ),
+                tool_confirmation={
+                    "default": str(dap_tc_raw["default"]) if dap_tc_raw.get("default") else None,
+                    "overrides": {
+                        str(k): str(v)
+                        for k, v in (dap_tc_raw.get("overrides") or {}).items()
+                        if isinstance(k, str) and isinstance(v, str)
+                    },
+                },
+                source="plugin",
+                source_path=None,
+            )
+            agent_def.default_agent_profile = dap_profile
+            logger.debug(
+                "Plugin '%s' agent '%s': loaded default_agent_profile '%s'.",
+                plugin_name,
+                agent_name,
+                dap_name,
+            )
+
         try:
             self.agents.register(plugin_name, agent_name, agent_def)
         except RegistryError as exc:

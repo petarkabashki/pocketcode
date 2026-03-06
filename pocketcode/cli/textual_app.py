@@ -120,6 +120,11 @@ class PocketCodeTextualApp(App[None]):
             "/status",
             "/context",
             "/confirm",
+            "/agent-profile",
+            "/agent-profile list",
+            "/agent-profile show",
+            "/agent-profile switch",
+            "/agent-profile clone",
             "/copy",
             "/copy-all",
             "/exit",
@@ -127,6 +132,7 @@ class PocketCodeTextualApp(App[None]):
             "/ls",
             "/wf",
             "/ag",
+            "/ap",
             "/lm",
             "/la",
             "/ln",
@@ -140,6 +146,7 @@ class PocketCodeTextualApp(App[None]):
                 commands
                 + self._engine.list_agents()
                 + self._engine.list_llm_profiles()
+                + self._engine.list_agent_profiles()
             )
         )
         self._suggestions = words
@@ -159,8 +166,10 @@ class PocketCodeTextualApp(App[None]):
 
         current_llm_profile = run_summary.get("current_llm_profile") or status.get("global_llm_override") or "none"
         current_llm_model = run_summary.get("current_llm_model") or "-"
+        active_profile = status.get("active_agent_profile") or "none"
         text = (
             f"Runtime flow: {runtime_flow} | Agent: {agent_display} | "
+            f"Profile: {active_profile} | "
             f"LLM: {current_llm_profile} ({current_llm_model})"
         )
         self.query_one("#status", Static).update(text)

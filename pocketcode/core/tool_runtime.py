@@ -74,6 +74,15 @@ class ToolRuntime:
         auto_confirm: bool = False,
         agent_name: str | None = None,
     ) -> Any:
+        # T019b: deny immediately if tool is not in the active profile's allowlist (FR-008 / FR-009).
+        _ap = shared_store.get("active_agent_profile")
+        if _ap is not None and _ap.tools is not None:
+            if tool_name not in _ap.tools:
+                return {
+                    "success": False,
+                    "error": f"Tool '{tool_name}' is not in the active agent profile's tool allowlist.",
+                }
+
         policy = self._resolve_confirmation_policy(
             tool_name=tool_name,
             shared_store=shared_store,
@@ -262,22 +271,42 @@ class ToolRuntime:
         if not isinstance(session_agent_policy, dict):
             session_agent_policy = {}
 
+        # T018/T019: gather profile tool_confirmation settings once.
+        _ap_tc = shared_store.get("active_agent_profile")
+        profile_tc: Dict[str, Any] = (_ap_tc.tool_confirmation if _ap_tc is not None else {}) or {}
+
         layers = [
+            # Tier 1 – session per-agent per-tool
             self._normalize_policy(
                 (session_agent_policy.get("tool_policies") or {}).get(tool_name)
                 if isinstance(session_agent_policy.get("tool_policies"), dict)
                 else None
             ),
+            # Tier 1.5 (T018) – profile per-tool override
+            self._normalize_policy(
+                (profile_tc.get("overrides") or {}).get(tool_name)
+                if isinstance(profile_tc.get("overrides"), dict)
+                else None
+            ),
+            # Tier 2 – config per-agent per-tool
             self._normalize_policy(
                 (agent_policy.get("tool_policies") or {}).get(tool_name)
                 if isinstance(agent_policy.get("tool_policies"), dict)
                 else None
             ),
+            # Tier 3 – session global per-tool
             self._normalize_policy(session_tools.get(tool_name)),
+            # Tier 4 – session per-agent default
             self._normalize_policy(session_agent_policy.get("default_policy")),
+            # Tier 4.5 (T019) – profile default
+            self._normalize_policy(profile_tc.get("default")),
+            # Tier 5 – config per-agent default
             self._normalize_policy(agent_policy.get("default_policy")),
+            # Tier 6 – config global per-tool
             self._normalize_policy(self._confirmation_config["tool_policies"].get(tool_name)),
+            # Tier 7 – session global default
             session_default,
+            # Tier 8 – config global default
             self._normalize_policy(self._confirmation_config.get("default_policy")),
         ]
         for policy in layers:

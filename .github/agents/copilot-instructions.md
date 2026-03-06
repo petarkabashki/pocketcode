@@ -10,6 +10,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-05
 - In-memory dicts (NamespaceRegistry snapshots); no persistent DB (003-unified-plugin-namespace)
 - Python 3.12 + pocketflow (custom Flow/Node framework), PyYAML, pytest (004-agents-to-plugins)
 - File-based — plugin directories with `plugin.yaml` manifests and `.py` agent modules (004-agents-to-plugins)
+- Python ≥3.10 + `pocketflow` (Flow/Node), `pyyaml`, `textual`, `prompt_toolkit` (001-agent-default-profiles)
+- Files — `.pocketcode/agent-profiles/*.yaml` (workspace-local, created on demand) (001-agent-default-profiles)
 
 ## Core Patterns
 
@@ -48,9 +50,9 @@ ruff check .
 Python 3.10+: Follow standard conventions, use `pocketflow` for complex agent logic.
 
 ## Recent Changes
+- 001-agent-default-profiles: Added Python ≥3.10 + `pocketflow` (Flow/Node), `pyyaml`, `textual`, `prompt_toolkit`
 - 004-agents-to-plugins: Added Python 3.12 + pocketflow (custom Flow/Node framework), PyYAML, pytest
 - 003-unified-plugin-namespace: Added Python 3.10+ + pocketflow, PyYAML, watchdog, textual, google-genai, openai, python-dotenv
-- 002-pocketflow-agents: Introduced programmatic PocketFlow agents and `get_plugin` factory registration.
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
