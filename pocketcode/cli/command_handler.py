@@ -7,6 +7,52 @@ from pocketcode.core.engine import PocketCodeEngine
 
 logger = logging.getLogger(__name__)
 
+BASE_COMMAND_SUGGESTIONS = [
+    "/help",
+    "/list",
+    "/set",
+    "/agents",
+    "/agent",
+    "/llms",
+    "/llm",
+    "/llm-agent",
+    "/llm-handoff",
+    "/tools",
+    "/reload",
+    "/status",
+    "/context",
+    "/confirm",
+    "/agent-profile",
+    "/agent-profile list",
+    "/agent-profile show",
+    "/agent-profile switch",
+    "/agent-profile clone",
+    "/copy",
+    "/copy-all",
+    "/exit",
+    "/quit",
+    "/ls",
+    "/ag",
+    "/ap",
+    "/lm",
+    "/la",
+    "/lh",
+    "/st",
+    "/r",
+    "/q",
+]
+
+
+def list_command_suggestions(engine: PocketCodeEngine) -> list[str]:
+    return sorted(
+        set(
+            BASE_COMMAND_SUGGESTIONS
+            + engine.list_agents()
+            + engine.list_llm_profiles()
+            + engine.list_agent_profiles()
+        )
+    )
+
 
 def handle_command(
     command_input: str,
@@ -587,12 +633,12 @@ def _handle_agent_profile_command(
 
     if subcommand == "show":
         if sub_args:
-            profile = engine._agent_profile_manager.get(sub_args[0])
+            profile = engine.get_agent_profile(sub_args[0])
             if profile is None:
                 print(f"Agent profile not found: {sub_args[0]}")
                 return None
         else:
-            profile = engine.active_agent_profile
+            profile = engine.get_agent_profile()
             if not profile:
                 print("No agent profile is currently active.")
                 return None
@@ -626,7 +672,7 @@ def _handle_agent_profile_command(
             return None
         src, new_name = sub_args[0], sub_args[1]
         try:
-            engine._agent_profile_manager.clone(src, new_name)
+            engine.clone_agent_profile(src, new_name)
             print(f"Cloned profile '{src}' \u2192 '{new_name}'.")
         except (KeyError, ValueError) as exc:
             print(f"Error: {exc}")

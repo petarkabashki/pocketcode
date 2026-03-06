@@ -137,6 +137,17 @@ class TestToolAllowlistGuard:
                 result = runtime.execute_tool("random_tool", {}, store)
         assert "allowlist" not in str(result.get("error", ""))
 
+    def test_mismatched_profile_agent_skips_allowlist_guard(self):
+        store: dict = {
+            "active_agent": "plug::other_agent",
+            "active_agent_profile": _make_profile(agent="plug::agent", tools=["my_tool"]),
+        }
+        runtime, _ = _make_tool_runtime(store)
+        with patch.object(runtime, "_resolve_confirmation_policy", return_value="allow"):
+            with patch.object(runtime, "_resolve_tool", return_value=lambda **kw: {"ok": True}):
+                result = runtime.execute_tool("blocked_tool", {}, store, agent_name="plug::other_agent")
+        assert "allowlist" not in str(result.get("error", ""))
+
 
 # ---------------------------------------------------------------------------
 # FR-009 Confirmation tiers 1.5 and 4.5

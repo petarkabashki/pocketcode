@@ -86,22 +86,25 @@ class NamespaceRegistry(Generic[T]):
             - ``"name"`` (2+ owners) → ``RegistryError``.
             - ``"name"`` (0 owners) → ``RegistryError``.
         """
+        return self._flat[self.qualify(ref, context_plugin=context_plugin)]
+
+    def qualify(self, ref: str, *, context_plugin: Optional[str] = None) -> str:
+        """Resolve *ref* to its qualified ``plugin.name`` form."""
         # Normalise :: delimiter to . so manifests using either form work.
         ref = ref.replace("::", ".")
 
         if "." in ref:
-            impl = self._flat.get(ref)
-            if impl is None:
+            if ref not in self._flat:
                 raise RegistryError(f"Resource not found: '{ref}'")
-            return impl
+            return ref
 
         # FR-004: intra-plugin local resolution first
         if context_plugin:
-            local = self._ns.get(context_plugin, {}).get(ref)
-            if local is not None:
-                return local
+            local_qname = f"{context_plugin}.{ref}"
+            if local_qname in self._flat:
+                return local_qname
 
-        owners = self._bare.get(ref, [])
+        owners = self.owners_for(ref)
         if not owners:
             raise RegistryError(f"Resource not found: '{ref}'")
         if len(owners) == 1:
@@ -112,12 +115,20 @@ class NamespaceRegistry(Generic[T]):
                 ref,
                 qname,
             )
-            return self._flat[qname]
+            return qname
         raise RegistryError(
             f"Ambiguous unqualified reference '{ref}': owned by "
             + ", ".join(f"'{q}'" for q in owners)
             + ". Use a qualified name."
         )
+
+    def has_local(self, plugin: str, name: str) -> bool:
+        """Return True when *plugin* owns *name*."""
+        return f"{plugin}.{name}" in self._flat
+
+    def owners_for(self, name: str) -> List[str]:
+        """Return qualified owners for an unqualified bare name."""
+        return list(self._bare.get(name, []))
 
     # ── Enumeration API ──────────────────────────────────────────────────────
 

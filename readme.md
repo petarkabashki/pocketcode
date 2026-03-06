@@ -6,26 +6,21 @@ Pocketcode is an extensible terminal AI coding assistant built around PocketFlow
 
 Pocketcode now uses a small plugin-first core:
 
-- Workflows can be graph-based Markdown (`dot`) or custom Python flow runtimes.
-- Agents are the primary composition unit; workflows are internal execution graphs.
-- Agents and workflows are unified as plugin `components` in `plugin.yaml`.
-- Flows can call other flows as nodes for arbitrarily nested composition.
-- Node/flow/agent prompts are external Markdown files with `{{ include:path.md }}` support.
-- Node and flow execution support Python `pre`, `steps`, and `post` handlers.
-- Runtime execution compiles each workflow node kind (`agent`, `tool`, `handoff`, etc.) into dedicated PocketFlow node executors for cleaner separation of hooks and core node behavior.
-- Agents now have first-class per-agent config for `llm_profile`, prompt, hooks (`pre|steps|post`), execution mode (`node|flow`), and handoff policies.
+- Plugins declare tools, prompts, and agents in `plugin.yaml`.
+- Agents are the primary runtime unit and are implemented as PocketFlow `Flow` factories.
+- Agent prompts live in external Markdown files with `{{ include:path.md }}` support.
+- Agents support Python `pre`, `steps`, and `post` handlers alongside LLM and deterministic execution modes.
+- Agent profiles can override LLM selection, tool allowlists, extra prompts, and confirmation policy.
 - Tool definitions and routing payloads are exchanged with LLMs as YAML.
 - CLI now uses a Textual TUI for interactive mode.
-- CLI switches agent and LLM profile at runtime.
-- Internal runtime flows support agent handoff and multi-LLM routing.
+- CLI switches agent, agent profile, and LLM profile at runtime.
+- The runtime supports agent handoff and per-agent/per-handoff LLM overrides.
 - Gemini provider is implemented with the `google.genai` package (`google-genai` dependency).
 
 ## Built-In Runtime
 
-- Built-in plugin: `pocketcode/plugins/core`
-- Built-in internal flows:
-  - `orchestrator` (multi-agent handoff graph)
-  - `single_agent` (agent runtime loop with recursive handoff support)
+- Built-in plugins live under `pocketcode/plugins/`
+- The default agent is `core::react`
 
 ## Configuration
 
@@ -87,27 +82,26 @@ Default behavior is confirmation-first (`confirm`) unless you explicitly overrid
 
 LLM routing supports layered overrides for multi-agent and nested flows:
 
-- node-level (`workflow.node` or `node`) in config and CLI
 - handoff-level (`source_agent->target_agent`) in config and CLI
 - agent-level in config and CLI
 - global CLI override and defaults
 
-Precedence is: CLI node > config node > CLI agent > config agent > CLI global > dynamic handoff/agent choice > node attribute > agent default > `llm.default_profile`.
+Precedence is: CLI agent > config agent > CLI global > dynamic handoff/agent choice > active agent profile > agent default > `llm.default_profile`.
 
 ## CLI Commands
 
-- `/list <agents|llms|components|tools>`
-- `/set <agent|llm|llm-agent|llm-node|llm-handoff> ...`
+- `/list <agents|llms|tools>`
+- `/set <agent|llm|llm-agent|llm-handoff> ...`
+- `/agent-profile <list|show|switch|clone> ...`
 - `/reload`, `/status`
 - `/context ...`
 - `/confirm ...`
 
 Compatibility aliases remain available:
 
-- `/agents`, `/llms`, `/components`, `/tools`
-- `/agent`, `/llm`, `/llm-agent`, `/llm-node`, `/llm-handoff`
-- Deprecated compatibility aliases: `/workflows`, `/workflow`, `/mode`, `/wf`
-- Short aliases: `/ls`, `/ag`, `/lm`, `/la`, `/ln`, `/lh`, `/st`, `/r`, `/q`
+- `/agents`, `/llms`, `/tools`
+- `/agent`, `/llm`, `/llm-agent`, `/llm-handoff`
+- Short aliases: `/ls`, `/ag`, `/ap`, `/lm`, `/la`, `/lh`, `/st`, `/r`, `/q`
 
 Textual keyboard shortcuts:
 
@@ -125,7 +119,7 @@ Output box behavior:
 - output text is selectable with mouse/keyboard
 - copy selected text with your terminal copy shortcut (for example `Ctrl+Shift+C`)
 
-Prompt suggestions include commands, agents, components, and LLM profiles.
+Prompt suggestions include commands, agents, agent profiles, and LLM profiles.
 
 Textual copy commands:
 
@@ -191,6 +185,7 @@ Plugins follow the unified plugin model (003-unified-plugin-namespace):
 - Tools are declared as `local_name: "tools/file.py:ClassName"`.
 - Agents are declared with `module:` + `entry_fn:` pointing to a zero-arg Python
   factory that returns a PocketFlow `Flow`.
+- Top-level `prompts:` entries are loaded into the plugin prompt registry.
 - All resources are addressable as `plugin_name.resource_name`.
 
 Quick example:

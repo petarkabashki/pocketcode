@@ -46,7 +46,7 @@ agents:
     entry_fn: "create_flow"
     description: "Agent that does X."
     tools: [my_tool]
-    prompts: ["prompts/system.md"]
+    prompt_files: ["prompts/system.md"]   # `prompts:` is also accepted as an alias
 
 prompts:
   system: "prompts/system.md"
@@ -59,7 +59,7 @@ prompts:
 | `description` | Optional | Human-readable summary. |
 | `tools` | Optional | `local_name: "file.py:ClassName"` mappings. |
 | `agents` | Optional | Agent blocks with `module` + `entry_fn`. |
-| `prompts` | Optional | `local_name: "prompts/file.md"` mappings. |
+| `prompts` | Optional | Top-level prompt registry entries: `local_name: "prompts/file.md"`. |
 
 ---
 
@@ -94,6 +94,7 @@ agents:
   my_agent:
     module: "agents/my_agent.py"
     entry_fn: "create_flow"
+    prompt_files: ["prompts/system.md"]
 ```
 
 ---

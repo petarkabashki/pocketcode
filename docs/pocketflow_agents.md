@@ -80,7 +80,7 @@ agents:
     entry_fn: "create_flow"
     description: "Does X using Y."
     tools: [my_tool]
-    prompts: ["prompts/system.md"]
+    prompt_files: ["prompts/system.md"]
 ```
 
 ---

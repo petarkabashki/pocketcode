@@ -6,6 +6,7 @@ import inspect
 import logging
 import re
 import sys
+import types
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -211,14 +212,14 @@ class AgentRuntime:
             # Use setdefault so test doubles can inject their own instances.
             shared_store.setdefault("_llm_router", self._llm_router)
             shared_store.setdefault("_tool_runtime", self._tool_runtime)
+            active_profile = self._get_active_profile_for_agent(agent_name, shared_store)
 
             # Pre-compute tool definitions for the active agent each turn.
             try:
                 _allowed = self._plugins.resolve_tools_for_agent(agent_name)
                 # T016: intersect with active profile tool allowlist (FR-008).
-                _pf_profile = shared_store.get("active_agent_profile")
-                if _pf_profile is not None and _pf_profile.tools is not None:
-                    _allowed = [t for t in _allowed if t in _pf_profile.tools]
+                if active_profile is not None and active_profile.tools is not None:
+                    _allowed = [t for t in _allowed if t in active_profile.tools]
                 shared_store["_agent_tool_definitions"] = self._tool_runtime.describe_tools(_allowed)
             except Exception:
                 shared_store.setdefault("_agent_tool_definitions", [])
@@ -233,7 +234,7 @@ class AgentRuntime:
 
             # T017: inject system prompt with extra_prompts for pocketflow agents.
             _pf_base_prompt = self._build_agent_system_prompt(agent_name=agent_name)
-            _pf_extra = self._resolve_extra_prompts_content(shared_store.get("active_agent_profile"))
+            _pf_extra = self._resolve_extra_prompts_content(active_profile)
             shared_store["_agent_system_prompt"] = (
                 _pf_base_prompt + "\n\n" + _pf_extra if _pf_extra else _pf_base_prompt
             )
@@ -354,10 +355,10 @@ class AgentRuntime:
         shared_store: Dict[str, Any],
     ) -> str:
         allowed_tools = self._plugins.resolve_tools_for_agent(agent_name)
+        active_profile = self._get_active_profile_for_agent(agent_name, shared_store)
         # T016: intersect with active profile tool allowlist (FR-008).
-        _llm_prof = shared_store.get("active_agent_profile")
-        if _llm_prof is not None and _llm_prof.tools is not None:
-            allowed_tools = [t for t in allowed_tools if t in _llm_prof.tools]
+        if active_profile is not None and active_profile.tools is not None:
+            allowed_tools = [t for t in allowed_tools if t in active_profile.tools]
         tool_definitions = self._tool_runtime.describe_tools(allowed_tools)
 
         llm_profile = self._resolve_llm_profile(agent_name, agent_definition, shared_store)
@@ -407,7 +408,7 @@ class AgentRuntime:
 
         system_prompt = self._build_agent_system_prompt(agent_name=agent_name)
         # T017: append extra_prompts from active agent profile.
-        _ep_content = self._resolve_extra_prompts_content(shared_store.get("active_agent_profile"))
+        _ep_content = self._resolve_extra_prompts_content(active_profile)
         if _ep_content:
             system_prompt = system_prompt + "\n\n" + _ep_content
         prompt = "\n\n".join(
@@ -680,8 +681,8 @@ class AgentRuntime:
             profile = dynamic_overrides.get(agent_name)
         # Tier 4.5: active agent profile llm_profile (FR-012 / T015).
         if not profile:
-            _active_prof = shared_store.get("active_agent_profile")
-            if _active_prof and _active_prof.agent == agent_name and _active_prof.llm_profile:
+            _active_prof = self._get_active_profile_for_agent(agent_name, shared_store)
+            if _active_prof and _active_prof.llm_profile:
                 profile = _active_prof.llm_profile
         if not profile:
             profile = agent_definition.llm_profile
@@ -862,16 +863,15 @@ class AgentRuntime:
                     f"Python handler file not found for '{handler_reference}': {candidate_file}"
                 )
 
-            module_name = f"pocketcode_runtime_agent_{abs(hash(str(candidate_file)))}"
-            if module_name in sys.modules:
-                module = sys.modules[module_name]
-            else:
-                spec = importlib.util.spec_from_file_location(module_name, candidate_file)
-                if not spec or not spec.loader:
-                    raise ImportError(f"Unable to create module spec for '{candidate_file}'")
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
+            token = f"{candidate_file.resolve()}:{hash(candidate_file.read_bytes())}"
+            module_name = f"pocketcode_runtime_agent_{abs(hash(token))}"
+            sys.modules.pop(module_name, None)
+            module = types.ModuleType(module_name)
+            module.__file__ = str(candidate_file)
+            sys.modules[module_name] = module
+            source = candidate_file.read_text(encoding="utf-8")
+            code = compile(source, str(candidate_file), "exec")
+            exec(code, module.__dict__)
 
             handler = getattr(module, function_name)
         else:
@@ -974,11 +974,16 @@ class AgentRuntime:
         if profile is None or not profile.extra_prompts:
             return ""
         workspace_pocketcode = self._plugins.workspace_root / ".pocketcode"
+        plugin_root = self._resolve_profile_plugin_root(profile)
         parts: List[str] = []
         for path_str in profile.extra_prompts:
             resolved = None
             if profile.source_path is not None:
                 candidate = profile.source_path.parent / path_str
+                if candidate.is_file():
+                    resolved = candidate
+            if resolved is None and plugin_root is not None:
+                candidate = plugin_root / path_str
                 if candidate.is_file():
                     resolved = candidate
             if resolved is None:
@@ -1001,3 +1006,21 @@ class AgentRuntime:
                     exc,
                 )
         return "\n\n".join(parts)
+
+    def _get_active_profile_for_agent(self, agent_name: str, shared_store: Dict[str, Any]) -> Any:
+        profile = shared_store.get("active_agent_profile")
+        if profile is None:
+            return None
+        return profile if getattr(profile, "agent", None) == agent_name else None
+
+    def _resolve_profile_plugin_root(self, profile: Any) -> Path | None:
+        agent_name = getattr(profile, "agent", None)
+        if not isinstance(agent_name, str):
+            return None
+        agent_definition = self._plugins.agents.get(agent_name)
+        if agent_definition is None:
+            return None
+        plugin_root = (agent_definition.metadata or {}).get("plugin_root")
+        if not plugin_root:
+            return None
+        return Path(str(plugin_root)).resolve()

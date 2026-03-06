@@ -156,11 +156,26 @@ class PocketCodeEngine:
                 f"Unknown agent profile '{name}'. "
                 f"Available: {available}"
             )
+        if profile.agent not in self._plugins.agents:
+            raise ValueError(
+                f"Agent profile '{name}' targets unknown agent '{profile.agent}'."
+            )
+        self.current_agent = profile.agent
         self.active_agent_profile = profile
 
     def list_agent_profiles(self) -> List[str]:
         """Return all known agent profile names, sorted."""
         return [p.name for p in self._agent_profile_manager.list()]
+
+    def get_agent_profile(self, name: Optional[str] = None) -> Any:
+        """Return a named agent profile, or the active one when *name* is None."""
+        if name is None:
+            return self.active_agent_profile
+        return self._agent_profile_manager.get(name)
+
+    def clone_agent_profile(self, src_name: str, new_name: str) -> Any:
+        """Clone an agent profile and return the new workspace-backed profile."""
+        return self._agent_profile_manager.clone(src_name, new_name)
 
     def _activate_default_profile_for(self, agent_name: str) -> None:
         """Set active_agent_profile to the agent's default profile."""
@@ -223,6 +238,9 @@ class PocketCodeEngine:
         if agent_name not in self._plugins.agents:
             raise KeyError(f"Unknown agent '{agent_name}'.")
         tool_names = self._plugins.resolve_tools_for_agent(agent_name)
+        active_profile = self.active_agent_profile
+        if active_profile is not None and active_profile.agent == agent_name and active_profile.tools is not None:
+            tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
         return self._tool_runtime.describe_tools(tool_names)
 
     def process_request(self, user_input: str, cli_context: Dict[str, Any]) -> str:

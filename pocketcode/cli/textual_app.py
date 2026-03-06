@@ -12,7 +12,7 @@ from textual.containers import Vertical
 from textual.suggester import SuggestFromList
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
-from pocketcode.cli.command_handler import handle_command
+from pocketcode.cli.command_handler import handle_command, list_command_suggestions
 from pocketcode.core.engine import PocketCodeEngine
 
 logger = logging.getLogger(__name__)
@@ -103,52 +103,7 @@ class PocketCodeTextualApp(App[None]):
         self.query_one("#input", Input).focus()
 
     def _refresh_suggestions(self) -> None:
-        commands = [
-            "/help",
-            "/list",
-            "/set",
-            "/agents",
-            "/agent",
-            "/components",
-            "/llms",
-            "/llm",
-            "/llm-agent",
-            "/llm-node",
-            "/llm-handoff",
-            "/tools",
-            "/reload",
-            "/status",
-            "/context",
-            "/confirm",
-            "/agent-profile",
-            "/agent-profile list",
-            "/agent-profile show",
-            "/agent-profile switch",
-            "/agent-profile clone",
-            "/copy",
-            "/copy-all",
-            "/exit",
-            "/quit",
-            "/ls",
-            "/wf",
-            "/ag",
-            "/ap",
-            "/lm",
-            "/la",
-            "/ln",
-            "/lh",
-            "/st",
-            "/r",
-            "/q",
-        ]
-        words = sorted(
-            set(
-                commands
-                + self._engine.list_agents()
-                + self._engine.list_llm_profiles()
-                + self._engine.list_agent_profiles()
-            )
-        )
+        words = list_command_suggestions(self._engine)
         self._suggestions = words
         self.query_one("#input", Input).suggester = SuggestFromList(words, case_sensitive=False)
 

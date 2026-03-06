@@ -21,7 +21,7 @@ PocketCoder is an extensible terminal AI coding assistant built around PocketFlo
 4. Execute your agent with:
 
    ```
-   python -m pocketcode.main --agent my_plugin.my_agent
+   pocketcode --agent my_plugin.my_agent
    ```
 
 ## Plugin Authoring
@@ -31,6 +31,7 @@ Plugins follow the unified plugin model introduced in 003-unified-plugin-namespa
 - One directory, one manifest (`plugin.yaml`, `schema_version: 1`).
 - Tools declared as `local_name: "file.py:ClassName"`.
 - Agents declared with `module:` + `entry_fn:` pointing to a PocketFlow factory.
+- Prompts declared with `local_name: "prompts/file.md"` and loaded into the prompt registry.
 - All resources addressable as `plugin_name.resource_name`.
 
 See the full walkthrough: [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)

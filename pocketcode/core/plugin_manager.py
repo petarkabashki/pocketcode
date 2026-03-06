@@ -4,12 +4,14 @@ import importlib
 import importlib.util
 import logging
 import sys
+import types
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 import yaml
 
 from pocketcode.core.interfaces import Plugin, PluginContext
+from pocketcode.core.manifest_loader import load_manifest
 from pocketcode.core.namespace_registry import NamespaceRegistry, RegistryError, RegistryHolder
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
 from pocketcode.core.runtime_models import AgentDefinition, AgentProfile
@@ -29,12 +31,14 @@ class PluginManager:
         self.plugin_roots: Dict[str, Path] = {}
         self.plugins: Dict[str, Plugin] = {}
         self._holder: RegistryHolder = RegistryHolder()
+        self._dynamic_module_names: set[str] = set()
 
     @property
     def workspace_root(self) -> Path:
         return self._workspace_root
 
     def clear(self) -> None:
+        self._unload_dynamic_modules()
         self.tools = NamespaceRegistry()
         self.agents = NamespaceRegistry()
         self.prompts = NamespaceRegistry()
@@ -133,7 +137,8 @@ class PluginManager:
                 
             # Register LLM profiles from metadata if present
             if "llm_profiles" in plugin.metadata:
-                self._load_plugin_llm_profiles(plugin_name, plugin.metadata)
+                self._load_plugin_llm_profiles(plugin_name, plugin.metadata.get("llm_profiles", {}))
+            self._load_factory_plugin_prompts(plugin_name, plugin)
                 
             return True
             
@@ -142,18 +147,9 @@ class PluginManager:
             return False
 
     def _load_module_from_file(self, file_path: Path) -> Any:
-        module_name = f"pocketcode_dynamic_plugin_{abs(hash(str(file_path)))}"
-
-        if module_name in sys.modules:
-            return sys.modules[module_name]
-        
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        if not spec or not spec.loader:
-            raise ImportError(f"Unable to create import spec for {file_path}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return module
+        module_name = self._build_dynamic_module_name(file_path)
+        sys.modules.pop(module_name, None)
+        return self._execute_module_from_file(file_path, module_name)
 
     def resolve_tools_for_agent(self, agent_name: str) -> List[str]:
         agent = self.agents.get(agent_name)
@@ -177,10 +173,10 @@ class PluginManager:
             # Determine the qualified name for this tool reference
             if "." in tool_ref:
                 qname = tool_ref  # already qualified
-            elif context_plugin and tool_ref in self.tools._ns.get(context_plugin, {}):
+            elif context_plugin and self.tools.has_local(context_plugin, tool_ref):
                 qname = f"{context_plugin}.{tool_ref}"  # local plugin owns it
             else:
-                owners = self.tools._bare.get(tool_ref, [])
+                owners = self.tools.owners_for(tool_ref)
                 if not owners:
                     logger.warning("Agent '%s' references unknown tool '%s'.", agent_name, tool_ref)
                     continue
@@ -240,31 +236,32 @@ class PluginManager:
 
     def _load_plugin(self, plugin_root: Path) -> None:
         if (plugin_root / "agent.yaml").is_file():
+            load_manifest(plugin_root / "agent.yaml")
             self._load_agent_plugin(plugin_root)
             return
 
         manifest_path = plugin_root / "plugin.yaml"
-        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(manifest, dict):
-            raise ValueError(f"Plugin manifest must be a YAML object: {manifest_path}")
-
-        plugin_name = str(manifest.get("name") or plugin_root.name)
+        manifest = load_manifest(manifest_path)
+        plugin_name = manifest.name
         self.plugin_roots[plugin_name] = plugin_root
 
         logger.info("Loading manifest plugin '%s' from %s", plugin_name, plugin_root)
 
-        self._load_plugin_llm_profiles(plugin_name, manifest)
-        self._load_plugin_tools(plugin_name, plugin_root, manifest)
-        self._load_plugin_agents(plugin_name, plugin_root, manifest)
+        self._load_plugin_llm_profiles(plugin_name, manifest.llm_profiles)
+        self._load_plugin_prompts(plugin_name, plugin_root, manifest.prompts)
+        self._load_plugin_tools(plugin_name, plugin_root, manifest.tools)
+        self._load_plugin_agents(plugin_name, plugin_root, manifest.agents)
 
         # Explicitly ignore removed legacy sections.
-        for legacy_key in ("components", "workflows", "flows", "modes"):
-            if legacy_key in manifest:
-                logger.warning(
-                    "Plugin '%s' contains legacy '%s' section; it is ignored in agent-only runtime.",
-                    plugin_name,
-                    legacy_key,
-                )
+        raw_manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        if isinstance(raw_manifest, dict):
+            for legacy_key in ("components", "workflows", "flows", "modes"):
+                if legacy_key in raw_manifest:
+                    logger.warning(
+                        "Plugin '%s' contains legacy '%s' section; it is ignored in agent-only runtime.",
+                        plugin_name,
+                        legacy_key,
+                    )
 
     def _load_agent_plugin(self, plugin_root: Path) -> None:
         manifest_path = plugin_root / "agent.yaml"
@@ -332,8 +329,7 @@ class PluginManager:
         except RegistryError as exc:
             logger.error("Agent '%s' registry collision: %s — skipping.", agent_name, exc)
 
-    def _load_plugin_llm_profiles(self, plugin_name: str, manifest: Dict[str, Any]) -> None:
-        llm_profiles = manifest.get("llm_profiles", {})
+    def _load_plugin_llm_profiles(self, plugin_name: str, llm_profiles: Dict[str, Any]) -> None:
         if not isinstance(llm_profiles, dict):
             logger.warning("Plugin '%s' llm_profiles is not a mapping. Skipping.", plugin_name)
             return
@@ -348,8 +344,58 @@ class PluginManager:
                 continue
             self.llm_profiles[str(profile_name)] = dict(profile_config)
 
-    def _load_plugin_tools(self, plugin_name: str, plugin_root: Path, manifest: Dict[str, Any]) -> None:
-        tools_section = manifest.get("tools", {})
+    def _load_plugin_prompts(
+        self,
+        plugin_name: str,
+        plugin_root: Path,
+        prompts_section: Dict[str, Any],
+    ) -> None:
+        if not isinstance(prompts_section, dict):
+            logger.warning("Plugin '%s' prompts section is not a mapping. Skipping.", plugin_name)
+            return
+
+        for prompt_name, reference in prompts_section.items():
+            if not isinstance(reference, str):
+                logger.warning(
+                    "Plugin '%s' prompt '%s' must be a string path. Skipping.",
+                    plugin_name,
+                    prompt_name,
+                )
+                continue
+            prompt_path = (plugin_root / reference).resolve()
+            if not prompt_path.is_file():
+                logger.error(
+                    "Plugin '%s' prompt '%s' not found at '%s'.",
+                    plugin_name,
+                    prompt_name,
+                    prompt_path,
+                )
+                continue
+            try:
+                self.prompts.register(plugin_name, str(prompt_name), prompt_path.read_text(encoding="utf-8"))
+            except RegistryError as exc:
+                logger.error(
+                    "Plugin '%s' prompt '%s' registry collision: %s",
+                    plugin_name,
+                    prompt_name,
+                    exc,
+                )
+
+    def _load_factory_plugin_prompts(self, plugin_name: str, plugin: Plugin) -> None:
+        for prompt_name, content in (plugin.prompts or {}).items():
+            if not isinstance(prompt_name, str) or not isinstance(content, str):
+                continue
+            try:
+                self.prompts.register(plugin_name, prompt_name, content)
+            except RegistryError as exc:
+                logger.error(
+                    "Plugin '%s' prompt '%s' registry collision: %s",
+                    plugin_name,
+                    prompt_name,
+                    exc,
+                )
+
+    def _load_plugin_tools(self, plugin_name: str, plugin_root: Path, tools_section: Dict[str, Any]) -> None:
         if not isinstance(tools_section, dict):
             logger.warning("Plugin '%s' tools section is not a mapping. Skipping.", plugin_name)
             return
@@ -374,8 +420,7 @@ class PluginManager:
                     exc,
                 )
 
-    def _load_plugin_agents(self, plugin_name: str, plugin_root: Path, manifest: Dict[str, Any]) -> None:
-        agents_section = manifest.get("agents", {})
+    def _load_plugin_agents(self, plugin_name: str, plugin_root: Path, agents_section: Dict[str, Any]) -> None:
         if not isinstance(agents_section, dict):
             logger.warning("Plugin '%s' agents section is not a mapping. Skipping.", plugin_name)
             return
@@ -435,8 +480,12 @@ class PluginManager:
                 agent_name,
             )
 
+        prompt_definition = dict(definition)
+        if "prompt_files" not in prompt_definition and "prompts" in prompt_definition:
+            prompt_definition["prompt_files"] = prompt_definition.get("prompts")
+
         system_prompt, prompt_sources = resolve_prompt_bundle(
-            definition,
+            prompt_definition,
             base_dir=plugin_root,
             inline_keys=("system_prompt", "prompt"),
             file_keys=("system_prompt_file", "prompt_file"),
@@ -635,16 +684,31 @@ class PluginManager:
         return getattr(module, object_name)
 
     def _load_from_file(self, file_path: Path, object_name: str) -> Any:
-        module_name = f"pocketcode_dynamic_plugin_{abs(hash(str(file_path)))}"
-
-        if module_name in sys.modules:
-            module = sys.modules[module_name]
-        else:
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
-            if not spec or not spec.loader:
-                raise ImportError(f"Unable to create import spec for {file_path}")
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
+        module_name = self._build_dynamic_module_name(file_path)
+        sys.modules.pop(module_name, None)
+        module = self._execute_module_from_file(file_path, module_name)
 
         return getattr(module, object_name)
+
+    def _unload_dynamic_modules(self) -> None:
+        for module_name in self._dynamic_module_names:
+            sys.modules.pop(module_name, None)
+        self._dynamic_module_names.clear()
+
+    def _build_dynamic_module_name(self, file_path: Path) -> str:
+        content_hash = hash(file_path.read_bytes())
+        token = f"{file_path.resolve()}:{content_hash}"
+        return f"pocketcode_dynamic_plugin_{abs(hash(token))}"
+
+    def _execute_module_from_file(self, file_path: Path, module_name: str) -> types.ModuleType:
+        module = types.ModuleType(module_name)
+        module.__file__ = str(file_path)
+        if file_path.name == "__init__.py":
+            module.__package__ = module_name
+            module.__path__ = [str(file_path.parent)]  # type: ignore[attr-defined]
+        sys.modules[module_name] = module
+        self._dynamic_module_names.add(module_name)
+        source = file_path.read_text(encoding="utf-8")
+        code = compile(source, str(file_path), "exec")
+        exec(code, module.__dict__)
+        return module
