@@ -75,7 +75,7 @@ class ToolRuntime:
         agent_name: str | None = None,
     ) -> Any:
         # T019b: deny immediately if tool is not in the active profile's allowlist (FR-008 / FR-009).
-        _ap = shared_store.get("active_agent_profile")
+        _ap = self._get_active_profile(shared_store, agent_name)
         if _ap is not None and _ap.tools is not None:
             if tool_name not in _ap.tools:
                 return {
@@ -272,7 +272,7 @@ class ToolRuntime:
             session_agent_policy = {}
 
         # T018/T019: gather profile tool_confirmation settings once.
-        _ap_tc = shared_store.get("active_agent_profile")
+        _ap_tc = self._get_active_profile(shared_store, agent_name)
         profile_tc: Dict[str, Any] = (_ap_tc.tool_confirmation if _ap_tc is not None else {}) or {}
 
         layers = [
@@ -313,6 +313,15 @@ class ToolRuntime:
             if policy:
                 return policy
         return "allow"
+
+    def _get_active_profile(self, shared_store: Dict[str, Any], agent_name: str | None) -> Any:
+        profile = shared_store.get("active_agent_profile")
+        if profile is None:
+            return None
+        effective_agent = agent_name or shared_store.get("active_agent")
+        if effective_agent and getattr(profile, "agent", None) != effective_agent:
+            return None
+        return profile
 
     def _request_tool_confirmation(
         self,

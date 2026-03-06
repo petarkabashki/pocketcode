@@ -1,6 +1,6 @@
 schema_version: 1
 name: core
-description: Built-in plugin with unified components for agents and workflows.
+description: Built-in plugin with the default tools and runtime agents.
 
 tools:
   read_file: tools/filesystem.py:ReadFileTool
