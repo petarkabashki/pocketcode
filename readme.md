@@ -112,7 +112,7 @@ Textual keyboard shortcuts:
 - `F8`: switch global LLM override (cycles `none` + profiles)
 - `F9`: toggle the left navigation panel
 - `F10`: toggle the right inspector panel
-- `F11`: toggle header details
+- `F11`: toggle the second header row
 - `Ctrl+W`: cycle workspace mode presets (`Balanced`, `Chat Focus`, `Control Desk`, `Minimal`, `Review`)
 - `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`: fallback view switching
 - `Ctrl+Shift+A`: copy full response console output
@@ -135,6 +135,7 @@ Inspector panels:
 - `Profiles For Active Agent`: quick profile switcher
 - `Active Tools`: effective tool scope after profile filtering
 - `Prompt Sources`: agent prompt sources plus profile extra prompts
+- the left navigation pane is scrollable, matching the right inspector pane
 
 Interactive workspace presets:
 
@@ -176,12 +177,17 @@ Textual copy commands:
 - `/copy`: copy the last assistant response
 - `/copy-all`: copy the full response console output
 
-Top stats panel includes:
+Header rows:
+
+- the first row is always visible and shows runtime flow, agent, profile, LLM, and current view
+- the second row is optional and shows compact runtime stats
+
+Second header row includes:
 
 - aggregated token usage (`in`, `out`, `total`) for the latest request
 - estimated USD cost (if pricing is configured)
 - active session confirmation default
-- it now lives inside the collapsible header details area instead of a separate top strip
+- it lives in the toggleable second header row instead of a separate top strip
 - it does not repeat the active agent/profile state already shown in the status bar
 
 Context counts and item details now live in the right-hand inspector instead of the top strip.
@@ -189,7 +195,9 @@ Context counts and item details now live in the right-hand inspector instead of 
 Terminal font size note:
 
 - Pocketcode can change colors, density, emphasis, borders, and layout inside the TUI
+- the current TUI uses an extra-compact header/footer/sidebar layout with tighter gaps and narrower panels to reduce visual bulk
 - actual font size is still controlled by your terminal emulator rather than the app
+- if you need physically smaller characters, reduce the font size or zoom level in your terminal emulator
 
 Optional cost pricing map:
 
