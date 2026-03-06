@@ -114,6 +114,11 @@ tool_confirmation:                      # optional
 | `/agent-profile show <name>` | Display full profile configuration |
 | `/agent-profile switch <name>` | Activate named profile; switches active agent if needed (with warning) |
 | `/agent-profile clone <src> <new>` | Clone profile to `.pocketcode/agent-profiles/<new>.yaml` |
+| `/agent-profile tools <profile> all` | Remove the profile tool allowlist and inherit all agent tools |
+| `/agent-profile tools <profile> none` | Persist an empty tool allowlist for the profile |
+| `/agent-profile tools <profile> set <tools...>` | Replace the profile tool allowlist |
+| `/agent-profile policy default <profile> <allow\|confirm\|deny\|reset>` | Set or clear the profile default confirmation policy |
+| `/agent-profile policy tool <profile> <tool> <allow\|confirm\|deny\|reset>` | Set or clear a per-tool confirmation override |
 | `/agent <name> --agent-profile <profile>` | Switch agent and activate profile atomically |
 
 ---

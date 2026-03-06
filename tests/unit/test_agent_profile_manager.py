@@ -240,7 +240,7 @@ class TestClone:
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
         apm.clone(qname, "cloned")
-        yaml_file = tmp_path / ".pocketcode" / "agent-profiles" / "cloned.yaml"
+        yaml_file = tmp_path / ".pocketcode" / "agents" / "cloned.yaml"
         assert yaml_file.exists()
 
     def test_clone_missing_source_raises(self, tmp_path):

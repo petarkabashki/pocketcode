@@ -19,7 +19,7 @@ MIGRATION_GUIDE = """\
       2. Add 'schema_version: 1' as the first key.
       3. Move personality.system_prompt → prompts.system.
       4. Convert tools list → tools dict (local_name: file.py:Class).
-      5. Create an agents: block with 'module:' + 'entry_fn:' pointing to a
+      5. Create a flows: block with 'module:' + 'entry_fn:' pointing to a
          zero-arg Python factory that returns a PocketFlow Flow.
       6. Remove the 'workflows:' list — express as a PocketFlow agent instead.
     See specs/003-unified-plugin-namespace/contracts/manifest-v1.md for the full schema."""
@@ -38,9 +38,14 @@ class ParsedManifest:
     description: str
     plugin_root: Path
     tools: Dict[str, str] = field(default_factory=dict)
-    agents: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    flows: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     prompts: Dict[str, str] = field(default_factory=dict)
     llm_profiles: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+    @property
+    def agents(self) -> Dict[str, Dict[str, Any]]:
+        """Backward-compatible alias for flow manifests."""
+        return self.flows
 
 
 def load_manifest(path: Path) -> ParsedManifest:
@@ -67,13 +72,21 @@ def load_manifest(path: Path) -> ParsedManifest:
     # ── legacy section warnings ───────────────────────────────────────────────
     _warn_legacy_sections(raw, path)
 
+    raw_flows = raw.get("flows")
+    raw_agents = raw.get("agents")
+    if raw_flows is not None and raw_agents is not None:
+        logger.warning(
+            "Plugin manifest '%s' declares both 'flows' and legacy 'agents'. Using 'flows'.",
+            path,
+        )
+
     return ParsedManifest(
         schema_version=int(raw["schema_version"]),
         name=str(raw.get("name") or path.parent.name),
         description=str(raw.get("description", "")),
         plugin_root=path.parent,
         tools=_expect_str_dict(raw.get("tools"), "tools", path),
-        agents=_expect_agent_dict(raw.get("agents"), path),
+        flows=_expect_flow_dict(raw_flows if raw_flows is not None else raw_agents, path),
         prompts=_expect_str_dict(raw.get("prompts"), "prompts", path),
         llm_profiles=_expect_nested_dict(raw.get("llm_profiles"), "llm_profiles", path),
     )
@@ -101,9 +114,9 @@ def _warn_legacy_sections(raw: dict, path: Path) -> None:
             logger.warning(
                 "LEGACY SECTION: plugin manifest '%s' contains '%s:' which is "
                 "ignored in schema_version 1. Migration: "
-                "- 'components:' (kind=agent) → 'agents:' block with module+entry_fn. "
+                "- 'components:' (kind=agent) → 'flows:' block with module+entry_fn. "
                 "- 'components:' (kind=workflow) → new agent with PocketFlow Flow factory. "
-                "- 'workflows:' list → PocketFlow agent in 'agents:' block. "
+                "- 'workflows:' list → PocketFlow agent in 'flows:' block. "
                 "- 'node_definitions:' → remove; PocketFlow Node subclasses own their logic.",
                 path,
                 key,
@@ -140,7 +153,7 @@ def _migrate_agent_yaml(raw: dict, path: Path) -> ParsedManifest:
     logger.warning(
         "LEGACY MANIFEST: '%s' has no 'module:' or 'entry_fn:' for its agent. "
         "The agent '%s' will NOT be registered as a PocketFlow Flow. "
-        "Add agents: block with module+entry_fn to complete migration.",
+        "Add flows: block with module+entry_fn to complete migration.",
         path,
         plugin_name,
     )
@@ -151,7 +164,7 @@ def _migrate_agent_yaml(raw: dict, path: Path) -> ParsedManifest:
         description=str(raw.get("description", "")),
         plugin_root=path.parent,
         tools=tools_dict,
-        agents={},  # cannot synthesise without entry_fn
+        flows={},  # cannot synthesise without entry_fn
         prompts={"system": system_prompt_file} if system_prompt_file else {},
         llm_profiles={},
     )
@@ -187,41 +200,44 @@ def _expect_str_dict(value: Any, section: str, path: Path) -> Dict[str, str]:
     return result
 
 
-def _expect_agent_dict(value: Any, path: Path) -> Dict[str, Dict[str, Any]]:
-    """Return agents section as Dict[str, Dict[str, Any]], validating module+entry_fn."""
+def _expect_flow_dict(value: Any, path: Path) -> Dict[str, Dict[str, Any]]:
+    """Return flows section as Dict[str, Dict[str, Any]], validating module+entry_fn."""
     if value is None:
         return {}
     if not isinstance(value, dict):
         logger.warning(
-            "Plugin manifest '%s': section 'agents' must be a mapping, got %s — ignoring.",
+            "Plugin manifest '%s': section 'flows' must be a mapping, got %s — ignoring.",
             path,
             type(value).__name__,
         )
         return {}
     result: Dict[str, Dict[str, Any]] = {}
-    for agent_name, agent_cfg in value.items():
-        if not isinstance(agent_name, str):
+    for flow_name, flow_cfg in value.items():
+        if not isinstance(flow_name, str):
             logger.warning(
-                "Plugin manifest '%s': agents key %r is not a string — skipping.", path, agent_name
+                "Plugin manifest '%s': flows key %r is not a string — skipping.", path, flow_name
             )
             continue
-        if not isinstance(agent_cfg, dict):
+        if not isinstance(flow_cfg, dict):
             logger.warning(
-                "Plugin manifest '%s': agent '%s' config must be a mapping — skipping.",
+                "Plugin manifest '%s': flow '%s' config must be a mapping — skipping.",
                 path,
-                agent_name,
+                flow_name,
             )
             continue
         # Validate required fields: module + entry_fn
-        missing = [f for f in ("module", "entry_fn") if not agent_cfg.get(f)]
+        missing = [f for f in ("module", "entry_fn") if not flow_cfg.get(f)]
         if missing:
             raise ManifestSchemaError(
-                f"Agent '{agent_name}' in '{path}' is missing required field(s): "
+                f"Flow '{flow_name}' in '{path}' is missing required field(s): "
                 + ", ".join(f"'{f}'" for f in missing)
                 + ". Both 'module' and 'entry_fn' are required."
             )
-        result[agent_name] = dict(agent_cfg)
+        result[flow_name] = dict(flow_cfg)
     return result
+
+
+_expect_agent_dict = _expect_flow_dict
 
 
 def _expect_nested_dict(value: Any, section: str, path: Path) -> Dict[str, Dict[str, Any]]:

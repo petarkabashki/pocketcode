@@ -6,19 +6,19 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass
-class AgentProfile:
-    """A named configuration bundle that governs how an agent is invoked.
+class Agent:
+    """A named configuration bundle that governs how a flow is invoked.
 
-    Every agent has at least one profile: either explicitly declared in
-    ``plugin.yaml`` under ``default_agent_profile``, or synthesised from the
-    agent's top-level fields by ``AgentProfileManager``.
+    Every flow has at least one agent: either explicitly declared in
+    ``plugin.yaml`` under ``default_agent``, or synthesised from the
+    flow's top-level fields by ``AgentManager``.
 
     Fields
     ------
     name : str
         Unique identifier (e.g. ``"core::react"`` or ``"react-safe"``).
-    agent : str
-        Qualified agent reference this profile targets (e.g. ``"core::react"``).
+    flow : str
+        Qualified flow reference this agent targets (e.g. ``"core::react"``).
     description : str
         Human-readable description. Default ``""``.
     llm_profile : str | None
@@ -48,9 +48,18 @@ class AgentProfile:
     source: str = "synthesised"
     source_path: Optional[Path] = None
 
+    @property
+    def flow(self) -> str:
+        """Canonical alias for the target flow name."""
+        return self.agent
+
+    @flow.setter
+    def flow(self, value: str) -> None:
+        self.agent = value
+
 
 @dataclass
-class AgentDefinition:
+class FlowDefinition:
     name: str
     description: str = ""
     llm_profile: str | None = None
@@ -71,4 +80,17 @@ class AgentDefinition:
     entry_fn: Optional[str] = None
     flow_instance: Any = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    default_agent_profile: Optional[AgentProfile] = None
+    default_agent_profile: Optional[Agent] = None
+
+    @property
+    def default_agent(self) -> Optional[Agent]:
+        """Canonical alias for the default runtime agent."""
+        return self.default_agent_profile
+
+    @default_agent.setter
+    def default_agent(self, value: Optional[Agent]) -> None:
+        self.default_agent_profile = value
+
+
+AgentProfile = Agent
+AgentDefinition = FlowDefinition

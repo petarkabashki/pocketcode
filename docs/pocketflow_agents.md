@@ -74,7 +74,7 @@ schema_version: 1
 name: my_plugin
 description: My plugin.
 
-agents:
+flows:
   my_agent:
     module: "agents/my_agent.py"
     entry_fn: "create_flow"
@@ -100,17 +100,17 @@ session. Useful keys injected by the runtime:
 
 ---
 
-## Cross-Agent Delegation
+## Cross-Flow Delegation
 
-An orchestrating agent (e.g., `micromanager`) can delegate to other agents by
-resolving their `AgentDefinition` from `shared["_registry"]`:
+An orchestrating flow (e.g., `micromanager`) can delegate to other flows by
+resolving their `FlowDefinition` from `shared["_registry"]`:
 
 ```python
 def post(self, shared, prep_res, exec_res):
     registry = shared.get("_registry")
     try:
-        agent_def = registry.agents.resolve("core.coder")
-        agent_def.flow_instance.run(shared)
+        flow_def = registry.agents.resolve("core.coder")
+        flow_def.flow_instance.run(shared)
     except Exception as exc:
         shared["error"] = str(exc)
     return "done"
@@ -120,11 +120,11 @@ def post(self, shared, prep_res, exec_res):
 
 ## Architecture Notes
 
-- Agents supersede workflows: there is no separate `workflows:` YAML — the `Flow`
+- Flows supersede workflows: there is no separate `workflows:` YAML — the `Flow`
   graph IS the workflow.
 - `flow_instance` is eagerly created at plugin-load time by calling `entry_fn()`.
-  If the factory raises, the agent is skipped and `ERROR` is logged.
-- All agents are addressed by their qualified name `{plugin}.{agent}` in the
+  If the factory raises, the flow is skipped and `ERROR` is logged.
+- All flows are addressed by their qualified name `{plugin}.{flow}` in the
   `NamespaceRegistry`.
 
 See [Plugin Architecture](plugin_architecture.md) for the full plugin model.

@@ -1,0 +1,20 @@
+name: my-react
+flow: core.react
+description: Synthesised default agent for core.react.
+llm_profile: gemini_default
+tools:
+- read_file
+- write_to_file
+- list_files
+- create_directory
+- glob_files
+- search_code
+- execute_command
+- ask_user_input
+- confirm_user_input
+- git_status
+- git_diff
+- git_add
+- git_commit
+- git_pull
+- git_push

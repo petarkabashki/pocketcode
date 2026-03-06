@@ -12,10 +12,13 @@ BASE_COMMAND_SUGGESTIONS = [
     "/help",
     "/list",
     "/set",
+    "/flows",
+    "/flow",
     "/agents",
     "/agent",
     "/llms",
     "/llm",
+    "/llm-flow",
     "/llm-agent",
     "/llm-handoff",
     "/tools",
@@ -23,19 +26,29 @@ BASE_COMMAND_SUGGESTIONS = [
     "/status",
     "/context",
     "/confirm",
+    "/agent list",
+    "/agent show",
+    "/agent switch",
+    "/agent clone",
+    "/agent tools",
+    "/agent policy",
     "/agent-profile",
     "/agent-profile list",
     "/agent-profile show",
     "/agent-profile switch",
     "/agent-profile clone",
+    "/agent-profile tools",
+    "/agent-profile policy",
     "/copy",
     "/copy-all",
     "/exit",
     "/quit",
+    "/fl",
     "/ls",
     "/ag",
     "/ap",
     "/lm",
+    "/lf",
     "/la",
     "/lh",
     "/st",
@@ -45,12 +58,18 @@ BASE_COMMAND_SUGGESTIONS = [
 
 
 def list_command_suggestions(engine: PocketCodeEngine) -> list[str]:
+    flow_names = engine.list_flows() if hasattr(engine, "list_flows") else engine.list_agents()
+    agent_names = (
+        engine.list_available_agents()
+        if hasattr(engine, "list_available_agents")
+        else engine.list_agent_profiles()
+    )
     return sorted(
         set(
             BASE_COMMAND_SUGGESTIONS
-            + engine.list_agents()
+            + flow_names
+            + agent_names
             + engine.list_llm_profiles()
-            + engine.list_agent_profiles()
         )
     )
 
@@ -86,7 +105,8 @@ def handle_command(
     if command in {"/status"}:
         status = engine.status()
         print("Runtime status:")
-        print(f"  Agent: {status['agent']}")
+        print(f"  Flow: {status.get('flow')}")
+        print(f"  Agent: {status.get('agent')}")
         print(f"  Global LLM Override: {status['global_llm_override']}")
         print(f"  Agent LLM Overrides: {status['agent_llm_overrides']}")
         print(f"  Handoff LLM Overrides: {status.get('handoff_llm_overrides', {})}")
@@ -96,12 +116,13 @@ def handle_command(
         print(f"  Tool Confirmation (session overrides): {status.get('session_tool_confirmation_overrides', {})}")
         return None
 
-    if command in {"/agents", "/llms", "/tools", "/list"}:
+    if command in {"/flows", "/agents", "/llms", "/tools", "/list"}:
         return _handle_list_command(command=command, args=args, engine=engine)
 
     if command in {
-        "/agent",
+        "/flow",
         "/llm",
+        "/llm-flow",
         "/llm-agent",
         "/llm-handoff",
         "/set",
@@ -114,8 +135,14 @@ def handle_command(
     if command == "/confirm":
         return _handle_confirm_command(args, engine)
 
+    if command == "/agent":
+        management_commands = {"help", "list", "show", "switch", "clone", "tools", "policy"}
+        if not args or args[0].lower() in management_commands:
+            return _handle_agent_command(args, engine)
+        return _handle_set_command(command="/flow", args=args, engine=engine)
+
     if command == "/agent-profile":
-        return _handle_agent_profile_command(args, engine)
+        return _handle_agent_command(args, engine)
 
     print(f"Unknown command: {command}")
     print_help()
@@ -128,9 +155,11 @@ def _normalize_command(command: str) -> str:
         "/r": "/reload",
         "/st": "/status",
         "/ls": "/list",
+        "/fl": "/flow",
         "/ag": "/agent",
-        "/ap": "/agent-profile",
+        "/ap": "/agent",
         "/lm": "/llm",
+        "/lf": "/llm-flow",
         "/la": "/llm-agent",
         "/lh": "/llm-handoff",
     }
@@ -138,7 +167,9 @@ def _normalize_command(command: str) -> str:
 
 
 def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine) -> Optional[str]:
-    if command == "/agents":
+    if command == "/flows":
+        scope = "flows"
+    elif command == "/agents":
         scope = "agents"
     elif command == "/llms":
         scope = "llms"
@@ -146,16 +177,31 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         scope = "tools"
     else:
         if not args:
-            print("Usage: /list <agents|llms|tools> [agent]")
+            print("Usage: /list <flows|agents|llms|tools> [flow]")
             return None
         scope = args[0].lower()
         args = args[1:]
 
+    if scope == "flows":
+        flows = engine.list_flows() if hasattr(engine, "list_flows") else engine.list_agents()
+        current_flow = engine.get_current_flow() if hasattr(engine, "get_current_flow") else engine.get_current_agent()
+        print("Available flows:")
+        for flow in flows:
+            marker = "*" if flow == current_flow else " "
+            print(f"  {marker} {flow}")
+        return None
+
     if scope == "agents":
-        agents = engine.list_agents()
+        agents = (
+            engine.list_available_agents()
+            if hasattr(engine, "list_available_agents")
+            else engine.list_agent_profiles()
+        )
+        active_agent = engine.get_agent() if hasattr(engine, "get_agent") else engine.get_agent_profile()
+        active_name = active_agent.name if active_agent else None
         print("Available agents:")
         for agent in agents:
-            marker = "*" if agent == engine.get_current_agent() else " "
+            marker = "*" if agent == active_name else " "
             print(f"  {marker} {agent}")
         return None
 
@@ -169,23 +215,29 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         return None
 
     if scope == "tools":
-        target_agent = args[0] if args else engine.get_current_agent()
-        if not target_agent:
-            print("No active agent selected. Use /agent <name> or /tools <agent_name>.")
+        target_flow = args[0] if args else (
+            engine.get_current_flow() if hasattr(engine, "get_current_flow") else engine.get_current_agent()
+        )
+        if not target_flow:
+            print("No active flow selected. Use /flow <name> or /tools <flow_name>.")
             return None
         try:
-            tool_descriptions = engine.describe_tools_for_agent(target_agent)
+            tool_descriptions = (
+                engine.describe_tools_for_flow(target_flow)
+                if hasattr(engine, "describe_tools_for_flow")
+                else engine.describe_tools_for_agent(target_flow)
+            )
         except Exception as exc:
             print(f"Error: {exc}")
             return None
 
-        print(f"Tools for agent '{target_agent}':")
+        print(f"Tools for flow '{target_flow}':")
         for tool in tool_descriptions:
             print(f"  - {tool['name']}: {tool.get('description', '')}")
         return None
 
     print(f"Unknown list scope: {scope}")
-    print("Usage: /list <agents|llms|tools> [agent]")
+    print("Usage: /list <flows|agents|llms|tools> [flow]")
     return None
 
 
@@ -193,33 +245,44 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
     if command == "/set":
         if not args:
             print(
-                "Usage: /set <agent|llm|llm-agent|llm-handoff> <args...>"
+                "Usage: /set <flow|llm|llm-flow|llm-handoff> <args...>"
             )
             return None
         command = f"/{args[0].lower()}"
         args = args[1:]
+        if command == "/llm-agent":
+            command = "/llm-flow"
 
-    if command == "/agent":
+    if command == "/flow":
         if not args:
-            current_agent = engine.get_current_agent()
-            current_profile = engine.active_agent_profile
-            print(f"Current agent: {current_agent or 'auto'}")
-            if current_profile:
-                print(f"Current agent profile: {current_profile.name}")
-            print("Usage: /agent <agent_name|auto> [--agent-profile <profile_name>]")
+            current_flow = engine.get_current_flow() if hasattr(engine, "get_current_flow") else engine.get_current_agent()
+            current_agent = engine.get_agent() if hasattr(engine, "get_agent") else engine.get_agent_profile()
+            print(f"Current flow: {current_flow or 'auto'}")
+            if current_agent:
+                print(f"Current agent: {current_agent.name}")
+            print("Usage: /flow <flow_name|auto> [--agent <agent_name>]")
             return None
-        target, profile_name = _parse_agent_profile_flag(args)
+        target, selected_agent = _parse_agent_selection_flag(args)
         try:
             if target.lower() == "auto":
-                engine.set_agent(None)
-                print("Agent selection reset to runtime default/handoff.")
+                if hasattr(engine, "set_flow"):
+                    engine.set_flow(None)
+                else:
+                    engine.set_agent(None)
+                print("Flow selection reset to runtime default/handoff.")
             else:
-                engine.set_agent(target)
-                print(f"Selected agent: {target}")
-            if profile_name is not None:
+                if hasattr(engine, "set_flow"):
+                    engine.set_flow(target)
+                else:
+                    engine.set_agent(target)
+                print(f"Selected flow: {target}")
+            if selected_agent is not None:
                 try:
-                    engine.set_active_agent_profile(profile_name)
-                    print(f"Agent profile activated: {profile_name}")
+                    if hasattr(engine, "set_active_agent"):
+                        engine.set_active_agent(selected_agent)
+                    else:
+                        engine.set_active_agent_profile(selected_agent)
+                    print(f"Agent activated: {selected_agent}")
                 except ValueError as exc:
                     print(f"Warning: {exc}")
         except Exception as exc:
@@ -243,18 +306,24 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
             print(f"Error: {exc}")
         return None
 
-    if command == "/llm-agent":
+    if command in {"/llm-flow", "/llm-agent"}:
         if len(args) < 2:
-            print("Usage: /llm-agent <agent_name> <profile_name|none>")
+            print("Usage: /llm-flow <flow_name> <profile_name|none>")
             return None
-        agent_name, profile_name = args[0], args[1]
+        flow_name, profile_name = args[0], args[1]
         try:
             if profile_name.lower() in {"none", "reset", "auto"}:
-                engine.set_agent_llm_override(agent_name, None)
-                print(f"Agent-specific LLM override cleared for: {agent_name}")
+                if hasattr(engine, "set_flow_llm_override"):
+                    engine.set_flow_llm_override(flow_name, None)
+                else:
+                    engine.set_agent_llm_override(flow_name, None)
+                print(f"Flow-specific LLM override cleared for: {flow_name}")
             else:
-                engine.set_agent_llm_override(agent_name, profile_name)
-                print(f"Agent-specific LLM override set: {agent_name} -> {profile_name}")
+                if hasattr(engine, "set_flow_llm_override"):
+                    engine.set_flow_llm_override(flow_name, profile_name)
+                else:
+                    engine.set_agent_llm_override(flow_name, profile_name)
+                print(f"Flow-specific LLM override set: {flow_name} -> {profile_name}")
         except Exception as exc:
             print(f"Error: {exc}")
         return None
@@ -287,7 +356,7 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
         return None
 
     print(f"Unknown set target: {command}")
-    print("Usage: /set <agent|llm|llm-agent|llm-handoff> <args...>")
+    print("Usage: /set <flow|llm|llm-flow|llm-handoff> <args...>")
     return None
 
 
@@ -420,33 +489,39 @@ def print_help() -> None:
 Pocketcode Commands:
   /help                          Show this help message.
   /list <scope> [opts]           List entities by scope.
-                                 Scopes: agents|llms|tools [agent for tools]
+                                 Scopes: flows|agents|llms|tools [flow for tools]
   /set <target> <args...>        Set runtime selection/override.
-                                 Targets: agent|llm|llm-agent|llm-handoff
+                                 Targets: flow|llm|llm-flow|llm-handoff
+  /flow <flow_name|auto>         Select the active flow.
+                                 Optional: --agent <agent_name>
   /reload                        Reload plugins and runtime catalogs.
   /status                        Show runtime status.
   /context <cmd> [opts]          Manage context. Run '/context help'.
   /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
-  /agent-profile <cmd> [opts]    Manage agent profiles. Run '/agent-profile help'.
+  /agent <cmd> [opts]            Manage agents. Run '/agent help'.
   /copy, /copy-all               Copy response text (Textual UI).
   /exit, /quit                   Exit Pocketcode.
 
 Compatibility aliases:
+  /flows     -> /list flows
   /agents    -> /list agents
   /llms      -> /list llms
   /tools     -> /list tools
-  /agent     -> /set agent
-  /ap        -> /agent-profile
+  /agent-profile -> /agent
   /llm       -> /set llm
-  /llm-agent -> /set llm-agent
+  /llm-flow  -> /set llm-flow
+  /llm-agent -> /set llm-flow
   /llm-handoff -> /set llm-handoff
 
 Keyboard shortcuts (Textual UI):
   Tab                           Complete current prompt input.
   F1 / F2 / F3 / F4 / F5        Switch Chat / Control / Profiles / Context / Run views.
-  F6                            Select next agent.
-  F7 or Ctrl+P                  Select next profile for the current agent.
+  F6                            Select next flow.
+  Shift+F6                      Select previous flow.
+  F7 or Ctrl+P                  Select next agent for the current flow.
+  Shift+F7 or Ctrl+Shift+P      Select previous agent for the current flow.
   F8                            Select next global LLM override.
+  Shift+F8                      Select previous global LLM override.
   F9                            Toggle the left navigation panel.
   F10                           Toggle the right inspector panel.
   F11                           Toggle the second header row.
@@ -463,9 +538,12 @@ Textual convenience commands:
 
 Shortcut aliases:
   /ls   /list
+  /fl   /flow
   /ag   /agent
+  /ap   /agent
   /lm   /llm
-  /la   /llm-agent
+  /lf   /llm-flow
+  /la   /llm-flow
   /lh   /llm-handoff
   /st   /status
   /r    /reload
@@ -594,67 +672,67 @@ def print_confirm_help() -> None:
     print(confirm_help)
 
 
-def _parse_agent_profile_flag(args: list[str]) -> tuple[str, str | None]:
-    """Extract ``--agent-profile <name>`` from *args*.
+def _parse_agent_selection_flag(args: list[str]) -> tuple[str, str | None]:
+    """Extract ``--agent <name>`` from *args*.
 
-    Returns a tuple of ``(positional_target, profile_name)`` where
-    *positional_target* is the first non-flag argument and *profile_name* is
-    the value following ``--agent-profile`` (or ``None`` if not supplied).
+    Returns ``(positional_target, agent_name)`` where *positional_target* is the
+    first non-flag argument and *agent_name* is the value following the agent
+    selection flag, if supplied.
     """
-    profile_name: str | None = None
+    agent_name: str | None = None
     cleaned: list[str] = []
     i = 0
     while i < len(args):
-        if args[i] in {"--agent-profile", "--profile"} and i + 1 < len(args):
-            profile_name = args[i + 1]
+        if args[i] in {"--agent", "--profile", "--agent-profile"} and i + 1 < len(args):
+            agent_name = args[i + 1]
             i += 2
         else:
             cleaned.append(args[i])
             i += 1
-    return (cleaned[0] if cleaned else ""), profile_name
+    return (cleaned[0] if cleaned else ""), agent_name
 
 
-def _handle_agent_profile_command(
+def _handle_agent_command(
     args: list[str],
     engine: PocketCodeEngine,
 ) -> Optional[str]:
-    """Dispatch /agent-profile sub-commands: list | show | switch | clone."""
+    """Dispatch /agent sub-commands."""
     if not args:
-        print_agent_profile_help()
+        print_agent_help()
         return None
 
     subcommand = args[0].lower()
     sub_args = args[1:]
 
     if subcommand == "help":
-        print_agent_profile_help()
+        print_agent_help()
         return None
 
     if subcommand == "list":
-        profiles = engine.list_agent_profiles()
-        if not profiles:
-            print("No agent profiles available.")
+        agents = engine.list_available_agents() if hasattr(engine, "list_available_agents") else engine.list_agent_profiles()
+        if not agents:
+            print("No agents available.")
             return None
-        active = engine.active_agent_profile
-        print("Available agent profiles:")
-        for name in profiles:
+        active = engine.get_agent() if hasattr(engine, "get_agent") else engine.get_agent_profile()
+        print("Available agents:")
+        for name in agents:
             marker = "*" if (active and active.name == name) else " "
             print(f"  {marker} {name}")
         return None
 
     if subcommand == "show":
         if sub_args:
-            profile = engine.get_agent_profile(sub_args[0])
+            profile = engine.get_agent(sub_args[0]) if hasattr(engine, "get_agent") else engine.get_agent_profile(sub_args[0])
             if profile is None:
-                print(f"Agent profile not found: {sub_args[0]}")
+                print(f"Agent not found: {sub_args[0]}")
                 return None
         else:
-            profile = engine.get_agent_profile()
+            profile = engine.get_agent() if hasattr(engine, "get_agent") else engine.get_agent_profile()
             if not profile:
-                print("No agent profile is currently active.")
+                print("No agent is currently active.")
                 return None
-        print(f"Agent Profile: {profile.name}")
-        print(f"  Agent    : {profile.agent}")
+        print(f"Agent: {profile.name}")
+        print(f"  Flow     : {profile.agent}")
         print(f"  Desc     : {profile.description or '\u2014'}")
         print(f"  LLM      : {profile.llm_profile or '(inherit)'}")
         print(f"  Tools    : {', '.join(profile.tools) if profile.tools is not None else '(all)'}")
@@ -667,43 +745,246 @@ def _handle_agent_profile_command(
 
     if subcommand == "switch":
         if not sub_args:
-            print("Usage: /agent-profile switch <profile_name>")
+            print("Usage: /agent switch <agent_name>")
             return None
         name = sub_args[0]
         try:
-            engine.set_active_agent_profile(name)
-            print(f"Agent profile activated: {name}")
+            if hasattr(engine, "set_active_agent"):
+                engine.set_active_agent(name)
+            else:
+                engine.set_active_agent_profile(name)
+            print(f"Agent activated: {name}")
         except ValueError as exc:
             print(f"Error: {exc}")
         return None
 
     if subcommand == "clone":
         if len(sub_args) < 2:
-            print("Usage: /agent-profile clone <source_profile> <new_profile_name>")
+            print("Usage: /agent clone <source_agent> <new_agent_name>")
             return None
         src, new_name = sub_args[0], sub_args[1]
         try:
-            engine.clone_agent_profile(src, new_name)
-            print(f"Cloned profile '{src}' \u2192 '{new_name}'.")
+            if hasattr(engine, "clone_agent"):
+                engine.clone_agent(src, new_name)
+            else:
+                engine.clone_agent_profile(src, new_name)
+            print(f"Cloned agent '{src}' \u2192 '{new_name}'.")
         except (KeyError, ValueError) as exc:
             print(f"Error: {exc}")
         return None
 
-    print(f"Unknown /agent-profile subcommand: {subcommand}")
-    print_agent_profile_help()
+    if subcommand == "tools":
+        return _handle_agent_tools_command(sub_args, engine)
+
+    if subcommand == "policy":
+        return _handle_agent_policy_command(sub_args, engine)
+
+    print(f"Unknown /agent subcommand: {subcommand}")
+    print_agent_help()
     return None
 
 
-def print_agent_profile_help() -> None:
-    text = """
-/agent-profile Commands:
-  /agent-profile list                         List all available agent profiles.
-  /agent-profile show [profile_name]          Show details of a profile (default: active).
-  /agent-profile switch <profile_name>        Activate an agent profile.
-  /agent-profile clone <source> <new_name>    Clone a profile to a new workspace profile.
-  /agent-profile help                         Show this help message.
+def _handle_agent_tools_command(
+    args: list[str],
+    engine: PocketCodeEngine,
+) -> Optional[str]:
+    if len(args) < 2:
+        print("Usage: /agent tools <agent_name> <all|none|set> [tool_name ...]")
+        return None
 
-Usage with /agent:
-  /agent <agent_name> [--agent-profile <profile_name>]
+    profile_name = args[0]
+    action = args[1].lower()
+    profile = _get_editable_agent_profile(engine, profile_name)
+    if profile is None:
+        return None
+
+    available_tools = set(engine.list_tools_for_agent(profile.agent))
+    updated_tools: list[str] | None
+    if action == "all":
+        updated_tools = None
+    elif action == "none":
+        updated_tools = []
+    elif action == "set":
+        if len(args) < 3:
+            print("Usage: /agent tools <agent_name> set <tool_name ...>")
+            return None
+        requested_tools = sorted(set(args[2:]))
+        unknown_tools = sorted(tool_name for tool_name in requested_tools if tool_name not in available_tools)
+        if unknown_tools:
+            print(
+                f"Error: unknown tool(s) for agent '{profile.agent}': {', '.join(unknown_tools)}"
+            )
+            return None
+        updated_tools = requested_tools
+    else:
+        print("Usage: /agent tools <agent_name> <all|none|set> [tool_name ...]")
+        return None
+
+    try:
+        updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
+        updater(
+            profile.name,
+            llm_profile=profile.llm_profile,
+            tools=updated_tools,
+            extra_prompts=list(profile.extra_prompts),
+            tool_confirmation_default=_get_profile_confirmation_default(profile),
+            tool_confirmation_overrides=_get_profile_confirmation_overrides(profile),
+        )
+        if updated_tools is None:
+            print(f"Agent '{profile.name}' now allows all tools for flow '{profile.agent}'.")
+        else:
+            print(
+                f"Agent '{profile.name}' allowed tools updated: "
+                f"{', '.join(updated_tools) if updated_tools else '(none)'}"
+            )
+    except Exception as exc:
+        print(f"Error: {exc}")
+    return None
+
+
+def _handle_agent_policy_command(
+    args: list[str],
+    engine: PocketCodeEngine,
+) -> Optional[str]:
+    if len(args) < 3:
+        print(
+            "Usage: /agent policy <default|tool> <agent_name> "
+            "<policy|tool_name policy>"
+        )
+        return None
+
+    target = args[0].lower()
+    profile_name = args[1]
+    profile = _get_editable_agent_profile(engine, profile_name)
+    if profile is None:
+        return None
+
+    current_default = _get_profile_confirmation_default(profile)
+    current_overrides = _get_profile_confirmation_overrides(profile)
+
+    try:
+        if target == "default":
+            if len(args) != 3:
+                print("Usage: /agent policy default <agent_name> <allow|confirm|deny|reset>")
+                return None
+            policy = _parse_policy_or_reset(args[2])
+            updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
+            updater(
+                profile.name,
+                llm_profile=profile.llm_profile,
+                tools=list(profile.tools) if profile.tools is not None else None,
+                extra_prompts=list(profile.extra_prompts),
+                tool_confirmation_default=policy,
+                tool_confirmation_overrides=current_overrides,
+            )
+            print(
+                f"Agent '{profile.name}' default tool policy set to: "
+                f"{policy or 'inherit'}"
+            )
+            return None
+
+        if target == "tool":
+            if len(args) != 4:
+                print(
+                    "Usage: /agent policy tool <agent_name> "
+                    "<tool_name> <allow|confirm|deny|reset>"
+                )
+                return None
+            tool_name = args[2]
+            policy = _parse_policy_or_reset(args[3])
+            available_tools = set(engine.list_tools_for_agent(profile.agent))
+            if tool_name not in available_tools:
+                print(f"Error: unknown tool '{tool_name}' for agent '{profile.agent}'.")
+                return None
+            if policy is None:
+                current_overrides.pop(tool_name, None)
+            else:
+                current_overrides[tool_name] = policy
+            updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
+            updater(
+                profile.name,
+                llm_profile=profile.llm_profile,
+                tools=list(profile.tools) if profile.tools is not None else None,
+                extra_prompts=list(profile.extra_prompts),
+                tool_confirmation_default=current_default,
+                tool_confirmation_overrides=current_overrides,
+            )
+            print(
+                f"Agent '{profile.name}' tool policy updated: "
+                f"{tool_name} -> {policy or 'inherit'}"
+            )
+            return None
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return None
+
+    print(
+        "Usage: /agent policy <default|tool> <agent_name> "
+        "<policy|tool_name policy>"
+    )
+    return None
+
+
+def _get_editable_agent_profile(
+    engine: PocketCodeEngine,
+    profile_name: str,
+) -> Any:
+    profile = engine.get_agent(profile_name) if hasattr(engine, "get_agent") else engine.get_agent_profile(profile_name)
+    if profile is None:
+        print(f"Error: agent not found: {profile_name}")
+        return None
+    if profile.source != "workspace" or profile.source_path is None:
+        print(
+            f"Error: agent '{profile_name}' is not workspace-backed. Clone it before editing."
+        )
+        return None
+    return profile
+
+
+def _get_profile_confirmation_default(profile: Any) -> str | None:
+    tool_confirmation = profile.tool_confirmation if isinstance(profile.tool_confirmation, dict) else {}
+    default_policy = tool_confirmation.get("default")
+    return str(default_policy) if default_policy else None
+
+
+def _get_profile_confirmation_overrides(profile: Any) -> dict[str, str]:
+    tool_confirmation = profile.tool_confirmation if isinstance(profile.tool_confirmation, dict) else {}
+    overrides = tool_confirmation.get("overrides", {})
+    if not isinstance(overrides, dict):
+        return {}
+    return {
+        str(tool_name): str(policy)
+        for tool_name, policy in overrides.items()
+        if tool_name and policy
+    }
+
+
+def print_agent_help() -> None:
+    text = """
+/agent Commands:
+  /agent list                                 List all available agents.
+  /agent show [agent_name]                    Show details of an agent (default: active).
+  /agent switch <agent_name>                  Activate an agent.
+  /agent clone <source> <new_name>            Clone an agent to a new workspace agent.
+  /agent tools <agent> all                    Allow all tools for a workspace agent.
+  /agent tools <agent> none                   Deny all tools for a workspace agent.
+  /agent tools <agent> set <tools...>
+                                              Set the allowed tool list for a workspace agent.
+  /agent policy default <agent> <allow|confirm|deny|reset>
+                                              Set the agent default confirmation policy.
+  /agent policy tool <agent> <tool> <allow|confirm|deny|reset>
+                                              Set or clear a per-tool confirmation policy.
+  /agent help                                 Show this help message.
+
+Usage with /flow:
+  /flow <flow_name> [--agent <agent_name>]
+
+Compatibility:
+  /agent-profile ...                          Alias for /agent ...
 """
     print(text)
+
+
+_parse_agent_profile_flag = _parse_agent_selection_flag
+_handle_agent_profile_command = _handle_agent_command
+print_agent_profile_help = print_agent_help

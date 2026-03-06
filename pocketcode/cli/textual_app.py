@@ -40,7 +40,7 @@ MAX_OUTPUT_LINES = 400
 VIEW_TITLES = {
     "chat": "Chat Workspace",
     "control": "Control Center",
-    "profiles": "Agent/Profile Config",
+    "profiles": "Flow/Agent Config",
     "context": "Context Builder",
     "run": "Run Inspector",
 }
@@ -73,20 +73,20 @@ def _build_stats_text(status: Dict[str, Any]) -> str:
 def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
     runtime_flow = status.get("runtime_workflow") or "internal-flow"
     run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
-    current_agent = run_summary.get("current_agent") or status.get("agent") or "auto"
+    current_flow = run_summary.get("current_agent") or status.get("flow") or "auto"
 
     agent_path = run_summary.get("agent_path", [])
     if isinstance(agent_path, list) and len(agent_path) > 1:
-        agent_display = " -> ".join(str(name) for name in agent_path if isinstance(name, str))
+        flow_display = " -> ".join(str(name) for name in agent_path if isinstance(name, str))
     else:
-        agent_display = str(current_agent)
+        flow_display = str(current_flow)
 
     current_llm_profile = run_summary.get("current_llm_profile") or status.get("global_llm_override") or "none"
     current_llm_model = run_summary.get("current_llm_model") or "-"
-    active_profile = status.get("active_agent_profile") or "none"
+    active_agent = status.get("active_agent") or status.get("active_agent_profile") or "none"
     return (
-        f"Runtime flow: {runtime_flow} | Agent: {agent_display} | "
-        f"Profile: {active_profile} | LLM: {current_llm_profile} ({current_llm_model}) | "
+        f"Runtime flow: {runtime_flow} | Flow: {flow_display} | "
+        f"Agent: {active_agent} | LLM: {current_llm_profile} ({current_llm_model}) | "
         f"View: {VIEW_TITLES.get(current_view, current_view)}"
     )
 
@@ -94,16 +94,16 @@ def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
 def _build_view_title_text(view_name: str) -> str:
     return (
         f"{VIEW_TITLES.get(view_name, view_name)} | "
-        "Runtime controls live in Control. Agent/profile edits live in Profiles."
+        "Runtime controls live in Control. Flow/agent edits live in Profiles."
     )
 
 
 def _build_profile_editor_hint(active_profile: Any) -> str:
     if active_profile is None:
-        return "Select an agent or profile to edit profile settings."
+        return "Select a flow or agent to edit agent settings."
     if active_profile.source == "workspace":
-        return f"Editing workspace profile '{active_profile.name}'. Save persists tools, prompts, and LLM."
-    return f"Profile '{active_profile.name}' is plugin/synthesised. Clone it to a workspace profile to edit."
+        return f"Editing workspace agent '{active_profile.name}'. Save persists tools, prompts, and LLM."
+    return f"Agent '{active_profile.name}' is plugin/synthesised. Clone it to a workspace agent to edit."
 
 
 def _trim_output_lines(lines: list[str], max_lines: int) -> tuple[list[str], int]:
@@ -120,6 +120,16 @@ def _build_output_text(lines: list[str], trimmed_line_count: int) -> str:
         return "\n".join(lines)
     notice = f"info> [output history trimmed: showing last {len(lines)} lines]"
     return "\n".join([notice, *lines]) if lines else notice
+
+
+def _cycle_value(values: list[Any], current: Any, step: int, *, missing_index: int) -> Any:
+    if not values:
+        raise ValueError("Cannot cycle an empty value list.")
+    try:
+        idx = values.index(current)
+    except ValueError:
+        idx = missing_index
+    return values[(idx + step) % len(values)]
 
 
 @dataclass(frozen=True)
@@ -179,12 +189,16 @@ class PocketCodeTextualApp(App[None]):
         Binding("f4", "view_context", "Context", priority=True),
         Binding("f5", "view_run", "Run", priority=True),
         Binding("f6", "next_agent", "Next Agent", priority=True),
+        Binding("shift+f6", "prev_agent", "Prev Agent", priority=True),
         Binding("f7", "next_profile", "Next Profile", priority=True),
+        Binding("shift+f7", "prev_profile", "Prev Profile", priority=True),
         Binding("f8", "next_llm", "Next LLM", priority=True),
+        Binding("shift+f8", "prev_llm", "Prev LLM", priority=True),
         Binding("f9", "toggle_left_panel", "Toggle Nav"),
         Binding("f10", "toggle_right_panel", "Toggle Inspector"),
         Binding("f11", "toggle_header", "Toggle Header"),
         Binding("ctrl+p", "next_profile", "Next Profile", priority=True),
+        Binding("ctrl+shift+p", "prev_profile", "Prev Profile", priority=True),
         Binding("ctrl+w", "next_workspace_mode", "Next Mode"),
         Binding("alt+1", "view_chat", "Chat"),
         Binding("alt+2", "view_control", "Control"),
@@ -612,7 +626,8 @@ class PocketCodeTextualApp(App[None]):
                 yield Static("Shortcuts", classes="section-title")
                 yield Static(
                     "F1..F5 switch views\n"
-                    "F6/F7/F8 cycle agent/profile/LLM\n"
+                    "F6/F7/F8 next flow/agent/LLM\n"
+                    "Shift+F6/F7/F8 previous flow/agent/LLM\n"
                     "F9/F10 toggle panels\n"
                     "F11 toggle second header row\n"
                     "Ctrl+W cycle mode\n"
@@ -666,11 +681,11 @@ class PocketCodeTextualApp(App[None]):
                             yield Button("Open Profiles", id="goto-profiles-button")
                             yield Button("Open Run Inspector", id="goto-run-button")
                     with VerticalScroll(id="view-profiles", classes="view view-scroll"):
-                        yield Static("Active profile settings save back to workspace YAML.", classes="hint")
+                        yield Static("Active agent settings save back to workspace YAML.", classes="hint")
                         yield Static("", id="profile-editor-hint", classes="hint")
                         yield Static("Clone Active Profile To Workspace", classes="field-label")
                         yield Input(id="clone-profile-name", placeholder="my-agent-safe")
-                        yield Button("Clone Active Profile", id="clone-profile-button", variant="primary")
+                        yield Button("Clone Active Agent", id="clone-profile-button", variant="primary")
                         yield Static("Profile LLM", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="profile-llm-select", allow_blank=False)
                         yield Static("Profile Confirmation Default", classes="field-label")
@@ -705,7 +720,7 @@ class PocketCodeTextualApp(App[None]):
                         yield TextArea("", id="profile-policy-summary", read_only=True)
                         yield Static("Extra Prompt Paths (one path per line)", classes="field-label")
                         yield TextArea("", id="profile-prompts")
-                        yield Button("Save Profile", id="save-profile-button", variant="success")
+                        yield Button("Save Agent", id="save-profile-button", variant="success")
                     with VerticalScroll(id="view-context", classes="view view-scroll"):
                         yield Static("Context controls update the next request scope.", classes="hint")
                         yield Static("Context Type", classes="field-label")
@@ -737,7 +752,7 @@ class PocketCodeTextualApp(App[None]):
                 yield Input(
                     id="main-input",
                     placeholder=(
-                        "Type a request or /command. F1..F5=view F6/F7/F8=agent/profile/LLM "
+                        "Type a request or /command. F1..F5=view F6/F7/F8 next flow/agent/LLM "
                         "F9/F10=panels F11=header"
                     ),
                 )
@@ -746,7 +761,7 @@ class PocketCodeTextualApp(App[None]):
                 yield Static("", id="inspector-summary", classes="card")
                 yield Static("Session Context", classes="section-title")
                 yield TextArea("", id="inspector-context", read_only=True)
-                yield Static("Profiles For Active Agent", classes="section-title")
+                yield Static("Agents For Active Flow", classes="section-title")
                 yield OptionList(id="profile-list")
                 yield Static("Active Tools", classes="section-title")
                 yield TextArea("", id="inspector-tools", read_only=True)
@@ -759,7 +774,7 @@ class PocketCodeTextualApp(App[None]):
         self._refresh_ui()
         self.set_interval(0.1, self._drain_run_events)
         self._write_info(
-            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 cycle agent-profile-LLM, and F11 toggles the second header row."
+            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 move forward through flow-agent-LLM, Shift+F6/F7/F8 move backward, and F11 toggles the second header row."
         )
         self.query_one("#main-input", Input).focus()
 
@@ -814,7 +829,7 @@ class PocketCodeTextualApp(App[None]):
             target_agent_tools = tuple(self._engine.list_tools_for_agent(target_agent)) if target_agent else ()
 
         llm_profile_names = tuple(str(name) for name in status.get("available_llm_profiles", []))
-        available_agents = tuple(str(agent) for agent in status.get("available_agents", []))
+        available_agents = tuple(str(agent) for agent in status.get("available_flows", status.get("available_agents", [])))
         session_default = status.get("session_tool_confirmation_overrides", {}).get("default_policy") or INHERIT_POLICY
         profile_default = (
             active_profile.tool_confirmation.get("default")
@@ -840,20 +855,20 @@ class PocketCodeTextualApp(App[None]):
             else DEFAULT_PROFILE
         )
         summary_lines = [
-            f"Agent: {current_agent or 'auto'}",
-            f"Profile: {active_profile_name or 'none'}",
-            f"Profile source: {active_profile.source if active_profile else '-'}",
+            f"Flow: {current_agent or 'auto'}",
+            f"Agent: {active_profile_name or 'none'}",
+            f"Agent source: {active_profile.source if active_profile else '-'}",
             f"Global LLM: {self._engine.global_llm_override or 'inherit'}",
             f"Auto-confirm: {'on' if self._engine.auto_confirm_tools else 'off'}",
             f"Session confirm: {session_default}",
         ]
         if active_profile and active_profile.description:
-            summary_lines.append(f"Profile note: {active_profile.description}")
+            summary_lines.append(f"Agent note: {active_profile.description}")
 
         profile_list_labels = tuple(
             f"{'* ' if active_profile_name == profile_name else '  '}{profile_name}"
             for profile_name in current_agent_profiles
-        ) or ("No profiles for the active agent",)
+        ) or ("No agents for the active flow",)
 
         return TextualUIState(
             theme_name=self._theme_name,
@@ -1302,7 +1317,7 @@ class PocketCodeTextualApp(App[None]):
     def _set_main_input_placeholder(self, prompt: str | None = None) -> None:
         input_widget = self.query_one("#main-input", Input)
         input_widget.placeholder = prompt or (
-            "Type a request or /command. F1..F5=view F6/F7/F8=agent/profile/LLM "
+            "Type a request or /command. F1..F5=view F6/F7/F8 next agent/profile/LLM "
             "F9/F10=panels F11=header"
         )
 
@@ -1533,8 +1548,13 @@ class PocketCodeTextualApp(App[None]):
         if self._syncing_controls:
             return
 
+        if event.select.value != event.value:
+            return
+
         widget_id = event.select.id or ""
         value = str(event.value)
+        if value == LOADING_OPTION:
+            return
         try:
             if widget_id == "workspace-mode-select":
                 self._apply_workspace_mode(value, announce=True)
@@ -1542,7 +1562,10 @@ class PocketCodeTextualApp(App[None]):
                 self._theme_name = value
                 self._write_info(f"Theme preset: {THEME_OPTIONS.get(value, value)}.")
             if widget_id == "agent-select":
-                self._engine.set_agent(None if value == AUTO_AGENT else value)
+                target_agent = None if value == AUTO_AGENT else value
+                if target_agent == self._engine.get_current_agent():
+                    return
+                self._engine.set_agent(target_agent)
                 self._write_info(
                     f"Selected agent: {self._engine.get_current_agent() or 'auto'}"
                 )
@@ -1553,23 +1576,38 @@ class PocketCodeTextualApp(App[None]):
                         self._engine.set_agent(current_agent)
                         self._write_info(f"Activated default profile for {current_agent}.")
                 else:
+                    active_profile = self._engine.active_agent_profile
+                    if (
+                        active_profile is not None
+                        and active_profile.agent == self._engine.get_current_agent()
+                        and active_profile.name == value
+                    ):
+                        return
                     self._engine.set_active_agent_profile(value)
                     self._write_info(f"Activated profile: {value}")
             elif widget_id == "llm-select":
-                self._engine.set_global_llm_override(None if value == NO_LLM else value)
+                target_llm = None if value == NO_LLM else value
+                if target_llm == self._engine.global_llm_override:
+                    return
+                self._engine.set_global_llm_override(target_llm)
                 self._write_info(
                     f"Global LLM override: {self._engine.global_llm_override or 'inherit'}"
                 )
             elif widget_id == "session-confirm-select":
-                self._engine.set_session_confirmation_default(
-                    None if value == INHERIT_POLICY else value
-                )
+                target_default = None if value == INHERIT_POLICY else value
+                current_default = self._engine.session_confirmation_overrides.get("default_policy")
+                if target_default == current_default:
+                    return
+                self._engine.set_session_confirmation_default(target_default)
                 self._write_info(
                     f"Session confirmation default: "
                     f"{self._engine.session_confirmation_overrides.get('default_policy') or 'inherit'}"
                 )
             elif widget_id == "profile-policy-tool-select":
-                self._selected_profile_policy_tool = None if value == NO_TOOL else value
+                target_tool = None if value == NO_TOOL else value
+                if target_tool == self._selected_profile_policy_tool:
+                    return
+                self._selected_profile_policy_tool = target_tool
                 self._sync_profile_policy_controls()
                 return
             elif widget_id == "profile-tool-policy-select":
@@ -1814,14 +1852,25 @@ class PocketCodeTextualApp(App[None]):
                 return
 
             current = self._engine.get_current_agent()
-            if current in agents:
-                idx = agents.index(current)
-                next_agent = agents[(idx + 1) % len(agents)]
-            else:
-                next_agent = agents[0]
-
+            next_agent = _cycle_value(agents, current, 1, missing_index=-1)
             self._engine.set_agent(next_agent)
             self._write_info(f"Selected agent: {next_agent}")
+        except Exception as exc:
+            self._write_error(str(exc))
+        finally:
+            self._sync_ui_from_engine()
+
+    def action_prev_agent(self) -> None:
+        try:
+            agents = self._engine.list_agents()
+            if not agents:
+                self._write_error("No agents are available.")
+                return
+
+            current = self._engine.get_current_agent()
+            prev_agent = _cycle_value(agents, current, -1, missing_index=0)
+            self._engine.set_agent(prev_agent)
+            self._write_info(f"Selected agent: {prev_agent}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -1839,15 +1888,33 @@ class PocketCodeTextualApp(App[None]):
             return
 
         current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
-        if current_profile_name in profiles:
-            idx = profiles.index(current_profile_name)
-            next_profile = profiles[(idx + 1) % len(profiles)]
-        else:
-            next_profile = profiles[0]
+        next_profile = _cycle_value(profiles, current_profile_name, 1, missing_index=-1)
 
         try:
             self._engine.set_active_agent_profile(next_profile)
             self._write_info(f"Activated profile: {next_profile}")
+        except Exception as exc:
+            self._write_error(str(exc))
+        finally:
+            self._sync_ui_from_engine()
+
+    def action_prev_profile(self) -> None:
+        current_agent = self._engine.get_current_agent()
+        if not current_agent:
+            self._write_error("Select an agent before cycling profiles.")
+            return
+
+        profiles = self._engine.list_agent_profiles(current_agent)
+        if not profiles:
+            self._write_error(f"No profiles are available for {current_agent}.")
+            return
+
+        current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
+        prev_profile = _cycle_value(profiles, current_profile_name, -1, missing_index=0)
+
+        try:
+            self._engine.set_active_agent_profile(prev_profile)
+            self._write_info(f"Activated profile: {prev_profile}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -1862,15 +1929,31 @@ class PocketCodeTextualApp(App[None]):
 
             current = self._engine.global_llm_override
             cycle = [None] + profiles
-            try:
-                idx = cycle.index(current)
-            except ValueError:
-                idx = 0
-            next_value = cycle[(idx + 1) % len(cycle)]
+            next_value = _cycle_value(cycle, current, 1, missing_index=0)
 
             self._engine.set_global_llm_override(next_value)
             self._write_info(
                 f"Global LLM override: {next_value if next_value is not None else 'inherit'}"
+            )
+        except Exception as exc:
+            self._write_error(str(exc))
+        finally:
+            self._sync_ui_from_engine()
+
+    def action_prev_llm(self) -> None:
+        try:
+            profiles = self._engine.list_llm_profiles()
+            if not profiles:
+                self._write_error("No LLM profiles are available.")
+                return
+
+            current = self._engine.global_llm_override
+            cycle = [None] + profiles
+            prev_value = _cycle_value(cycle, current, -1, missing_index=0)
+
+            self._engine.set_global_llm_override(prev_value)
+            self._write_info(
+                f"Global LLM override: {prev_value if prev_value is not None else 'inherit'}"
             )
         except Exception as exc:
             self._write_error(str(exc))

@@ -7,7 +7,7 @@ author: PocketCoder-Core
 tools:
   execute_command: tools/system.py:ExecuteCommandTool
 
-agents:
+flows:
   micromanager:
     module: agents/micromanager_agent.py
     entry_fn: create_flow
