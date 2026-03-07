@@ -196,26 +196,26 @@ Listing behavior:
 Textual keyboard shortcuts:
 
 - `Tab`: complete current prompt input
-- `F1`, `F2`, `F3`, `F4`, `F5`: switch `Chat`, `Control`, `Edit Agent`, `Context`, and `Run` views
+- `F1`, `F2`, `F5`: switch `Chat`, `Control`, and `Run` views
+- `F3`: open the asset editor picker
+- `F4`: open the asset clone picker
 - `F6`: open the popup asset picker for active flow, agent profile, LLM override, workspace mode, theme, and session confirmation; use arrow keys plus `Enter` to choose
-- `F9`: toggle the left navigation panel
 - `F10`: toggle the right inspector panel
-- `F11`: toggle the second header row
-- `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`: fallback view switching
+- `Alt+1`, `Alt+2`, `Alt+5`: fallback view switching
+- `Ctrl+R`: reload runtime
+- `Ctrl+L`: clear output
 - `Ctrl+Shift+A`: copy full response console output
 - `Ctrl+Y`: copy last assistant response
 - `Ctrl+Q`: quit Textual UI
-- top header `Agent` and `LLM` chips open their respective searchable popup pickers directly
+- searchable selection popups support `Ctrl+Down` to jump into the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted entry
 
 Interactive workspace views:
 
 - `Chat`: conversation and command entry
-- `Control`: runtime/session selectors and toggles for workspace mode, theme, active flow, active agent profile, LLM, and session confirmation
-- `Control`: includes a popup asset picker for selecting active flow/profile/LLM/theme/mode/session state from searchable lists with arrow-key navigation
-- top header `Agent` and `LLM` chips mirror the current selection and open the matching picker without leaving the current view
+- `Control`: runtime/session selectors and toggles for workspace mode, theme, active agent profile, global LLM override, and session confirmation
+- `Control`: includes popup pickers for profile, LLM, skills, tools, tool policies, session confirmation, and system settings
+- top header chips mirror the current `Agent` and `LLM` selection
 - `Control` selectors apply only to live user selections; placeholder values used during refresh are ignored so flow/agent cycling does not re-enter itself
-- `Edit Agent`: dedicated editor for cloning workspace agents, toggling allowed tools, editing per-tool confirmation overrides, and saving extra prompts/LLM/agent defaults
-- `Context`: add, remove, and clear files, folders, URLs, and snippets without slash commands
 - `Run`: inspect the latest runtime path, effective LLM/agent state, token usage, cost, and live in-flight runtime events while a request is still running
 - flow/agent/tool metadata is reused across a single UI refresh so switching the active flow stays responsive
 - the Textual client now derives one UI snapshot per refresh and applies only changed widget state, instead of imperatively rebuilding each pane in multiple passes
@@ -246,6 +246,8 @@ Agent editing in the Textual UI:
 
 - plugin and synthesised agents are read-only until cloned to a workspace agent
 - workspace-backed agents can edit `llm_profile`, tool allowlists, per-tool confirmation overrides, confirmation defaults, and `extra_prompts`
+- tool allowlists, tool policy overrides, and skills now use a three-step model: `Apply` saves a persisted last-used runtime selection, `Reset` clears the last-used override and falls back to defaults, and `Save as Default` writes the current state into the default config
+- last-used tool allowlists, tool policy overrides, and skill selections are reloaded automatically on startup
 - tools and prompts can be changed from lists, toggles, policy selectors, and text boxes instead of editing YAML manually
 
 Modes and skills:
@@ -310,16 +312,8 @@ Textual copy commands:
 
 Header rows:
 
-- the first row is always visible and shows `Runtime flow`, `Flow`, `Agent`, and `LLM`
-- the second row is optional and shows compact runtime stats
-
-Second header row includes:
-
-- aggregated token usage (`in`, `out`, `total`) for the latest request
-- estimated USD cost (if pricing is configured)
-- active session confirmation default
-- it lives in the toggleable second header row instead of a separate top strip
-- it does not repeat the active flow/agent state already shown in the status bar
+- the top header now only shows the active `Agent` and `LLM`
+- runtime flow details stay in the inspector and run view instead of a dedicated header row
 
 Context counts and item details now live in the right-hand inspector instead of the top strip.
 

@@ -10,10 +10,10 @@ from pocketcode.cli.textual_app import (
     PocketCodeTextualApp,
     SystemSettingsScreen,
     TextEditorScreen,
+    ToolPolicyEditorScreen,
     ToolSelectionScreen,
     _build_header_agent_text,
     _build_header_llm_text,
-    _build_header_summary_text,
     _build_output_text,
     _build_profile_editor_hint,
     _build_stats_text,
@@ -93,7 +93,6 @@ class TestUiTextHelpers:
             },
         }
 
-        assert _build_header_summary_text(status) == "Runtime flow: internal-flow"
         assert _build_header_agent_text(status) == "Agent: coder.safe"
         assert _build_header_llm_text(status) == "LLM: smart (gpt-test)"
 
@@ -141,6 +140,13 @@ class _TextualEngineStub:
         self.update_agent_profile_calls: list[dict[str, object]] = []
         self.update_llm_profile_calls: list[dict[str, object]] = []
         self.save_system_settings_calls: list[dict[str, object]] = []
+        self.set_last_used_skill_calls: list[list[str]] = []
+        self.reset_last_used_skill_calls = 0
+        self.save_default_skills_calls: list[list[str]] = []
+        self.set_last_used_profile_tools_calls: list[tuple[str, list[str] | None]] = []
+        self.reset_last_used_profile_tools_calls: list[str] = []
+        self.set_last_used_profile_tool_policy_calls: list[tuple[str, dict[str, str]]] = []
+        self.reset_last_used_profile_tool_policy_calls: list[str] = []
         self.active_skills: list[str] = []
         self.skill_enabled: list[str] = []
         self.skill_disabled: list[str] = []
@@ -212,7 +218,7 @@ class _TextualEngineStub:
             if profile.agent == target
         ]
 
-    def get_agent_profile(self, name=None):
+    def get_agent_profile(self, name=None, *, effective=True):
         if name is None:
             return self.active_agent_profile
         return self._profiles.get(name)
@@ -308,6 +314,59 @@ class _TextualEngineStub:
                 "default_llm_profile": default_llm_profile,
             }
         )
+        return Path("/tmp/pocketcode.yml")
+
+    def set_last_used_skills(self, skill_names):
+        normalized = list(skill_names)
+        self.set_last_used_skill_calls.append(normalized)
+        self.active_skills = normalized
+        return Path("/tmp/pocketcode.yml")
+
+    def reset_last_used_skills(self):
+        self.reset_last_used_skill_calls += 1
+        self.active_skills = []
+        return Path("/tmp/pocketcode.yml")
+
+    def save_default_skills(self, skill_names):
+        self.save_default_skills_calls.append(list(skill_names))
+        return Path("/tmp/pocketcode.yml")
+
+    def set_last_used_profile_tools(self, profile_name, tools):
+        normalized = None if tools is None else list(tools)
+        self.set_last_used_profile_tools_calls.append((profile_name, normalized))
+        profile = self._profiles.get(profile_name)
+        if profile is not None:
+            profile.tools = normalized
+            if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+                self.active_agent_profile.tools = normalized
+        return Path("/tmp/pocketcode.yml")
+
+    def reset_last_used_profile_tools(self, profile_name):
+        self.reset_last_used_profile_tools_calls.append(profile_name)
+        profile = self._profiles.get(profile_name)
+        if profile is not None:
+            profile.tools = None
+            if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+                self.active_agent_profile.tools = None
+        return Path("/tmp/pocketcode.yml")
+
+    def set_last_used_profile_tool_policies(self, profile_name, overrides):
+        normalized = dict(overrides)
+        self.set_last_used_profile_tool_policy_calls.append((profile_name, normalized))
+        profile = self._profiles.get(profile_name)
+        if profile is not None:
+            profile.tool_confirmation = {"overrides": normalized}
+            if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+                self.active_agent_profile.tool_confirmation = {"overrides": normalized}
+        return Path("/tmp/pocketcode.yml")
+
+    def reset_last_used_profile_tool_policies(self, profile_name):
+        self.reset_last_used_profile_tool_policy_calls.append(profile_name)
+        profile = self._profiles.get(profile_name)
+        if profile is not None:
+            profile.tool_confirmation = {}
+            if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+                self.active_agent_profile.tool_confirmation = {}
         return Path("/tmp/pocketcode.yml")
 
     def list_tools_for_agent(self, agent_name):
@@ -423,6 +482,7 @@ class TestTextualSelectStability:
                 await pilot.pause()
                 assert isinstance(app.query_one("#header-agent", Static), Static)
                 assert isinstance(app.query_one("#header-llm", Static), Static)
+                assert len(app.query("#status")) == 0
                 assert app._text_state_cache["header-agent"] == "Agent: a"
                 assert app._text_state_cache["header-llm"] == "LLM: fast (-)"
 
@@ -495,6 +555,57 @@ class TestToolSelectionPopup:
 
         asyncio.run(exercise())
 
+    def test_tool_picker_ctrl_arrows_switch_between_filter_and_list(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            engine.active_agent_profile.tools = []
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._open_tool_selection_picker()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                assert app.screen.focused.id == "tool-picker-filter"
+
+                await pilot.press("ctrl+down")
+                await pilot.pause(0.05)
+                assert app.screen.focused.id == "tool-picker-list"
+
+                await pilot.press("ctrl+up")
+                await pilot.pause(0.05)
+                assert app.screen.focused.id == "tool-picker-filter"
+
+        asyncio.run(exercise())
+
+    def test_tool_picker_space_toggles_highlighted_selection(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            engine.active_agent_profile.tools = []
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._open_tool_selection_picker()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                await pilot.press("ctrl+down", "space")
+                await pilot.pause(0.05)
+
+                assert "__skill_group__:tool" in app.screen._selected_values
+
+        asyncio.run(exercise())
+
     def test_f6_select_can_open_skill_selection_popup(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
@@ -514,7 +625,7 @@ class TestToolSelectionPopup:
                 await pilot.pause(0.1)
 
                 assert isinstance(app.screen, ToolSelectionScreen)
-                assert app.screen.query_one("#tool-picker-filter", Input).placeholder == "Filter skills..."
+                assert app.screen._filter_placeholder == "Filter skills..."
 
         asyncio.run(exercise())
 
@@ -695,10 +806,11 @@ class TestProfileCloneAndSave:
                 await pilot.pause(0.05)
 
                 assert engine.update_agent_profile_calls[-1]["tool_confirmation_overrides"] == {"tool.write": "deny"}
+                assert engine.reset_last_used_profile_tool_policy_calls == ["a-safe"]
 
         asyncio.run(exercise())
 
-    def test_tool_selection_popup_saves_selected_tools(self):
+    def test_tool_selection_popup_saves_last_used_tools(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
             engine.set_active_agent_profile("a-safe")
@@ -713,10 +825,28 @@ class TestProfileCloneAndSave:
                 await pilot.pause(0.05)
 
                 assert isinstance(app.screen, ToolSelectionScreen)
-                app.screen.dismiss(["tool.read"])
+                app.screen.dismiss({"action": "apply", "values": ["tool.read"]})
                 await pilot.pause(0.05)
 
-                assert engine.update_agent_profile_calls[-1]["tools"] == ["tool.read"]
+                assert engine.set_last_used_profile_tools_calls == [("a-safe", ["tool.read"])]
+
+        asyncio.run(exercise())
+
+    def test_tool_policy_popup_can_open_policy_editor_screen(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._open_tool_policy_editor()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, ToolPolicyEditorScreen)
 
         asyncio.run(exercise())
 
@@ -813,6 +943,7 @@ class TestInspectorToolFiltering:
                 await pilot.pause(0.05)
 
                 assert engine.skill_enabled == ["python-testing"]
+                assert engine.set_last_used_skill_calls[-1] == ["python-testing"]
 
         asyncio.run(exercise())
 
@@ -838,5 +969,6 @@ class TestInspectorToolFiltering:
                 await pilot.pause(0.05)
 
                 assert engine.skill_enabled == ["python-lint", "python-testing"]
+                assert engine.set_last_used_skill_calls[-1] == ["python-lint", "python-testing"]
 
         asyncio.run(exercise())

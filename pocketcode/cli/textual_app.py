@@ -364,10 +364,12 @@ class AssetPickerScreen(ModalScreen[str | None]):
         self.dismiss(str(event.option_id))
 
 
-class ToolSelectionScreen(ModalScreen[list[str] | None]):
+class ToolSelectionScreen(ModalScreen[dict[str, Any] | None]):
     BINDINGS = [
         Binding("escape", "cancel", "Close", show=False),
         Binding("ctrl+s", "apply", "Apply", show=False),
+        Binding("ctrl+up", "focus_filter", "Focus Search", show=False),
+        Binding("ctrl+down", "focus_list", "Focus List", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -444,6 +446,8 @@ class ToolSelectionScreen(ModalScreen[list[str] | None]):
             yield SelectionList(id="tool-picker-list")
             with Horizontal(id="tool-picker-actions", classes="button-row"):
                 yield Button("Apply", id="tool-picker-apply", variant="primary")
+                yield Button("Reset", id="tool-picker-reset")
+                yield Button("Save as Default", id="tool-picker-save-default")
                 yield Button("Cancel", id="tool-picker-cancel")
 
     def on_mount(self) -> None:
@@ -473,6 +477,7 @@ class ToolSelectionScreen(ModalScreen[list[str] | None]):
         if not matching_tools:
             selection_list.add_options([(self._empty_message, LOADING_OPTION, False)])
             selection_list.disabled = True
+            selection_list.highlighted = 0
             return
         selection_list.disabled = False
         selection_list.add_options(
@@ -481,12 +486,36 @@ class ToolSelectionScreen(ModalScreen[list[str] | None]):
                 for tool in matching_tools
             ]
         )
+        selection_list.highlighted = 0
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def action_apply(self) -> None:
-        self.dismiss(sorted(self._selected_values))
+        self.dismiss({"action": "apply", "values": sorted(self._selected_values)})
+
+    def action_reset(self) -> None:
+        self.dismiss({"action": "reset"})
+
+    def action_save_default(self) -> None:
+        self.dismiss({"action": "save_default", "values": sorted(self._selected_values)})
+
+    def action_focus_filter(self) -> None:
+        self.query_one("#tool-picker-filter", Input).focus()
+
+    def action_focus_list(self) -> None:
+        selection_list = self.query_one("#tool-picker-list", SelectionList)
+        if selection_list.option_count and selection_list.highlighted is None:
+            selection_list.highlighted = 0
+        selection_list.focus()
+
+    def _toggle_highlighted_selection(self) -> None:
+        selection_list = self.query_one("#tool-picker-list", SelectionList)
+        if selection_list.disabled or not selection_list.option_count:
+            return
+        if selection_list.highlighted is None:
+            selection_list.highlighted = 0
+        selection_list.action_select()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "tool-picker-filter":
@@ -496,8 +525,18 @@ class ToolSelectionScreen(ModalScreen[list[str] | None]):
         button_id = event.button.id or ""
         if button_id == "tool-picker-apply":
             self.action_apply()
+        elif button_id == "tool-picker-reset":
+            self.action_reset()
+        elif button_id == "tool-picker-save-default":
+            self.action_save_default()
         elif button_id == "tool-picker-cancel":
             self.action_cancel()
+
+    def on_key(self, event) -> None:
+        if event.key == "space" and self.focused is self.query_one("#tool-picker-list", SelectionList):
+            event.prevent_default()
+            event.stop()
+            self._toggle_highlighted_selection()
 
     def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
         if event.selection_list.id != "tool-picker-list" or event.selection_list.disabled:
@@ -533,6 +572,95 @@ class ToolSelectionScreen(ModalScreen[list[str] | None]):
             else:
                 self._selected_values.discard(group_value)
 
+
+class ToolPolicyEditorScreen(ModalScreen[dict[str, str] | None]):
+    BINDINGS = [
+        Binding("escape", "cancel", "Close", show=False),
+        Binding("ctrl+s", "apply", "Apply", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ToolPolicyEditorScreen {
+        align: center middle;
+        background: rgba(2, 6, 23, 0.72);
+    }
+
+    #text-editor-modal {
+        width: 96;
+        max-width: 95vw;
+        height: 32;
+        max-height: 90vh;
+        border: round #0ea5e9;
+        background: #020617;
+        padding: 1;
+    }
+
+    #text-editor-title {
+        color: #e0f2fe;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #text-editor-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    #text-editor-body {
+        height: 1fr;
+        margin-bottom: 1;
+    }
+
+    #text-editor-actions {
+        height: auto;
+    }
+    """
+
+    def __init__(self, *, title: str, help_text: str, initial_text: str) -> None:
+        super().__init__()
+        self._title = title
+        self._help_text = help_text
+        self._initial_text = initial_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="text-editor-modal"):
+            yield Static(self._title, id="text-editor-title")
+            yield Static(self._help_text, id="text-editor-help")
+            yield TextArea(self._initial_text, id="text-editor-body")
+            with Horizontal(id="text-editor-actions", classes="button-row"):
+                yield Button("Apply", id="tool-policy-apply", variant="primary")
+                yield Button("Reset", id="tool-policy-reset")
+                yield Button("Save as Default", id="tool-policy-save-default")
+                yield Button("Cancel", id="tool-policy-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#text-editor-body", TextArea).focus()
+
+    def _dismiss_with_action(self, action: str) -> None:
+        self.dismiss({"action": action, "text": self.query_one("#text-editor-body", TextArea).text})
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_apply(self) -> None:
+        self._dismiss_with_action("apply")
+
+    def action_reset(self) -> None:
+        self._dismiss_with_action("reset")
+
+    def action_save_default(self) -> None:
+        self._dismiss_with_action("save_default")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id == "tool-policy-apply":
+            self.action_apply()
+        elif button_id == "tool-policy-reset":
+            self.action_reset()
+        elif button_id == "tool-policy-save-default":
+            self.action_save_default()
+        elif button_id == "tool-policy-cancel":
+            self.action_cancel()
 
 class NameInputScreen(ModalScreen[str | None]):
     BINDINGS = [
@@ -848,11 +976,6 @@ class PocketCodeTextualApp(App[None]):
         color: #dbeafe;
     }
 
-    Screen.theme-ocean #status {
-        background: #0b4f6c;
-        color: #f8fafc;
-    }
-
     Screen.theme-ocean #header-agent,
     Screen.theme-ocean #header-llm {
         background: #0b4f6c;
@@ -904,11 +1027,6 @@ class PocketCodeTextualApp(App[None]):
         color: #dcfce7;
     }
 
-    Screen.theme-forest #status {
-        background: #14532d;
-        color: #f0fdf4;
-    }
-
     Screen.theme-forest #header-agent,
     Screen.theme-forest #header-llm {
         background: #14532d;
@@ -958,11 +1076,6 @@ class PocketCodeTextualApp(App[None]):
     Screen.theme-ember Footer {
         background: #7c2d12;
         color: #ffedd5;
-    }
-
-    Screen.theme-ember #status {
-        background: #9a3412;
-        color: #fff7ed;
     }
 
     Screen.theme-ember #header-agent,
@@ -1018,16 +1131,7 @@ class PocketCodeTextualApp(App[None]):
     #topbar-main {
         height: 1;
         padding: 0;
-        content-align: left middle;
-    }
-
-    #status {
-        width: 1fr;
-        height: 1;
-        padding: 0;
-        color: #f8fafc;
-        content-align: left middle;
-        text-style: bold;
+        content-align: right middle;
     }
 
     #header-agent,
@@ -1224,7 +1328,6 @@ class PocketCodeTextualApp(App[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="topbar"):
             with Horizontal(id="topbar-main"):
-                yield Static(id="status")
                 yield Static(id="header-agent")
                 yield Static(id="header-llm")
         with Horizontal(id="workspace"):
@@ -1393,7 +1496,7 @@ class PocketCodeTextualApp(App[None]):
             theme_name=self._theme_name,
             current_view=self._current_view,
             right_panel_visible=self._show_right_panel,
-            status_text=_build_header_summary_text(status_for_display),
+            status_text="",
             header_agent_text=_build_header_agent_text(status_for_display),
             header_llm_text=_build_header_llm_text(status_for_display),
             view_title_text=_build_view_title_text(self._current_view),
@@ -1460,7 +1563,6 @@ class PocketCodeTextualApp(App[None]):
         ):
             self._apply_view_state(state.current_view, state.view_title_text)
 
-        self._set_static_text(self.query_one("#status", Static), state.status_text)
         self._set_static_text(self.query_one("#header-agent", Static), state.header_agent_text)
         self._set_static_text(self.query_one("#header-llm", Static), state.header_llm_text)
 
@@ -2419,7 +2521,7 @@ class PocketCodeTextualApp(App[None]):
         )
 
     def _apply_agent_yaml_edit(self, profile_name: str, text: str) -> None:
-        active_profile = self._engine.get_agent_profile(profile_name)
+        active_profile = self._engine.get_agent_profile(profile_name, effective=False)
         if active_profile is None:
             raise ValueError(f"Unknown agent profile '{profile_name}'.")
 
@@ -2492,28 +2594,50 @@ class PocketCodeTextualApp(App[None]):
 
     def _open_tool_policy_editor(self, profile_name: str | None = None) -> None:
         if profile_name is None:
-            self._ensure_workspace_agent_profile(
-                action_label="editing tool policies",
-                on_ready=self._open_tool_policy_editor,
-            )
-            return
+            active_profile = self._engine.active_agent_profile
+            if active_profile is None:
+                self._write_error("No active agent selected.")
+                return
+            profile_name = active_profile.name
         active_profile = self._engine.get_agent_profile(profile_name)
         if active_profile is None:
             return
         overrides = self._active_profile_policy_overrides(active_profile)
         initial_text = _dump_yaml_text(overrides) if overrides else "{}"
-        self._open_text_editor(
-            title=f"Edit Tool Policies: {profile_name}",
-            help_text="Map tool names to allow, confirm, or deny. Use {} to clear overrides. Ctrl+S saves.",
-            initial_text=initial_text,
-            on_submit=lambda text: self._apply_tool_policy_yaml_edit(profile_name, text),
+
+        def _handle_submit(payload: dict[str, str] | None) -> None:
+            if payload is None:
+                return
+            action = payload.get("action")
+            text = payload.get("text", "")
+            try:
+                if action == "apply":
+                    overrides = self._parse_tool_policy_yaml(text)
+                    self._engine.set_last_used_profile_tool_policies(profile_name, overrides)
+                    self._write_info(f"Saved last-used tool confirmation overrides for '{profile_name}'.")
+                elif action == "reset":
+                    self._engine.reset_last_used_profile_tool_policies(profile_name)
+                    self._write_info(f"Reset tool confirmation overrides for '{profile_name}' to defaults.")
+                elif action == "save_default":
+                    self._ensure_workspace_agent_profile(
+                        action_label="saving tool policy defaults",
+                        on_ready=lambda target_name: self._apply_tool_policy_yaml_edit(target_name, text),
+                    )
+            except Exception as exc:
+                self._write_error(str(exc))
+            finally:
+                self._sync_ui_from_engine()
+
+        self.push_screen(
+            ToolPolicyEditorScreen(
+                title=f"Edit Tool Policies: {profile_name}",
+                help_text="Apply saves last-used overrides. Reset clears them. Save as Default writes the workspace agent YAML.",
+                initial_text=initial_text,
+            ),
+            callback=_handle_submit,
         )
 
-    def _apply_tool_policy_yaml_edit(self, profile_name: str, text: str) -> None:
-        active_profile = self._engine.get_agent_profile(profile_name)
-        if active_profile is None:
-            raise ValueError(f"Unknown agent profile '{profile_name}'.")
-
+    def _parse_tool_policy_yaml(self, text: str) -> dict[str, str]:
         data = _load_yaml_mapping(text, label="Tool policy overrides")
         normalized: dict[str, str] = {}
         for tool_name, policy in data.items():
@@ -2523,6 +2647,13 @@ class PocketCodeTextualApp(App[None]):
             if policy_value not in {"allow", "confirm", "deny"}:
                 raise ValueError("Tool policy values must be allow, confirm, or deny.")
             normalized[str(tool_name)] = policy_value
+        return normalized
+
+    def _apply_tool_policy_yaml_edit(self, profile_name: str, text: str) -> None:
+        active_profile = self._engine.get_agent_profile(profile_name, effective=False)
+        if active_profile is None:
+            raise ValueError(f"Unknown agent profile '{profile_name}'.")
+        normalized = self._parse_tool_policy_yaml(text)
 
         tools = list(active_profile.tools) if active_profile.tools is not None else None
         self._save_workspace_agent_profile(
@@ -2533,7 +2664,28 @@ class PocketCodeTextualApp(App[None]):
             tool_confirmation_default=self._active_profile_default_confirmation(active_profile),
             tool_confirmation_overrides=normalized,
         )
+        if hasattr(self._engine, "reset_last_used_profile_tool_policies"):
+            self._engine.reset_last_used_profile_tool_policies(profile_name)
         self._write_info(f"Saved tool confirmation overrides for '{profile_name}'.")
+
+    def _save_tool_selection_default(self, profile_name: str, tools: list[str] | None) -> None:
+        active_profile = self._engine.get_agent_profile(profile_name, effective=False)
+        if active_profile is None:
+            raise ValueError(f"Unknown agent profile '{profile_name}'.")
+        self._save_workspace_agent_profile(
+            profile_name,
+            llm_profile=active_profile.llm_profile,
+            tools=tools,
+            extra_prompts=list(active_profile.extra_prompts),
+            tool_confirmation_default=self._active_profile_default_confirmation(active_profile),
+            tool_confirmation_overrides=self._active_profile_policy_overrides(active_profile),
+        )
+        if hasattr(self._engine, "reset_last_used_profile_tools"):
+            self._engine.reset_last_used_profile_tools(profile_name)
+        self._write_info(
+            f"Saved default tool allowlist for '{profile_name}': "
+            f"{'all tools' if tools is None else f'{len(tools)} selected'}."
+        )
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         widget_id = event.input.id or ""
@@ -2679,6 +2831,17 @@ class PocketCodeTextualApp(App[None]):
             self._write_info(f"Auto-confirm tools {state}.")
             self._sync_ui_from_engine()
 
+    def on_key(self, event) -> None:
+        if event.key != "space" or not isinstance(self.focused, SelectionList):
+            return
+        if self.focused.disabled or not self.focused.option_count:
+            return
+        event.prevent_default()
+        event.stop()
+        if self.focused.highlighted is None:
+            self.focused.highlighted = 0
+        self.focused.action_select()
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id != "profile-list":
             return
@@ -2727,6 +2890,8 @@ class PocketCodeTextualApp(App[None]):
             else:
                 self._engine.disable_skill(value)
                 self._write_info(f"Disabled skill: {value}")
+            if hasattr(self._engine, "set_last_used_skills"):
+                self._engine.set_last_used_skills(sorted(self._active_skill_name_set()))
         except Exception as exc:
             self._write_error(str(exc))
         finally:
@@ -2771,11 +2936,11 @@ class PocketCodeTextualApp(App[None]):
 
     def _open_tool_selection_picker(self, profile_name: str | None = None) -> None:
         if profile_name is None:
-            self._ensure_workspace_agent_profile(
-                action_label="editing tools",
-                on_ready=self._open_tool_selection_picker,
-            )
-            return
+            active_profile = self._engine.active_agent_profile
+            if active_profile is None:
+                self._write_error("No active agent selected.")
+                return
+            profile_name = active_profile.name
         active_profile = self._engine.get_agent_profile(profile_name)
         if active_profile is None:
             return
@@ -2814,33 +2979,41 @@ class PocketCodeTextualApp(App[None]):
                 for tool_name in member_values
             )
 
-        def _handle_selection(selected_values: list[str] | None) -> None:
-            if selected_values is None:
+        def _handle_selection(payload: dict[str, Any] | None) -> None:
+            if payload is None:
                 return
+            action = str(payload.get("action") or "")
+            selected_values = payload.get("values", [])
             selected_set = {
                 value
                 for value in selected_values
                 if not self._is_skill_group_value(value)
             }
             tools = None if len(selected_set) >= len(available_tools) else sorted(selected_set)
-            self._save_workspace_agent_profile(
-                profile_name,
-                llm_profile=active_profile.llm_profile,
-                tools=tools,
-                extra_prompts=list(active_profile.extra_prompts),
-                tool_confirmation_default=self._active_profile_default_confirmation(active_profile),
-                tool_confirmation_overrides=self._active_profile_policy_overrides(active_profile),
-            )
-            self._write_info(
-                f"Saved tool allowlist for '{profile_name}': "
-                f"{'all tools' if tools is None else f'{len(selected_values)} selected'}."
-            )
+            if action == "apply":
+                self._engine.set_last_used_profile_tools(profile_name, tools)
+                self._write_info(
+                    f"Saved last-used tool allowlist for '{profile_name}': "
+                    f"{'all tools' if tools is None else f'{len(selected_set)} selected'}."
+                )
+            elif action == "reset":
+                self._engine.reset_last_used_profile_tools(profile_name)
+                self._write_info(f"Reset tool allowlist for '{profile_name}' to defaults.")
+            elif action == "save_default":
+                self._ensure_workspace_agent_profile(
+                    action_label="saving tool defaults",
+                    on_ready=lambda target_name: self._save_tool_selection_default(target_name, tools),
+                )
 
         self.push_screen(
             ToolSelectionScreen(
                 title="Edit Allowed Tools",
                 tools=tuple(picker_options),
                 selected_values=initial_selected_values,
+                help_text=(
+                    "Apply saves last-used tools. Reset clears last-used overrides. "
+                    "Save as Default writes the workspace agent YAML."
+                ),
                 grouped_values=grouped_values,
             ),
             callback=_handle_selection,
@@ -2881,21 +3054,33 @@ class PocketCodeTextualApp(App[None]):
                 for skill_name in member_values
             )
 
-        def _handle_selection(selected_values: list[str] | None) -> None:
-            if selected_values is None:
+        def _handle_selection(payload: dict[str, Any] | None) -> None:
+            if payload is None:
                 return
+            action = str(payload.get("action") or "")
+            selected_values = payload.get("values", [])
             selected_set = {
                 value
                 for value in selected_values
                 if not self._is_skill_group_value(value)
             }
-            for skill_name in available_skills:
-                if skill_name in selected_set and skill_name not in active_skill_names:
-                    self._engine.enable_skill(skill_name)
-                elif skill_name not in selected_set and skill_name in active_skill_names:
-                    self._engine.disable_skill(skill_name)
+            selected_skill_names = sorted(selected_set)
+            if action == "apply":
+                self._engine.set_last_used_skills(selected_skill_names)
+                self._write_info(
+                    f"Saved last-used skills: {', '.join(selected_skill_names) if selected_skill_names else 'none'}."
+                )
+            elif action == "reset":
+                self._engine.reset_last_used_skills()
+                active_skills = sorted(self._active_skill_name_set())
+                self._write_info(f"Reset skills to defaults: {', '.join(active_skills) if active_skills else 'none'}.")
+            elif action == "save_default":
+                self._engine.set_last_used_skills(selected_skill_names)
+                self._engine.save_default_skills(selected_skill_names)
+                self._write_info(
+                    f"Saved default skills: {', '.join(selected_skill_names) if selected_skill_names else 'none'}."
+                )
             self._refresh_suggestions()
-            self._write_info(f"Active skills: {', '.join(sorted(selected_set)) if selected_set else 'none'}.")
             self._sync_ui_from_engine()
 
         self.push_screen(
@@ -2903,7 +3088,10 @@ class PocketCodeTextualApp(App[None]):
                 title="Select Skills",
                 tools=tuple(picker_options),
                 selected_values=selected_values,
-                help_text="Filter skills, toggle with Space, then choose Apply.",
+                help_text=(
+                    "Apply saves last-used skills. Reset restores default skills. "
+                    "Save as Default writes the default skill set to pocketcode.yml."
+                ),
                 empty_message="No matching skills.",
                 filter_placeholder="Filter skills...",
                 grouped_values=grouped_values,

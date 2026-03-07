@@ -402,3 +402,64 @@ class TestEngineAgentProfiles:
             "workspace_mode": "review",
         }
         assert saved["llm"]["default_profile"] == "fast"
+
+    def test_configured_enabled_skills_prefers_last_used_selection(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._config = {
+            "runtime": {
+                "textual": {
+                    "default_skills": ["python-lint"],
+                    "last_used": {"skills": ["python-testing", "missing-skill"]},
+                }
+            }
+        }
+        engine._skill_manager = _SkillManagerStub(
+            {
+                "python-lint": SkillDefinition(name="python-lint"),
+                "python-testing": SkillDefinition(name="python-testing"),
+            }
+        )
+
+        assert engine._configured_enabled_skills() == ["python-testing"]
+
+    def test_set_last_used_profile_tools_persists_textual_override(self, tmp_path):
+        profile = AgentProfile(name="coder.safe", flow="coder::coder", tools=["tool.read"])
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {"runtime": {"textual": {}}}
+        engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
+        engine.active_agent_profile = profile
+
+        engine.set_last_used_profile_tools("coder.safe", ["tool.write"])
+
+        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
+        assert saved["runtime"]["textual"]["last_used"]["agent_profiles"]["coder.safe"]["tools"] == ["tool.write"]
+        assert engine.active_agent_profile is not None
+        assert engine.active_agent_profile.tools == ["tool.write"]
+
+    def test_reset_last_used_skills_restores_default_skill_config(self, tmp_path):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {
+            "runtime": {
+                "textual": {
+                    "default_skills": ["python-lint"],
+                    "last_used": {"skills": ["python-testing"]},
+                }
+            }
+        }
+        engine._skill_manager = _SkillManagerStub(
+            {
+                "python-lint": SkillDefinition(name="python-lint"),
+                "python-testing": SkillDefinition(name="python-testing"),
+            }
+        )
+        engine.enabled_skills = ["python-testing"]
+        engine._refresh_runtime_components = lambda: None
+
+        engine.reset_last_used_skills()
+
+        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
+        assert engine.enabled_skills == ["python-lint"]
+        assert saved["runtime"]["textual"]["default_skills"] == ["python-lint"]
+        assert "last_used" not in saved["runtime"]["textual"]

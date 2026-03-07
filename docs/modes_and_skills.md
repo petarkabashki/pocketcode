@@ -120,7 +120,10 @@ Textual UI:
 - `F6` opens `Select`, including a skills picker for enabling or disabling session skills
 - the right-hand inspector includes a `Skills` selection list for the same runtime toggles
 - skill selection supports both individual skills and top-level skill groups
-- `F6` also exposes grouped or individual tool selection, tool policy editing, and a `System Settings` form that saves theme, workspace mode, and default agent/LLM values to `pocketcode.yml`
+- skill selections are persisted as last-used state and automatically restored on startup
+- `F6` also exposes grouped or individual tool selection and tool policy editing; both use `Apply` for persisted last-used state, `Reset` to clear last-used overrides, and `Save as Default` to write the current selection into the default config
+- searchable selection popups support `Ctrl+Down` to jump into the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted item
+- `F6` also exposes a `System Settings` form that saves theme, workspace mode, and default agent/LLM values to `pocketcode.yml`
 
 This repo ships a workspace-builder skill pack under `.pocketcode/skills/`:
 

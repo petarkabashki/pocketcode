@@ -88,7 +88,7 @@ Agent command shortcuts: `/ag` and `/ap` → `/agent`
 ### Status Bar Format
 
 ```
-Runtime flow: <runtime> | Agent: <agent> | LLM: <llm_profile> (<model>)
+Agent: <agent> | LLM: <llm_profile> (<model>)
 ```
 
 ### Workspace LLM Profile YAML Schema
@@ -108,6 +108,8 @@ Textual UI notes:
 - `F3` opens the popup editor selector for agent config, LLM config, tool selection, and tool policies
 - `F4` opens the popup clone selector for agent and LLM configs
 - `F6` opens `Select` for active agent, runtime LLM override, skills, grouped/individual tool selection, tool policy editing, session confirmation, and system settings
+- searchable selection popups support `Ctrl+Down` to jump to the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted item
+- skill selection plus tool/tool-policy edits persist last-used state automatically; `Reset` clears the last-used override and `Save as Default` writes the current state into the default config
 - `System Settings` applies and saves theme, workspace mode, and default agent/LLM selections to `pocketcode.yml`
 
 ### Workspace Agent YAML Schema
