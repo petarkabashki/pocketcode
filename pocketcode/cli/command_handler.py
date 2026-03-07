@@ -8,6 +8,8 @@ from pocketcode.core.engine import PocketCodeEngine
 
 logger = logging.getLogger(__name__)
 
+TEXTUAL_ONLY_COMMANDS = {"/copy", "/copy-all"}
+
 BASE_COMMAND_SUGGESTIONS = [
     "/help",
     "/list",
@@ -50,8 +52,6 @@ BASE_COMMAND_SUGGESTIONS = [
     "/skill show",
     "/skill enable",
     "/skill disable",
-    "/copy",
-    "/copy-all",
     "/exit",
     "/quit",
     "/ls",
@@ -156,6 +156,21 @@ def _print_grouped_skills(engine: PocketCodeEngine) -> None:
             print(f"    {marker} {skill_name}")
 
 
+def _get_interface_name(cli_context: Dict[str, Any]) -> str:
+    interface_name = cli_context.get("interface") if isinstance(cli_context, dict) else None
+    return str(interface_name or "basic").strip().lower()
+
+
+def _handle_interface_specific_command(command: str, interface_name: str) -> Optional[str]:
+    if interface_name == "textual":
+        print(f"{command} is available through the Textual UI command palette.")
+        return None
+
+    print(f"The {command} command is available only in the Textual UI.")
+    print("Open the full interface to use Textual-only commands.")
+    return None
+
+
 def list_command_suggestions(engine: PocketCodeEngine) -> list[str]:
     flow_names = _list_flow_names(engine)
     agent_names = _list_agent_names(engine)
@@ -187,9 +202,13 @@ def handle_command(
 
     command = _normalize_command(parts[0].lower())
     args = parts[1:]
+    interface_name = _get_interface_name(cli_context)
+
+    if command in TEXTUAL_ONLY_COMMANDS:
+        return _handle_interface_specific_command(command, interface_name)
 
     if command in {"/help"}:
-        print_help()
+        print_help(interface_name=interface_name)
         return None
 
     if command in {"/exit", "/quit"}:
@@ -206,12 +225,13 @@ def handle_command(
     if command in {"/status"}:
         status = engine.status()
         print("Runtime status:")
-        print(f"  Flow: {status.get('flow')}")
-        print(f"  Agent: {status.get('agent')}")
-        print(f"  Mode: {status.get('mode')}")
-        print(f"  Skills: {status.get('skills')}")
-        print(f"  Global LLM Override: {status['global_llm_override']}")
-        print(f"  Agent LLM Overrides: {status['agent_llm_overrides']}")
+        print(f"  Internal flow: {status.get('runtime_flow') or 'internal-flow'}")
+        print(f"  Selected flow: {status.get('flow') or 'auto'}")
+        print(f"  Agent: {status.get('agent') or 'none'}")
+        print(f"  Mode: {status.get('mode') or 'none'}")
+        print(f"  Skills: {status.get('skills') or []}")
+        print(f"  Global LLM override: {status['global_llm_override']}")
+        print(f"  Agent LLM overrides: {status['agent_llm_overrides']}")
         print(f"  Handoff LLM Overrides: {status.get('handoff_llm_overrides', {})}")
         print(f"  Config LLM Overrides: {status.get('config_llm_overrides', {})}")
         print(f"  Default LLM Profile: {status['default_llm_profile']}")
@@ -761,7 +781,7 @@ def _handle_skill_command(
     return None
 
 
-def print_help() -> None:
+def print_help(interface_name: str | None = None) -> None:
     help_text = """
 Pocketcode Commands:
   /help                          Show this help message.
@@ -780,7 +800,6 @@ Pocketcode Commands:
   /context <cmd> [opts]          Manage context. Run '/context help'.
   /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
   /agent <cmd> [opts]            Manage agents. Run '/agent help'.
-  /copy, /copy-all               Copy response text (Textual UI).
   /exit, /quit                   Exit Pocketcode.
 
 Compatibility aliases:
@@ -796,22 +815,6 @@ Compatibility aliases:
   /llm-agent -> /set llm-flow
   /llm-handoff -> /set llm-handoff
 
-Keyboard shortcuts (Textual UI):
-  Tab                           Complete current prompt input.
-  F1 / F5                       Switch Chat / Run views.
-  F3                            Open the popup edit selector (agent, mode, LLM, tools, tool policies).
-  F4                            Open the popup clone selector (agent, mode, LLM).
-  F6                            Open the Control Center (agent, mode, LLM, skills, tools, policies, presets, confirm, system settings).
-  F10                           Toggle the right inspector panel.
-  Alt+1 / Alt+2 / Alt+5         Switch Chat / Control / Run views.
-  Ctrl+Shift+A                  Copy full response console output.
-  Ctrl+Y                        Copy last assistant response.
-  Ctrl+Q                        Quit Textual UI.
-
-Textual convenience commands:
-  /copy                         Copy last assistant response.
-  /copy-all                     Copy full response console output.
-
 Shortcut aliases:
   /ls   /list
   /ag   /agent
@@ -826,6 +829,26 @@ Shortcut aliases:
   /q    /quit
 """
     print(help_text)
+
+    if interface_name == "textual":
+        textual_help = """
+Textual-only commands:
+  /copy                         Copy last assistant response.
+  /copy-all                     Copy full response console output.
+
+Textual UI shortcuts:
+  Tab                           Complete current prompt input.
+  F1 / F5                       Switch Chat / Run views.
+  F3                            Open the popup edit selector (agent, mode, LLM, tools, tool policies).
+  F4                            Open the popup clone selector (agent, mode, LLM).
+  F6                            Open the Control Center (agent, mode, LLM, skills, tools, policies, presets, confirm, system settings).
+  F10                           Toggle the right inspector panel.
+  Alt+1 / Alt+2 / Alt+5         Switch Chat / Control / Run views.
+  Ctrl+Shift+A                  Copy full response console output.
+  Ctrl+Y                        Copy last assistant response.
+  Ctrl+Q                        Quit Textual UI.
+"""
+        print(textual_help)
 
 
 def print_context_help() -> None:

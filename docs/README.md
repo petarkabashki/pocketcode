@@ -27,6 +27,14 @@ PocketCoder is an extensible terminal AI coding assistant built around PocketFlo
    pocketcode --flow my_plugin.my_agent
    ```
 
+## CLI Surface
+
+PocketCoder exposes one universal CLI help surface for commands that work across the shared CLI contract.
+
+- Universal commands include `/help`, `/list`, `/flow`, `/mode`, `/skill`, `/prompts`, `/agent`, `/reload`, `/stop`, `/cancel`, `/status`, `/context`, and `/confirm`.
+- Textual-only commands are `/copy` and `/copy-all`; they remain available inside the Textual UI and are excluded from universal help and shared suggestions.
+- Startup entrypoints use `--flow`, `--llm`, and `--prompt`. The removed `--workflow` flag and deprecated `--agent` startup alias are no longer supported.
+
 ## Plugin Authoring
 
 Plugins follow the unified plugin model introduced in 003-unified-plugin-namespace:

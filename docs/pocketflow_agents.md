@@ -4,6 +4,10 @@ PocketCoder agents are expressed as PocketFlow `Flow` factories registered in
 `plugin.yaml`. This replaces the older YAML-workflow and `agent.yaml` formats
 completely — agents ARE flows, with no separate workflow layer.
 
+This authoring terminology is internal to plugin and flow design. The public CLI
+uses agent-centered command and status wording, while interface-specific command
+discovery stays local to the interface that owns it.
+
 ---
 
 ## Overview

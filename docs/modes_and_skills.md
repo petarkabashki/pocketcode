@@ -77,7 +77,7 @@ Example `SKILL.md`:
 ```md
 ---
 name: python-testing
-description: Pytest workflow
+description: Pytest test loop
 tools:
   - core.read_file
 extra_prompts:
@@ -93,6 +93,11 @@ Skill behavior:
 - tool references listed in front matter are added to the effective tool surface
 - Python modules under `tools/*.py` are loaded when the skill is enabled
 - skill-owned tools are registered under `skill.<skill_name>.*`
+
+CLI discovery note:
+
+- `/help` shows only the universal command surface.
+- Textual-only commands such as `/copy` and `/copy-all` are documented inside the Textual UI instead of the shared help output.
 
 Discovery controls:
 

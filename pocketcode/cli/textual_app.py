@@ -89,7 +89,7 @@ def _build_stats_text(status: Dict[str, Any]) -> str:
 
 
 def _resolve_status_display_parts(status: Dict[str, Any]) -> tuple[str, str, str, str]:
-    runtime_flow = status.get("runtime_flow") or status.get("runtime_workflow") or "internal-flow"
+    runtime_flow = status.get("runtime_flow") or "internal-flow"
     run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
 
     current_llm_profile = str(
@@ -1488,7 +1488,7 @@ class PocketCodeTextualApp(App[None]):
         session_default = status.get("session_tool_confirmation_overrides", {}).get("default_policy") or INHERIT_POLICY
         summary_lines = [
             f"Agent: {active_profile_name or 'none'}",
-            f"Runtime flow: {status.get('runtime_workflow') or 'internal-flow'}",
+            f"Internal flow: {status.get('runtime_flow') or 'internal-flow'}",
             f"Agent source: {active_profile.source if active_profile else '-'}",
             f"Global LLM: {self._engine.global_llm_override or 'inherit'}",
             f"Skills: {', '.join(active_skill_names) if active_skill_names else 'none'}",
@@ -1699,7 +1699,7 @@ class PocketCodeTextualApp(App[None]):
 
         lines = [
             f"live_run_status: {self._live_run_status}",
-            f"runtime_workflow: {status.get('runtime_workflow') or 'internal-flow'}",
+            f"internal_flow: {status.get('runtime_flow') or 'internal-flow'}",
             f"active_agent: {status.get('agent') or 'auto'}",
             f"active_profile: {status.get('active_agent_profile') or 'none'}",
             f"global_llm_override: {status.get('global_llm_override') or 'none'}",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from pocketcode.cli.command_handler import handle_command
+from pocketcode.cli.command_handler import handle_command, list_command_suggestions
 
 
 class _EngineStub:
@@ -208,7 +208,109 @@ class _ModeSkillEngineStub(_EngineStub):
         self.active_skills = [skill for skill in self.active_skills if skill != name]
 
 
+class _StatusEngineStub(_EngineStub):
+    def status(self):
+        return {
+            "runtime_flow": "internal-router",
+            "flow": "core::react",
+            "agent": "coder.safe",
+            "mode": "review",
+            "skills": ["python-testing"],
+            "global_llm_override": None,
+            "agent_llm_overrides": {},
+            "handoff_llm_overrides": {},
+            "config_llm_overrides": {},
+            "default_llm_profile": "balanced",
+            "tool_confirmation": {},
+            "session_tool_confirmation_overrides": {},
+        }
+
+
 class TestCommandHandlerParsing:
+    def test_universal_command_suggestions_exclude_textual_only_commands(self):
+        suggestions = list_command_suggestions(_EngineStub())
+
+        assert "/help" in suggestions
+        assert "/agent" in suggestions
+        assert "/copy" not in suggestions
+        assert "/copy-all" not in suggestions
+
+    def test_universal_help_excludes_textual_only_commands(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "one-shot",
+        }
+
+        handle_command(
+            "/help",
+            engine=_EngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "/copy" not in captured.out
+        assert "Textual UI shortcuts" not in captured.out
+
+    def test_textual_help_includes_textual_only_commands(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "textual",
+        }
+
+        handle_command(
+            "/help",
+            engine=_EngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Textual-only commands:" in captured.out
+        assert "/copy" in captured.out
+        assert "/copy-all" in captured.out
+
+    def test_textual_only_command_reports_interface_scope_outside_textual(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "basic",
+        }
+
+        handle_command(
+            "/copy",
+            engine=_EngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "available only in the Textual UI" in captured.out
+
+    def test_status_output_uses_internal_flow_label(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+
+        handle_command(
+            "/status",
+            engine=_StatusEngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Internal flow: internal-router" in captured.out
+        assert "Selected flow: core::react" in captured.out
+        assert "workflow" not in captured.out.lower()
+
     def test_context_add_snippet_uses_shell_style_quoting(self):
         cli_context = {
             "files": set(),

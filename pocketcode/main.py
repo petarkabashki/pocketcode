@@ -41,14 +41,15 @@ def _configure_logging(log_level: str, *, stream: bool = True) -> None:
 
 def _print_startup(engine: PocketCodeEngine) -> None:
     status = engine.status()
-    print("Pocketcode plugin runtime ready.")
-    print(f"Runtime flow (internal): {status.get('runtime_workflow')}")
-    print(f"Flow: {status.get('flow') or 'auto'}")
+    print("Pocketcode runtime ready.")
+    print(f"Internal flow: {status.get('runtime_flow') or 'internal-flow'}")
+    print(f"Selected flow: {status.get('flow') or 'auto'}")
     print(f"Agent: {status.get('agent') or 'none'}")
     print(f"Global LLM override: {status['global_llm_override'] or 'none'}")
 
 
 def _run_basic_interactive_cli(engine: PocketCodeEngine, cli_context: Dict[str, Any]) -> None:
+    cli_context["interface"] = "basic"
     print("Textual UI unavailable. Using basic interactive CLI.")
     print("Type /help for commands. Ctrl+C or /exit to quit.")
 
@@ -165,12 +166,7 @@ def run() -> None:
             "Deprecated. Pocketcode always loads config from ./pocketcode.yml in the workspace root."
         ),
     )
-    parser.add_argument(
-        "--workflow",
-        help="Deprecated. Workflow selection is internal; use --flow for interactive selection.",
-    )
     parser.add_argument("--flow", help="Initial flow name override.")
-    parser.add_argument("--agent", help="Deprecated alias for --flow.")
     parser.add_argument("--llm", help="Global LLM profile override.")
     parser.add_argument(
         "--prompt",
@@ -224,11 +220,7 @@ def run() -> None:
         sys.exit(1)
 
     try:
-        if args.workflow:
-            print(
-                "Ignoring --workflow. Workflow selection is internal; use --flow for runtime control."
-            )
-        selected_flow = args.flow or args.agent
+        selected_flow = args.flow
         if selected_flow:
             engine.set_flow(None if selected_flow.lower() == "auto" else selected_flow)
         if args.llm:
@@ -244,9 +236,11 @@ def run() -> None:
         "folders": set(),
         "urls": set(),
         "snippets": {},
+        "interface": None,
     }
 
     if args.prompt is not None:
+        cli_context["interface"] = "one-shot"
         request = args.prompt.strip()
         if not request:
             print("No prompt provided. Pass text with --prompt.")
@@ -276,6 +270,7 @@ def run() -> None:
         return
 
     if force_basic_cli:
+        cli_context["interface"] = "basic"
         _print_startup(engine)
         _run_basic_interactive_cli(engine=engine, cli_context=cli_context)
         return
@@ -290,9 +285,11 @@ def run() -> None:
         raise
 
     try:
+        cli_context["interface"] = "textual"
         run_textual_cli(engine=engine, cli_context=cli_context)
     except Exception as exc:
         logger.error("Textual UI failed to start: %s", exc, exc_info=True)
+        cli_context["interface"] = "basic"
         _run_basic_interactive_cli(engine=engine, cli_context=cli_context)
 
 

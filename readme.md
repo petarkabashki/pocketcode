@@ -147,6 +147,8 @@ Precedence is: CLI flow > config flow > CLI global > dynamic handoff/flow choice
 
 ## CLI Commands
 
+Universal commands:
+
 - `/list <flows|prompts|modes|skills|agents|llms|tools>`
 - `/set <flow|llm|llm-flow|llm-handoff> ...`
 - `/flow <flow_name|auto> [--agent <agent_name>]`
@@ -158,6 +160,20 @@ Precedence is: CLI flow > config flow > CLI global > dynamic handoff/flow choice
 - `/reload`, `/status`
 - `/context ...`
 - `/confirm ...`
+
+Textual-only commands:
+
+- `/copy`: copy the last assistant response
+- `/copy-all`: copy the full response console output
+
+Textual-only commands are intentionally excluded from universal `/help` output and shared prompt suggestions.
+
+Startup flags:
+
+- `--flow <flow_name|auto>` selects the initial flow.
+- `--llm <profile_name>` sets the global LLM override.
+- `--prompt "..."` runs one request non-interactively.
+- `--workflow` and the deprecated `--agent` startup alias are no longer supported.
 
 Compatibility aliases remain available:
 
@@ -254,7 +270,7 @@ Skill example:
 ```md
 ---
 name: python-testing
-description: Pytest workflow
+description: Pytest test loop
 tools:
   - core.read_file
 extra_prompts:
@@ -279,12 +295,9 @@ Live request handling:
 - runtime progress is surfaced through a queued event stream today, which also provides the execution seam needed for future token/delta streaming
 - the fallback basic CLI and one-shot `--prompt` mode now print runtime events as they happen, including tool calls, handoffs, handoff returns, agent transition decisions, and cancellation state
 
-Prompt suggestions include commands, flows, agents, and LLM profiles.
+Prompt suggestions include universal commands, flows, agents, and LLM profiles.
 
-Textual copy commands:
-
-- `/copy`: copy the last assistant response
-- `/copy-all`: copy the full response console output
+Textual-only commands stay discoverable through Textual-local help and shortcuts instead of the shared suggestion list.
 
 Header rows:
 

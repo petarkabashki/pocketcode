@@ -1043,6 +1043,10 @@ class PocketCodeEngine:
     def status(self) -> Dict[str, Any]:
         selected_agent = self.active_agent_profile.name if self.active_agent_profile else None
         selected_llm_profile = self._selected_llm_profile()
+        runtime_flow = (
+            self._runtime_config.get("agent_runtime_flow")
+            or self._runtime_config.get("agent_runtime_workflow")
+        )
         return {
             "flow": self.current_agent,
             "agent": selected_agent,
@@ -1051,7 +1055,7 @@ class PocketCodeEngine:
             "selected_llm_profile": selected_llm_profile,
             "mode": self.active_mode.name if self.active_mode else None,
             "skills": list(self.enabled_skills),
-            "runtime_workflow": self._runtime_config.get("agent_runtime_workflow"),
+            "runtime_flow": runtime_flow,
             # T013: expose active agent profile name.
             "active_agent_profile": selected_agent,
             "active_agent": selected_agent,

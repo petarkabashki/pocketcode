@@ -36,10 +36,6 @@ class AgentCompleter(Completer):
             if name.startswith(word):
                 yield Completion(name, start_position=-len(word))
 
-
-AgentProfileCompleter = AgentCompleter
-
-
 class SnippetRemoveCompleter(Completer):
     """Completes snippet names for `/context remove snippet <name>`."""
 
