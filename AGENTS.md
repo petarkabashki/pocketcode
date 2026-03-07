@@ -1,167 +1,27 @@
 Always update the documentation to be consistent with the codebase and reflect all changes.
 
+`docs/` is the canonical documentation set and must be kept up to date with the current implementation.
+
+Keep comprehensive, up-to-date canonical documentation in `docs/` covering the architecture, design, implementation details, and runtime behavior of the system.
+
+Keep code and documentation files limited to around 500 lines where practical; when a file grows beyond that, split it functionally into appropriately named files and folders.
+
+- Treat `docs/` plus the codebase as the single source of truth for current behavior.
+- Treat `specs/` only as historical incremental design history that may be out of date.
+- If code changes, update the relevant files in `docs/` in the same change.
+- If a spec conflicts with the implementation, do not "fix" the docs to match the spec; document the implementation and, if useful, note that the spec is historical.
+- Prefer documenting current load order, precedence rules, schemas, commands, and runtime behavior over planned or aspirational behavior.
+
 Always for python load the local python environment by running `source` on .venv/bin/activate
 
 ---
 
-## Agent System
+Implementation details belong in `docs/`, not in this instruction file.
 
-### Concept
+Use these canonical docs:
 
-An **Agent** is a named configuration object that governs how a flow behaves during a session:
-- Which **LLM profile** to use (overrides engine defaults at tier 4.5)
-- Which **tools** are permitted (allowlist — `None` means all tools)
-- Extra **system prompt files** appended to the flow's base prompt (`extra_prompts`)
-- **Tool confirmation** policy defaults and per-tool overrides
-
-Every flow automatically gets a *synthesised* default agent on startup. Workspace-local YAML files and plugin-declared blocks can override defaults.
-
-Workspace-local customisation also lives under `.pocketcode/`:
-- `.pocketcode/agents/` for workspace agent YAML files
-- `.pocketcode/llm-profiles/` for workspace LLM profile YAML files created by the Textual clone/edit flow
-- `.pocketcode/plugins/` for workspace plugins
-- `.pocketcode/tools/` for shared tools auto-registered under the `workspace` namespace and visible to every flow whose tool scope is unrestricted
-- `.pocketcode/prompts/` for shared prompt files; files are registered under the `workspace` namespace and are also valid fallback prompt sources for plugin agents and agent `extra_prompts`
-
-### Agent Fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | `str` | — | Unique agent identifier |
-| `flow` | `str` | — | Qualified flow name this agent targets (`plugin::flow`) |
-| `description` | `str` | `""` | Human-readable description |
-| `llm_profile` | `str \| None` | `None` | LLM profile name; `None` inherits from engine |
-| `extra_prompts` | `List[str]` | `[]` | File paths to append to system prompt |
-| `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` = unrestricted |
-| `tool_confirmation` | `dict` | `{}` | Keys: `default` (policy), `overrides` (per-tool policies) |
-| `source` | `str` | `"synthesised"` | One of `"synthesised"`, `"plugin"`, `"workspace"` |
-| `source_path` | `Path \| None` | `None` | Path to the workspace YAML file if applicable |
-
-### Precedence (Name Collision)
-
-Plugin-declared > Workspace file > Synthesised default
-
-### LLM Resolution Tier Order
-
-1. CLI per-flow override
-2. Config per-flow override
-3. CLI global override
-4. Dynamic per-flow override
-4.5 **Active agent** `llm_profile`
-5. Flow definition `llm_profile`
-6. Default LLM profile
-7. LLM router default
-
-### Tool Confirmation Tier Order
-
-**PRE-CHECK**: Tool not in `agent.tools` → deny immediately (no confirmation prompt)
-
-1. Session `[flow][tool]`
-1.5 **Agent** `tool_confirmation.overrides[tool]`
-2. Config `[flow][tool]`
-3. Session global `[tool]`
-4. Session `[flow].default`
-4.5 **Agent** `tool_confirmation.default`
-5. Config `[flow].default`
-6. Config global `[tool]`
-7. Session global default
-8. Config global default
-
-### CLI Commands
-
-```
-/prompts                                    List all available prompts.
-/agent list                                 List all available agents.
-/agent show [agent_name]                    Show details (default: active agent).
-/agent switch <agent_name>                  Activate an agent.
-/agent clone <source> <new_name>            Clone an agent to a new workspace file.
-/agent edit llm <agent> <profile|inherit>   Set or clear the agent LLM override.
-/agent edit prompts <agent> <paths...>      Replace extra prompt paths.
-/agent edit prompts <agent> clear           Clear extra prompt paths.
-/agent help                                 Show help.
-
-/flow <flow_name> [--agent <agent_name>]    Set flow + optionally activate an agent.
-```
-
-Agent command shortcuts: `/ag` and `/ap` → `/agent`
-
-### Status Bar Format
-
-```
-Agent: <agent> | LLM: <llm_profile> (<model>)
-```
-
-### Workspace LLM Profile YAML Schema
-
-Stored in `.pocketcode/llm-profiles/<name>.yaml`:
-
-```yaml
-name: my-fast-clone   # required
-provider: gemini      # required
-model: gemini-2.5-flash
-parameters:           # optional
-  temperature: 0.2
-  max_output_tokens: 3072
-```
-
-Textual UI notes:
-- `F3` opens the popup editor selector for agent config, mode config, LLM config, tool selection, and tool policies
-- `F4` opens the popup clone selector for agent, mode, and LLM configs
-- `F6` opens the `Control Center` for active agent/profile selection, mode selection, runtime LLM override, skills, grouped/individual tool selection, tool policy editing, selection presets, session confirmation, and system settings
-- searchable selection popups support `Ctrl+Down` to jump to the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted item
-- tool selection groups follow the tool file/folder path under `tools/`; separate files such as `tools/filesystem.py` and `tools/user_input.py` appear as separate groups, and deeper folders create nested groups
-- mode/profile/LLM/skill selection plus tool/tool-policy edits persist last-used state automatically; `Reset` clears the last-used override and `Save as Default` writes the current state into the default config
-- editing a plugin/synthesised LLM profile from the Textual UI prompts for a workspace clone first, then opens the YAML editor against that workspace copy
-- `System Settings` applies and saves theme, workspace mode, and default agent/LLM selections to `pocketcode.yml`
-
-### Workspace Agent YAML Schema
-
-Stored in `.pocketcode/agents/<name>.yaml`:
-
-```yaml
-name: my-agent          # required
-flow: plugin::flowname  # required (qualified name)
-description: "Optional description"
-llm_profile: gpt-4o     # optional; omit to inherit
-tools:                  # optional; omit for unrestricted
-  - filesystem::read_file
-  - search::web_search
-extra_prompts:          # optional file paths
-  - prompts/safety.md   # relative to this file or .pocketcode/
-tool_confirmation:
-  default: confirm      # optional: allow | confirm | deny
-  overrides:
-    filesystem::delete_file: deny
-```
-
-### Plugin plugin.yaml Inline Block
-
-```yaml
-flows:
-  myflow:
-    # ... existing flow fields ...
-    default_agent:
-      name: myplugin::myflow:safe
-      description: "Safe mode agent"
-      llm_profile: gpt-4o-mini
-      tools:
-        - search::web_search
-      tool_confirmation:
-        default: confirm
-```
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `pocketcode/core/agent_manager.py` | Agent registry exports |
-| `pocketcode/core/agent_profile_manager.py` | Agent registry implementation: load, get, list, clone, save |
-| `pocketcode/core/runtime_models.py` | `Agent` and `FlowDefinition` dataclasses |
-| `pocketcode/core/engine.py` | `set_flow()`, `set_active_agent()`, `list_flows()`, `list_available_agents()` |
-| `pocketcode/core/agent_runtime.py` | LLM tier 4.5, tool filtering, extra_prompts injection |
-| `pocketcode/core/tool_runtime.py` | Confirmation tiers 1.5/4.5, tool allowlist pre-check |
-| `pocketcode/cli/command_handler.py` | `/flow`, `/prompts`, and `/agent` CLI surface, with agent-only shortcuts |
-| `pocketcode/cli/completers.py` | `AgentCompleter` for tab-completion |
-| `pocketcode/cli/textual_app.py` | Status bar Flow/Agent segments, suggestion list |
-| `tests/unit/test_agent_profile_manager.py` | Agent manager unit tests |
-| `tests/unit/test_agent_profile_resolution.py` | LLM/confirmation/allowlist unit tests |
+- `docs/agent_system.md` for agent profile fields, precedence, schemas, commands, and key files
+- `docs/architecture.md` for runtime loading and resolution order
+- `docs/configuration.md` for workspace paths and config structure
+- `docs/cli.md` for the command and Textual UI surface
+- `docs/pocketflow_agents.md` for the flow versus profile model

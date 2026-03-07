@@ -1,10 +1,10 @@
 # Run Cancellation And Hard-Stop Design
 
-This document describes the current cancellation model in Pocketcode and the recommended path to stronger stop guarantees for long-running tools.
+This document is the canonical reference for the current cancellation model in PocketCoder and the currently implemented hard-stop behavior for long-running tools.
 
 ## Current State
 
-Pocketcode now supports cooperative run cancellation from the CLI and Textual UI:
+PocketCoder currently supports cooperative run cancellation from the CLI and Textual UI:
 
 - `/stop` and `/cancel` request cancellation on the active `RunHandle`
 - the basic CLI also converts `Ctrl+C` during an active run into a stop request
@@ -24,7 +24,7 @@ This does **not** force-stop code that is currently blocked inside:
 - a Python tool function running inline in-process
 - a blocking OS command launched inside a tool that does not expose its child process to the runtime
 
-Pocketcode now also has an initial hard-stop path for `execute_command` via a managed subprocess execution mode. That path allows the runtime to terminate the underlying OS process when cancellation is requested.
+PocketCoder also has an implemented hard-stop path for managed subprocess tools such as `execute_command`. That path allows the runtime to terminate the underlying OS process when cancellation is requested.
 
 ## Constraint
 

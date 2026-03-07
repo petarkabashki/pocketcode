@@ -1,38 +1,45 @@
-# Modes and Skills
+# Modes And Skills
 
-Pocketcode now supports two Markdown-authored session overlays on top of the
-existing `flow + agent` runtime:
+This document describes the current Markdown-authored runtime overlay system.
 
-- `mode`: one active session preset
-- `skill`: zero or more active capability packs
+## Overview
 
-Neither introduces a second runtime. Both resolve into the existing agent
-runtime controls: prompt text, LLM override, tool scope, and tool confirmation.
+Modes and skills are session-time overlays on top of the flow plus agent-profile runtime.
+
+- a mode resolves into one ephemeral active profile
+- skills are additive and can be enabled together
+
+Neither introduces a second execution engine.
 
 ## Modes
 
-Modes live under `.pocketcode/modes/*.md`.
+### Location
 
-Discovery controls:
+Modes live under:
 
-- Rename a mode file or parent folder to include `.disabled`.
-- Add workspace-owned rules in `<workspace>/.pocketcode/.pocketcodeignore`, for example `modes/archive/`.
+```text
+.pocketcode/modes/*.md
+```
 
-Each mode uses YAML front matter plus a Markdown body:
+### File Format
+
+Modes use YAML front matter plus a Markdown body.
+
+Example:
 
 ```md
 ---
 name: review
 description: Review mode
-flow: core::react
-llm_profile: gemini_default
+flow: core.react
+llm_profile: fast-review
 tool_confirmation:
   default: confirm
 ---
 Focus on bugs, regressions, unsafe assumptions, and missing tests.
 ```
 
-Supported front matter keys:
+### Supported Front Matter Keys
 
 - `name`
 - `description`
@@ -43,36 +50,73 @@ Supported front matter keys:
 - `extra_prompts`
 - `tool_confirmation`
 
-Resolution rules:
+### Tool Selection Semantics
 
-- if `agent` is set, the mode inherits from that agent profile first
-- else if `flow` is set, the mode inherits from the flow's default profile
-- the Markdown body becomes inline system prompt text for an ephemeral active profile
-- `extra_prompts` are resolved relative to the mode file first, then workspace prompt roots
+Mode tool selection is normalized from front matter as follows:
 
-CLI:
+- omitted: inherit from the base profile
+- `all` or `*`: unrestricted profile tool filter
+- `none` or `deny`: empty allowlist
+- `inherit` or `default`: clear explicit mode tool override
+- list: explicit allowlist
 
-- `/mode list`
-- `/mode show [name]`
-- `/mode switch <name>`
-- `/mode clear`
+### Mode Resolution
+
+When a mode is activated, the engine resolves a base profile in this order:
+
+1. `mode.agent`
+2. `mode.flow`
+3. current active profile
+4. current flow default profile
+
+Then it merges:
+
+- target flow
+- LLM override
+- inline prompt body
+- extra prompt files
+- tool allowlist
+- tool confirmation policy
+
+The resulting object becomes the active ephemeral profile for the session.
+
+### Mode Commands
+
+Current commands:
+
+```text
+/mode list
+/mode show [mode_name]
+/mode switch <mode_name>
+/mode clear
+```
 
 ## Skills
 
-Skills live under `.pocketcode/skills/<skill_name>/`.
+### Location
 
-Expected layout:
+Skills live under:
+
+```text
+.pocketcode/skills/<skill_name>/
+```
+
+### Expected Layout
 
 ```text
 .pocketcode/skills/python-testing/
 ├── SKILL.md
-├── tools/
-├── scripts/
+├── assets/
 ├── references/
-└── assets/
+├── scripts/
+└── tools/
 ```
 
-Example `SKILL.md`:
+Only `SKILL.md` is required.
+
+### `SKILL.md` Format
+
+Example:
 
 ```md
 ---
@@ -86,69 +130,96 @@ extra_prompts:
 Reproduce failures first, then patch minimally.
 ```
 
-Skill behavior:
+### Skill Contributions
 
-- the Markdown body is appended to the active system prompt while enabled
-- `extra_prompts` are resolved relative to the skill directory first
-- tool references listed in front matter are added to the effective tool surface
-- Python modules under `tools/*.py` are loaded when the skill is enabled
-- skill-owned tools are registered under `skill.<skill_name>.*`
+Skills can contribute:
 
-CLI discovery note:
+- inline prompt body text
+- referenced prompt files through `extra_prompts`
+- references to already-registered tools through `tools`
+- new Python tool modules loaded from `tools/*.py`
+- static reference files, scripts, and assets for human use
 
-- `/help` shows only the universal command surface.
-- Textual-only commands such as `/copy` and `/copy-all` are documented inside the Textual UI instead of the shared help output.
+### Skill Tool Names
 
-Discovery controls:
+Skill-provided tools are registered under:
 
-- Rename a skill directory, `SKILL.md`, or any nested asset/tool folder so one path component contains `.disabled`.
-- Add workspace-owned rules in `<workspace>/.pocketcode/.pocketcodeignore`.
-- Rules are evaluated relative to `.pocketcode/` and support `!` re-includes.
-
-Example:
-
-```gitignore
-skills/*/tools/*.py
-!skills/python-testing/tools/run_pytest.py
-skills/legacy/
+```text
+skill.<slug>.<tool_name>
 ```
 
-CLI:
+Where `<slug>` is derived from the skill name.
 
-- `/skill list` (grouped by top-level skill name prefix; for example `pocketcode` and `pocketflow`)
-- `/skill show <name>`
-- `/skill enable <name>`
-- `/skill disable <name>`
+### Skill Commands
 
-Textual UI:
+Current commands:
 
-- `F6` opens the `Control Center`, which drills into agent, mode, LLM, skills, tools, tool policies, selection presets, session confirmation, and system settings
-- `F3` opens the edit selector for agent, mode, LLM, tools, and tool policies
-- `F4` opens the clone selector for agent, mode, and LLM configs
-- the right-hand inspector includes a `Skills` selection list for the same runtime toggles
-- skill selection supports both individual skills and top-level skill groups
-- tool selection nests groups from the tool source path under `tools/`; separate files such as `tools/filesystem.py` and `tools/user_input.py` appear as separate groups, and nested folders create nested groups
-- mode, active profile, global LLM override, skills, session confirmation, auto-confirm, and per-profile tool/policy overrides are persisted as last-used state and restored on startup
-- the Textual console starts empty; startup status is shown in the header and control panels rather than injected into the output log
-- when launching the Textual UI, startup/plugin logs are written to `pocketcode.log` instead of the terminal stream to keep the screen clean
-- grouped or individual tool selection and tool policy editing use `Apply` for persisted last-used state, `Reset` to clear last-used overrides, and `Save as Default` to write the current selection into the default config
-- editing a plugin/synthesised agent or LLM config from the Textual UI prompts for a workspace clone first, then opens the editor against that new workspace-backed copy
-- the control center supports editing, cloning, and deleting the current workspace-backed mode, agent, and LLM configs
-- named selection presets save and reload the whole current runtime selection snapshot, including the active mode/profile, LLM override, skills, confirmation default, auto-confirm flag, and persisted per-profile tool/policy overrides
-- searchable selection popups support `Ctrl+Down` to jump into the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted item without losing the current row
-- the control center also exposes a `System Settings` form that saves theme, workspace mode, and default agent/LLM values to `pocketcode.yml`
+```text
+/skill list
+/skill show <skill_name>
+/skill enable <skill_name>
+/skill disable <skill_name>
+```
 
-This repo ships a workspace-builder skill pack under `.pocketcode/skills/`:
+`/skill list` groups skills by top-level name prefix.
 
-- `pocketcode-workspace-builder`: umbrella skill for the workspace builder agent
-- `pocketflow-graph-authoring`: PocketFlow node/flow authoring
-- `pocketcode-plugin-authoring`: plugin manifests and flow registration
-- `pocketcode-profiles-prompts`: composite agents, modes, skills, and prompt includes
-- `pocketcode-tools-runtime`: tools and runtime execution behavior
-- `pocketcode-workspace-assets`: shared `.pocketcode/` assets and portability rules
+## Discovery Controls
 
-## Runtime precedence
+Modes and skills can be disabled without deleting them.
 
-Prompt and tool behavior resolve in this order:
+### `.disabled`
 
-`flow defaults -> agent -> active mode -> enabled skills -> session overrides`
+If any path component contains `.disabled`, the runtime skips that file or directory.
+
+### `.pocketcode/.pocketcodeignore`
+
+Workspace-owned modes and skills use rules from:
+
+```text
+.pocketcode/.pocketcodeignore
+```
+
+Patterns are gitignore-style and support `!` re-includes.
+
+## Textual UI Integration
+
+The Textual UI currently supports:
+
+- switching the active mode
+- enabling and disabling skills
+- persisting last-used skill selections
+- saving default skill selections to config
+- saving full runtime selection presets that include mode and skills
+
+The primary controls are exposed through:
+
+- `F3` edit picker
+- `F4` clone picker
+- `F6` Control Center
+
+## Prompt And Tool Precedence
+
+Current runtime precedence for these overlays is:
+
+```text
+flow base -> active agent profile -> active mode -> enabled skills -> session overrides
+```
+
+More precisely:
+
+- modes resolve into the active profile before a turn starts
+- skills append prompt guidance and add tools after the profile has been resolved
+- session-level Textual overrides can further modify profile tools and confirmation overrides
+
+## Repository-Shipped Workspace Skills
+
+This repository currently ships workspace skills under `.pocketcode/skills/`, including:
+
+- `pocketcode-workspace-builder`
+- `pocketflow-graph-authoring`
+- `pocketcode-plugin-authoring`
+- `pocketcode-profiles-prompts`
+- `pocketcode-tools-runtime`
+- `pocketcode-workspace-assets`
+
+These are ordinary workspace skills and follow the same loading rules as any other skill.

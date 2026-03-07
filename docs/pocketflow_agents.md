@@ -1,136 +1,211 @@
-# PocketFlow Agents
+# Flows And Agent Profiles
 
-PocketCoder agents are expressed as PocketFlow `Flow` factories registered in
-`plugin.yaml`. This replaces the older YAML-workflow and `agent.yaml` formats
-completely — agents ARE flows, with no separate workflow layer.
+This document describes the current relationship between executable flows and agent profiles.
 
-This authoring terminology is internal to plugin and flow design. The public CLI
-uses agent-centered command and status wording, while interface-specific command
-discovery stays local to the interface that owns it.
+## One Executable Model, Multiple Overlays
 
----
+PocketCoder executes flows. Agent profiles do not replace flows; they configure how a selected flow runs.
 
-## Overview
+The current stack is:
 
-A PocketFlow agent is a Python module that contains:
+1. flow definition
+2. agent profile
+3. optional active mode
+4. optional enabled skills
+5. session overrides from the CLI or Textual UI
 
-1. One or more `Node` subclasses (each node is a step in the agent's reasoning loop).
-2. A `create_flow() -> Flow` factory function that wires the nodes into a `Flow` and
-   returns it.
+## Flow Authoring With PocketFlow
 
-The `Flow` is then referenced from `plugin.yaml` via `module:` + `entry_fn:`.
+The canonical authored flow path is:
 
----
+1. implement a PocketFlow factory in Python
+2. register it in `plugin.yaml` under `flows:`
 
-## Creating an Agent
-
-### 1. Define Nodes
+Example:
 
 ```python
-from pocketflow import Node
-from typing import Any, Dict
+from pocketflow import Flow, Node
+
 
 class ThinkNode(Node):
-    def prep(self, shared: Dict[str, Any]) -> str:
-        """Extract the task from shared state."""
+    def prep(self, shared):
         return shared.get("task", "")
 
-    def exec(self, task: str) -> str:
-        """Pure computation step — no shared state side-effects here."""
-        return task  # hand off to LLM router when wired
+    def exec(self, task):
+        return task
 
-    def post(self, shared: Dict[str, Any], prep_res: str, exec_res: str) -> str:
-        """Update shared state and return an action string for branching."""
+    def post(self, shared, prep_res, exec_res):
         shared["result"] = exec_res
-        return "continue"  # matches a transition key defined in the Flow
-```
+        return "done"
 
-### 2. Wire into a Flow
-
-```python
-from pocketflow import Flow
 
 def create_flow() -> Flow:
-    think = ThinkNode()
-    # Simple single-node flow:
-    return Flow(start=think)
+    return Flow(start=ThinkNode())
 ```
 
-For multi-step agents, connect nodes with the `>>` operator:
-
-```python
-def create_flow() -> Flow:
-    plan = PlanNode()
-    execute = ExecuteNode()
-    review = ReviewNode()
-
-    plan >> {"execute": execute, "done": None}
-    execute >> {"review": review, "retry": execute}
-    review >> {"done": None, "revise": execute}
-
-    return Flow(start=plan)
-```
-
-### 3. Register in `plugin.yaml`
+Manifest registration:
 
 ```yaml
-schema_version: 1
-name: my_plugin
-description: My plugin.
-
 flows:
-  my_agent:
-    module: "flows/my_agent.py"
-    entry_fn: "create_flow"
-    description: "Does X using Y."
-    tools: [my_tool]
-    prompt_files: ["prompts/system.md"]
+  analyst:
+    module: flows/analyst.py
+    entry_fn: create_flow
+    description: Analyze the current workspace.
 ```
 
----
+## What A Flow Definition Can Do
 
-## Shared Store (`shared`)
+A flow definition can supply:
 
-The `shared` dictionary is the single mutable context passed between all nodes in a
-session. Useful keys injected by the runtime:
+- a PocketFlow `flow_instance`
+- an `llm_profile`
+- a base tool list
+- handoff targets and policies
+- pre, step, and post handlers
+- base prompt text and prompt source files
+- an inline default agent profile
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `"task"` | `str` | Initial user request |
-| `"messages"` | `list` | Conversation history |
-| `"_registry"` | `PluginManager` | Live plugin registry snapshot |
-| `"_llm_router"` | `LLMRouter` | LLM routing client (if wired) |
-| `"results"` | `dict` | Accumulated outputs |
+The flow is the authoritative base layer for execution.
 
----
+## Agent Profiles
 
-## Cross-Flow Delegation
+An agent profile is a named `CompositeAgent` that targets one flow.
 
-An orchestrating flow (e.g., `micromanager`) can delegate to other flows by
-resolving their `FlowDefinition` from `shared["_registry"]`:
+Profiles can change:
 
-```python
-def post(self, shared, prep_res, exec_res):
-    registry = shared.get("_registry")
-    try:
-        flow_def = registry.agents.resolve("coder::coder")
-        flow_def.flow_instance.run(shared)
-    except Exception as exc:
-        shared["error"] = str(exc)
-    return "done"
+- `llm_profile`
+- `inline_prompt`
+- `extra_prompts`
+- `tools`
+- `tool_confirmation`
+
+Profiles do not define executable graph logic. They select and constrain behavior for an existing flow.
+
+## Agent Profile Sources
+
+Current profile sources are:
+
+1. inline `default_agent` inside a flow definition
+2. plugin-local `agents/*.yaml`
+3. workspace `.pocketcode/agents/*.yaml`
+4. synthesised fallback profile created from the flow definition
+
+Effective precedence is:
+
+1. plugin-defined profiles
+2. workspace profiles
+3. synthesised defaults
+
+## Synthesised Defaults
+
+Every loaded flow gets a synthesised default profile if no higher-precedence profile replaces that name.
+
+That synthesised profile:
+
+- uses the flow's qualified name as its own name
+- targets the same flow
+- inherits the flow's `llm_profile`
+- inherits the flow's tool list
+
+## Workspace Agent Profile Schema
+
+Current workspace profile schema:
+
+```yaml
+name: my-review-profile
+flow: core.react
+description: Review-focused profile
+llm_profile: fast-review
+tools:
+  - core.read_file
+  - core.search_code
+extra_prompts:
+  - prompts/review.md
+tool_confirmation:
+  default: confirm
+  overrides:
+    core.execute_command: deny
 ```
 
----
+Notes:
 
-## Architecture Notes
+- `flow` is required.
+- `tools` omitted means inherit the flow tool surface.
+- `tools: []` means allow no base tools.
 
-- Flows supersede workflows: there is no separate `workflows:` YAML — the `Flow`
-  graph IS the workflow.
-- `flow_instance` is eagerly created at plugin-load time by calling `entry_fn()`.
-  If the factory raises, the flow is skipped and `ERROR` is logged.
-- All flows are addressed by their qualified name `{plugin}.{flow}` in the
-  `NamespaceRegistry`.
+## Modes Resolve Into Profiles
 
-See [Plugin Architecture](plugin_architecture.md) for the full plugin model.
-See [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)
-for an end-to-end walkthrough of creating a new plugin.
+Modes are not a separate execution system. A mode is resolved into an ephemeral agent profile.
+
+Mode resolution in the engine works like this:
+
+1. resolve a base profile from `mode.agent`, `mode.flow`, the active profile, or the current flow
+2. merge mode `llm_profile`, prompts, tools, and confirmation policy
+3. activate the resulting ephemeral profile against the target flow
+
+Mode inline prompt text is appended after the base profile inline prompt.
+
+## Skills Extend The Active Profile
+
+Skills do not replace the active profile either. They extend it by adding:
+
+- inline prompt guidance
+- extra prompt files
+- references to existing tools
+- skill-provided tool modules
+
+Skill prompt text is appended after the active profile prompt content.
+
+## Effective Prompt Composition
+
+For a given flow turn, the effective prompt is:
+
+1. flow system prompt
+2. active profile inline prompt
+3. active profile extra prompt files
+4. enabled skill inline prompts
+5. enabled skill extra prompt files
+
+## Effective Tool Surface
+
+For a given flow turn, the effective tool surface is:
+
+1. flow tools
+2. filtered by active profile allowlist when present
+3. extended by enabled skill references to existing tools
+4. extended by enabled skill-provided tools
+
+## Programmatic Flow Runtime Helpers
+
+When a PocketFlow `flow_instance` runs, the runtime injects services into the shared store, including:
+
+- `_llm_router`
+- `_tool_runtime`
+- `_agent_llm_profile`
+- `_agent_system_prompt`
+- `_agent_tool_definitions`
+- `_registry`
+
+These are runtime conveniences, not part of the manifest schema.
+
+## Handoffs
+
+A flow can hand off to other flows through `handoff_agents` and optional handoff policy configuration.
+
+Current handoff behavior supports:
+
+- target flow selection
+- handoff-level LLM overrides
+- whole-context or delegated-context mode
+- optional return-to-caller behavior
+
+## Authoring Guidance
+
+When documenting or implementing new behavior, keep these distinctions explicit:
+
+- flows are executable
+- agent profiles are named overlays for flows
+- modes are ephemeral overlays resolved into profiles
+- skills are additive session extensions
+
+That separation is the current canonical model in the codebase.

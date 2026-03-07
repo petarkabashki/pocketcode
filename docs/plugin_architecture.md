@@ -1,225 +1,258 @@
 # Plugin Architecture
 
-PocketCoder plugins are self-contained directories that declare tools, prompts, and
-flows in a single `plugin.yaml` manifest. Every resource is addressed by a
-two-part qualified name: `plugin_name.resource_name`.
+This document describes the current plugin model implemented by `PluginManager` and `ManifestLoader`.
 
----
+## Canonical Plugin Model
 
-## Unified Plugin Model
+The canonical plugin format is `plugin.yaml` with `schema_version: 1`.
 
-As of the 003-unified-plugin-namespace release, all plugins share one manifest format
-and one namespace. There are no separate workflow YAML files — flow logic is expressed
-as a [PocketFlow](pocketflow_agents.md) `Flow` factory.
+Plugins can contribute:
 
-### Plugin Directory Layout
+- tools
+- flows
+- prompts
+- LLM profiles
+- plugin-local agent profiles in `agents/*.yaml`
 
-```
-my_plugin/
-├── plugin.yaml          # Required: unified manifest (schema_version: 1)
-├── flows/
-│   ├── __init__.py      # Empty package init
-│   └── my_agent.py      # PocketFlow Node + Flow factory
-├── agents/
-│   └── my_agent.yaml    # Composite runtime agent targeting a flow
-├── prompts/
-│   └── system.md       # Markdown system prompt
-└── tools/
-    └── my_tools.py     # BaseTool subclasses
-```
+## Discovery Roots
 
----
+Current plugin discovery sources are:
 
-## Plugin Manifest (`plugin.yaml`)
+1. package plugins under `pocketcode/plugins/`
+2. extra plugin roots listed in `runtime.plugin_paths`
 
-Every plugin **must** have a `plugin.yaml` with `schema_version: 1` as its first key.
+The common workspace setup is to point `runtime.plugin_paths` at `.pocketcode/plugins`.
+
+## Supported Plugin Loading Forms
+
+`PluginManager` supports three loading paths:
+
+1. factory plugin: a plugin root with `__init__.py` exporting `get_plugin(config)`
+2. manifest plugin: a plugin root with `plugin.yaml`
+3. legacy compatibility plugin: a plugin root with `agent.yaml`
+
+If a plugin root contains `__init__.py`, the factory loading path is attempted before manifest loading.
+
+## Canonical Manifest Layout
+
+Example:
 
 ```yaml
 schema_version: 1
 name: my_plugin
-description: "What this plugin does."
+description: Example plugin
 
 tools:
-  my_tool: "tools/my_tools.py:MyTool"
-
-flows:
-  my_agent:
-    module: "flows/my_agent.py"
-    entry_fn: "create_flow"
-    description: "Flow that does X."
-    tools: [my_tool]
-    prompt_files: ["prompts/system.md"]   # `prompts:` is also accepted as an alias
+  read_notes: tools/notes.py:ReadNotesTool
 
 prompts:
-  system: "prompts/system.md"
-```
+  system: prompts/system.md
 
-| Key | Required | Description |
-|-----|----------|-------------|
-| `schema_version` | ✅ | Must be `1`. |
-| `name` | Optional | Defaults to the directory name. |
-| `description` | Optional | Human-readable summary. |
-| `tools` | Optional | `local_name: "file.py:ClassName"` mappings. |
-| `flows` | Optional | Flow blocks with `module` + `entry_fn`. |
-| `prompts` | Optional | Top-level prompt registry entries: `local_name: "prompts/file.md"`. |
+llm_profiles:
+  fast:
+    provider: gemini
+    model: gemini-3.1-flash-lite-preview
 
----
-
-## Flow Factory (`flows/my_agent.py`)
-
-Each flow is a zero-argument factory function that returns a PocketFlow `Flow`.
-
-```python
-from __future__ import annotations
-from typing import Any, Dict
-from pocketflow import Flow, Node
-
-class MyThinkNode(Node):
-    def prep(self, shared: Dict[str, Any]) -> str:
-        return shared.get("task", "")
-
-    def exec(self, task: str) -> str:
-        return task                          # forward to LLM router if wired
-
-    def post(self, shared, prep_res, exec_res) -> str:
-        shared["result"] = exec_res
-        return "continue"
-
-def create_flow() -> Flow:
-    return Flow(start=MyThinkNode())
-```
-
-Register the factory in `plugin.yaml` under `flows:`:
-
-```yaml
 flows:
-  my_agent:
-    module: "flows/my_agent.py"
-    entry_fn: "create_flow"
-    prompt_files: ["prompts/system.md"]
+  analyst:
+    description: Analyze workspace notes
+    module: flows/analyst.py
+    entry_fn: create_flow
+    llm_profile: fast
+    tools:
+      - read_notes
+      - core.read_file
+    prompt_files:
+      - prompts/system.md
 ```
 
-## Composite Agents (`agents/*.yaml`)
+## Manifest Keys
 
-Composite agents are YAML configuration objects that target a flow and optionally
-override prompts, tools, LLM, and confirmation policy.
+Top-level keys currently used by the loader:
 
-```yaml
-name: my_plugin::my_agent
-flow: my_plugin::my_agent
-description: Safe profile for the main flow.
-tools:
-  - my_tool
-extra_prompts:
-  - prompts/review.md
-tool_confirmation:
-  default: confirm
-```
+- `schema_version`
+- `name`
+- `description`
+- `tools`
+- `flows`
+- `prompts`
+- `llm_profiles`
 
-## Discovery Controls
+Legacy top-level keys such as `components`, `workflows`, `node_definitions`, and `modes` are not part of the canonical model and trigger warnings when present.
 
-Plugin discovery and plugin-local resources can be turned off in two ways:
+## Tool Registration
 
-- Rename a plugin file or folder so one path component contains `.disabled`.
-- Add rules to the workspace-level `<workspace>/.pocketcodeignore`.
-
-The workspace-level plugin ignore file uses gitignore-style patterns and applies to built-in and external plugin roots by plugin directory name:
-
-- `tools/`
-- `prompts/`
-- `agents/`
-- flow module files referenced from `plugin.yaml`
+Manifest `tools` is a mapping of local name to `path.py:ObjectName`.
 
 Example:
 
-```gitignore
-core/prompts/drafts/
-architect/tools/*.py
-!architect/tools/search.py
-my_external_plugin/agents/experimental.yaml
+```yaml
+tools:
+  search_code: tools/search.py:SearchCodeTool
 ```
 
-Whole plugins can also be disabled by renaming the plugin directory itself, for example `my_plugin.disabled/`.
+Loaded tool implementations may be:
 
----
+- `BaseTool` subclasses
+- `BaseTool` instances
+- plain callables
 
-## Namespace & Qualified Names
+After registration, the canonical qualified name is `plugin.tool`.
 
-Every resource is registered as `{plugin_name}.{local_name}`:
+## Flow Definitions
 
-| Local reference | Qualified name | Resolves to |
-|-----------------|----------------|-------------|
-| `my_tool` (from `my_plugin`) | `my_plugin.my_tool` | `MyTool` impl |
-| `my_agent` | `my_plugin.my_agent` | `FlowDefinition` with Flow |
+Each manifest flow becomes a `FlowDefinition`.
 
-Unqualified bare-name resolution:
-- **Unique owner** → resolved with a `WARNING` suggesting qualification.
-- **Multiple owners** → raises `RegistryError`; caller must qualify the name.
+Required fields:
 
----
+- `module`
+- `entry_fn`
 
-## Core Plugin (`pocketcode/plugins/core`)
+Important optional fields:
 
-The package-owned `core` plugin ships the default runtime flow plus the shared interactive tool family. All other repo-shipped plugins now live under `.pocketcode/plugins/` and are discovered through `runtime.plugin_paths` just like workspace-local plugins. Git and context elephant store tools are implemented and registered from the workspace plugins at `.pocketcode/plugins/workspace_git` and `.pocketcode/plugins/workspace_context`. The only remaining compatibility surface for git is the `pocketcode.tools` package export; the old core git module is gone:
+- `description`
+- `llm_profile`
+- `tools`
+- `allowed_tools` as a compatibility alias for `tools`
+- `handoff_agents`
+- `execution_mode`
+- `mode` as a compatibility alias for `execution_mode`
+- `deterministic_handler`
+- `handler` as a compatibility alias for `deterministic_handler`
+- `composite_agents`
+- `sub_agents` and `delegate_agents` as compatibility aliases
+- `pre`, `pre_steps`
+- `steps`, `exec`, `exec_steps`
+- `post`, `post_steps`
+- `handoff_policies`
+- `default_handoff_policy`
+- `system_prompt`, `prompt`
+- `system_prompt_file`, `prompt_file`, `prompt_files`
+- `prompts` as a compatibility alias for `prompt_files`
+- `default_agent`, `default_agent_profile`
 
-| Qualified name | Description |
-|----------------|-------------|
-| `core.read_file` | Read a file from the workspace |
-| `core.write_to_file` | Write content to a file |
-| `core.select_filesystem_entry` | Ask the local user to choose files/folders |
-| `core.extract_text` | Extract lines/sections from a file or inline text |
-| `core.stage_text_replace` | Preview and stage a line/pattern-based replacement |
-| `core.apply_staged_edit` | Apply a previously staged file edit |
-| `core.cancel_staged_edit` | Cancel one or more staged file edits |
-| `core.search_code` | Search the codebase |
-| `core.execute_command` | Run a shell command |
-| `core.ask_user_input` | Prompt the user for free-form text |
-| `core.ask_user_buttons` | Prompt the user with button-style options |
-| `core.ask_user_radio_group` | Prompt the user with a single-choice selector |
-| `core.ask_user_checklist` | Prompt the user with a multi-select checklist |
-| `core.confirm_user_input` | Prompt the user for yes/no confirmation |
-| `core.react` | Default ReAct flow |
+## Execution Modes
 
-Workspace plugin example:
+Current normalized flow execution modes are:
 
-| Qualified name | Description |
-|----------------|-------------|
-| `workspace_git.git_diff` | Show a git diff |
-| `workspace_git.git_status` | Show git status |
-| `workspace_context.read_context_elephant_store_file` | Read a context elephant store file |
-| `workspace_builder.plugin_builder` | Author workspace plugin resources, workspace-level assets, and related docs |
-| `workspace.select_filesystem_entry` | Workspace re-export of the interactive filesystem picker |
-| `workspace.stage_text_replace` | Workspace re-export of staged text replacement |
+- `llm`
+- `deterministic`
+- `composite`
 
-For plugins that share tool behavior, prefer re-export shims over copy-pasted tool modules. The filesystem tools are the reference pattern: `pocketcode/plugins/core/tools/filesystem.py` is canonical, while plugin-local `tools/filesystem.py` modules can re-export those symbols so manifest-local handler paths remain stable without duplicating implementation.
-The same pattern now applies to staged editing helpers in `pocketcode/plugins/core/tools/file_ops.py` and `.pocketcode/tools/file_ops.py`.
+If `module` plus `entry_fn` loads a PocketFlow factory successfully, the resulting `flow_instance` is used directly for execution.
 
----
+## Prompt Resolution For Flows
 
-## Hot Reload
+`PluginManager._register_flow_definition()` resolves prompts through `resolve_prompt_bundle()`.
 
-Plugin changes are detected by `PluginWatcher`. On any file-system event inside a
-plugin directory, a new `PluginManager` snapshot is built and atomically swapped into
-the `RegistryHolder` — live sessions transparently see the updated registry within
-500 ms.
+Supported prompt sources are:
 
----
+- inline `system_prompt` or `prompt`
+- file-based `system_prompt_file` or `prompt_file`
+- file lists in `prompt_files`
+- compatibility alias `prompts`
 
-## Legacy `agent.yaml` Migration
+If no explicit prompt file is provided, the loader also checks default prompt candidates:
 
-Plugins that still use `agent.yaml` are loaded via a one-release compatibility shim
-that emits `WARNING` log records and returns `schema_version=0`. They **will not** be
-loaded as PocketFlow flows until migrated.
+- `prompts/flows/<flow_name>.md`
+- `prompts/agents/<flow_name>.md`
 
-Migration steps:
+Prompt files can use nested includes via:
 
-1. Rename `agent.yaml` → `plugin.yaml`.
-2. Add `schema_version: 1` as the first key.
-3. Convert the `tools:` list to a `tools:` dict: `local_name: "file.py:Class"`.
-4. Create a `flows/` directory with a `create_flow()` factory module.
-5. Add a `flows:` block pointing to the factory.
-6. Optionally add `agents/*.yaml` composite agents that target those flows.
-7. Remove `workflows:`, `components:`, and `node_definitions:` legacy sections.
+```text
+{{ include:path/to/file.md }}
+```
 
-See [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)
-for a step-by-step walkthrough.
+## Prompt Registration
+
+Top-level manifest `prompts` registers prompt files into the prompt registry.
+
+Example:
+
+```yaml
+prompts:
+  system: prompts/system.md
+```
+
+This registers the prompt as `plugin.system`.
+
+## Inline Default Agent Block
+
+A flow may declare a default agent profile inline through `default_agent`.
+
+Example:
+
+```yaml
+flows:
+  analyst:
+    module: flows/analyst.py
+    entry_fn: create_flow
+    default_agent:
+      name: analyst-safe
+      description: Restrictive profile
+      llm_profile: fast
+      tools:
+        - core.read_file
+      tool_confirmation:
+        default: confirm
+```
+
+This becomes the flow's `default_agent_profile` and participates in agent profile precedence.
+
+## Plugin-Local Agent Profiles
+
+Plugins may also define profile YAML files under:
+
+```text
+<plugin>/agents/*.yaml
+```
+
+Those files use the same schema as workspace agent profiles.
+
+Precedence is:
+
+1. plugin-declared default agent and plugin-local `agents/*.yaml`
+2. workspace agent profiles
+3. synthesised default built from the flow definition
+
+## Factory Plugins
+
+Factory plugins return a `Plugin` instance from `get_plugin(config)`.
+
+That object can contribute:
+
+- tools
+- programmatic flows
+- prompts
+- metadata
+
+Flow instances returned by factory plugins are wrapped into `FlowDefinition` objects with `is_programmatic=True`.
+
+## Workspace Tools And Prompts
+
+Workspace-local shared assets are not declared through plugin manifests.
+
+- `.pocketcode/prompts/` files are auto-registered under `workspace`
+- `.pocketcode/tools/*.py` modules are auto-discovered and registered under `workspace`
+
+These are separate from manifest plugin loading, but they join the same global registries.
+
+## Discovery Controls
+
+Plugins and plugin-local resources can be skipped through:
+
+- `.disabled` in any path component
+- ignore rules from workspace-root `.pocketcodeignore`
+- workspace `.pocketcode/.pocketcodeignore` when the plugin root itself lives under `.pocketcode/`
+
+## Legacy `agent.yaml`
+
+`agent.yaml` still has a compatibility shim, but it is not canonical.
+
+Limitations of the shim:
+
+- it logs deprecation warnings
+- it cannot synthesize manifest-quality flow definitions without `module` plus `entry_fn`
+- it should be treated as migration-only support
+
+For current authoring, always use `plugin.yaml` with `schema_version: 1`.

@@ -1,59 +1,53 @@
-# PocketCoder Documentation
+# PocketCoder Canonical Documentation
 
-PocketCoder is an extensible terminal AI coding assistant built around PocketFlow.
+This `docs/` directory is the canonical documentation set for the current codebase.
 
-## Topics
+Rules for maintaining documentation:
 
-### Core Concepts
-- [Architecture Overview](architecture.md) (Planned)
-- [Prompt Engineering](prompts.md) (Planned)
-- [Modes and Skills](modes_and_skills.md)
-- [Run Cancellation](run_cancellation.md)
+- Treat the codebase and `docs/` as the source of truth.
+- When code and documentation disagree, fix `docs/` to match the code, or fix the code and update `docs/` in the same change.
+- Treat `specs/` as historical design history and incremental change records. Specs can be useful for intent and context, but they are not authoritative once the implementation has moved on.
+- Prefer documenting current runtime behavior, load order, precedence rules, and file formats over documenting planned features.
 
-### Plugins and Flows
-- [Plugin Architecture](plugin_architecture.md)
-- [PocketFlow Agents](pocketflow_agents.md)
-- [`Agent Profiles` quickstart](../specs/001-agent-default-profiles/quickstart.md)
-- [Dynamic Tools](tools.md) (Planned)
+## Core Terms
 
-## Quick Start
+- `flow`: the executable runtime unit registered by the plugin system. Internally, flows are represented by `FlowDefinition` and are the primary execution surface.
+- `agent profile`: a named configuration overlay for a flow. Profiles can override LLM selection, prompt additions, tool allowlists, and tool confirmation policy.
+- `mode`: a Markdown-authored session overlay that resolves into an ephemeral agent profile.
+- `skill`: an additive session capability pack that can append prompt guidance and contribute tools.
+- `workspace resources`: files under `.pocketcode/` that extend the runtime without changing package code.
 
-1. Configure your LLM provider in `pocketcode.yml`.
-2. Create a plugin directory under `.pocketcode/plugins/my_plugin/`.
-3. Add a `plugin.yaml` with `schema_version: 1` and a `flows:` block.
-4. Execute your flow with:
+## Qualified Names
 
-   ```
-   pocketcode --flow my_plugin.my_agent
-   ```
+The registry's canonical qualified form is `plugin.resource`.
 
-## CLI Surface
+The runtime also accepts `plugin::resource` in user-facing configuration, manifests, and commands, then normalizes it to `plugin.resource` internally. This documentation uses `plugin.resource` when describing registry behavior and may show `plugin::resource` where that matches the current user-facing examples.
 
-PocketCoder exposes one universal CLI help surface for commands that work across the shared CLI contract.
+## Documentation Map
 
-- Universal commands include `/help`, `/list`, `/flow`, `/mode`, `/skill`, `/prompts`, `/agent`, `/reload`, `/stop`, `/cancel`, `/status`, `/context`, and `/confirm`.
-- Textual-only commands are `/copy` and `/copy-all`; they remain available inside the Textual UI and are excluded from universal help and shared suggestions.
-- Startup entrypoints use `--flow`, `--llm`, and `--prompt`. The removed `--workflow` flag and deprecated `--agent` startup alias are no longer supported.
+- `agent_system.md`: agent profile model, schemas, precedence, and control surfaces
+- `architecture.md`: startup, loading, registries, execution loop, and precedence rules
+- `configuration.md`: `pocketcode.yml`, `.pocketcode/`, discovery controls, and prompt loading
+- `cli.md`: startup flags, commands, aliases, and Textual controls
+- `plugin_architecture.md`: plugin discovery, manifest schema, flow fields, and prompt/tool registration
+- `pocketflow_agents.md`: flow authoring and agent profile behavior
+- `modes_and_skills.md`: Markdown-authored runtime overlays and skill-provided tools
+- `run_cancellation.md`: current cancellation model and managed subprocess behavior
 
-## Plugin Authoring
+## Practical Reading Order
 
-Plugins follow the unified plugin model introduced in 003-unified-plugin-namespace:
+1. Read `architecture.md` for the system model.
+2. Read `agent_system.md` for agent-profile behavior and precedence.
+3. Read `configuration.md` for workspace setup and discovery behavior.
+4. Read `cli.md` for the user-facing control surface.
+5. Read `plugin_architecture.md` and `pocketflow_agents.md` when changing runtime resources.
+6. Read `modes_and_skills.md` when working on session overlays.
+7. Read `run_cancellation.md` when changing long-running tools or stop behavior.
 
-- One directory, one manifest (`plugin.yaml`, `schema_version: 1`).
-- Tools declared as `local_name: "file.py:ClassName"`.
-- Flows declared with `module:` + `entry_fn:` pointing to a PocketFlow factory.
-- Prompts declared with `local_name: "prompts/file.md"` and loaded into the prompt registry.
-- All resources addressable as `plugin_name.resource_name`.
+## Historical Specs
 
-This repo also ships a workspace authoring plugin at
-`.pocketcode/plugins/workspace_builder/`. Its `workspace_builder::plugin_builder`
-agent is intended for creating and editing workspace plugin resources and
-workspace-level assets such as `plugin.yaml`, `flows/`, `prompts/`, `agents/`,
-`llm-profiles/`, `tools/`, and `.pocketcode/skills/`. The plugin carries its own authoring
-reference prompt so it remains usable even when PocketCoder is run from a
-workspace that does not contain this repository's source tree. It is now paired
-with a workspace-builder skill pack under `.pocketcode/skills/` for deeper,
-self-contained guidance on PocketFlow graphs, plugin authoring, profiles and
-prompts, tools and runtime behavior, and workspace assets.
+Everything under `specs/` should be read as historical incremental design material.
 
-See the full walkthrough: [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)
+- Use specs to understand why a change was introduced.
+- Do not assume a spec still matches current code.
+- If a spec disagrees with `docs/` or the implementation, the implementation and `docs/` win.

@@ -2,6 +2,8 @@
 
 Pocketcode is an extensible terminal AI coding assistant built around PocketFlow.
 
+Canonical implementation documentation lives in `docs/`. Treat `docs/` and the codebase as the source of truth for current behavior; treat `specs/` as historical incremental design history that may no longer match the implementation.
+
 ## What Changed
 
 Pocketcode now uses a small plugin-first core:
