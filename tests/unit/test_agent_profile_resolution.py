@@ -34,7 +34,7 @@ def _make_profile(
 ) -> AgentProfile:
     return AgentProfile(
         name=name,
-        agent=agent,
+        flow=agent,
         llm_profile=llm_profile,
         tools=tools,
         tool_confirmation=tool_confirmation or {},

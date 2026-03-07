@@ -1,6 +1,6 @@
 schema_version: 1
 name: architect
-description: Software architect agent that reads code, lists files, and searches the codebase to produce design plans.
+description: Software architect plugin with planning tools, prompts, flows, and composite agents.
 
 tools:
   read_file: tools/filesystem.py:ReadFileTool
@@ -10,7 +10,7 @@ tools:
 flows:
   architect:
     description: Architecture and planning specialist.
-    module: agents/architect_agent.py
+    module: flows/architect.py
     entry_fn: create_flow
     llm_profile: gemini_default
     tools:

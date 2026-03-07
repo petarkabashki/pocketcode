@@ -10,11 +10,27 @@ class _EngineStub:
     def list_agents(self):
         return []
 
+    def list_prompts(self):
+        return []
+
     def list_llm_profiles(self):
         return []
 
     def list_agent_profiles(self, agent_name=None):
         return []
+
+
+class _PromptListingEngineStub(_EngineStub):
+    def list_prompts(self):
+        return ["core.react", "workspace.review"]
+
+
+class _FlowSelectionEngineStub(_EngineStub):
+    def __init__(self):
+        self.set_flow_calls = []
+
+    def set_flow(self, flow_name):
+        self.set_flow_calls.append(flow_name)
 
 
 class _RunHandleStub:
@@ -151,6 +167,61 @@ class TestCommandHandlerParsing:
 
         captured = capsys.readouterr()
         assert "No run is currently active." in captured.out
+
+    def test_prompts_command_lists_registered_prompts(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+
+        handle_command(
+            "/prompts",
+            engine=_PromptListingEngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Available prompts:" in captured.out
+        assert "core.react" in captured.out
+        assert "workspace.review" in captured.out
+
+    def test_agent_command_no_longer_falls_back_to_flow_selection(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _FlowSelectionEngineStub()
+
+        handle_command(
+            "/agent coder::coder",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        assert engine.set_flow_calls == []
+        captured = capsys.readouterr()
+        assert "Unknown /agent subcommand: coder::coder" in captured.out
+
+    def test_flow_shortcut_alias_is_removed(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+
+        handle_command(
+            "/fl core::react",
+            engine=_EngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Unknown command: /fl" in captured.out
 
 
 class TestAgentEditingCommands:

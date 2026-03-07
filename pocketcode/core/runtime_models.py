@@ -6,12 +6,13 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass
-class Agent:
+class CompositeAgent:
     """A named configuration bundle that governs how a flow is invoked.
 
     Every flow has at least one agent: either explicitly declared in
-    ``plugin.yaml`` under ``default_agent``, or synthesised from the
-    flow's top-level fields by ``AgentManager``.
+    plugin metadata, loaded from a plugin-local ``agents/*.yaml`` file,
+    or synthesised from the flow's top-level fields by the composite agent
+    registry.
 
     Fields
     ------
@@ -39,7 +40,7 @@ class Agent:
     """
 
     name: str
-    agent: str
+    flow: str
     description: str = ""
     llm_profile: Optional[str] = None
     extra_prompts: List[str] = field(default_factory=list)
@@ -49,13 +50,13 @@ class Agent:
     source_path: Optional[Path] = None
 
     @property
-    def flow(self) -> str:
-        """Canonical alias for the target flow name."""
-        return self.agent
+    def agent(self) -> str:
+        """Backward-compatible alias for the target flow name."""
+        return self.flow
 
-    @flow.setter
-    def flow(self, value: str) -> None:
-        self.agent = value
+    @agent.setter
+    def agent(self, value: str) -> None:
+        self.flow = value
 
 
 @dataclass
@@ -80,17 +81,18 @@ class FlowDefinition:
     entry_fn: Optional[str] = None
     flow_instance: Any = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    default_agent_profile: Optional[Agent] = None
+    default_agent_profile: Optional[CompositeAgent] = None
 
     @property
-    def default_agent(self) -> Optional[Agent]:
+    def default_agent(self) -> Optional[CompositeAgent]:
         """Canonical alias for the default runtime agent."""
         return self.default_agent_profile
 
     @default_agent.setter
-    def default_agent(self, value: Optional[Agent]) -> None:
+    def default_agent(self, value: Optional[CompositeAgent]) -> None:
         self.default_agent_profile = value
 
 
-AgentProfile = Agent
+Agent = CompositeAgent
+AgentProfile = CompositeAgent
 AgentDefinition = FlowDefinition

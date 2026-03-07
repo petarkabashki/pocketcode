@@ -1,9 +1,9 @@
-"""AgentManager — loads, indexes, and persists Agent objects.
+"""CompositeAgentManager — loads, indexes, and persists composite agent objects.
 
 Load order (highest precedence first within same name):
-  1. Plugin-declared (default_agent block with explicit ``name`` field)
-  2. Workspace-local file  (.pocketcode/agents/<name>.yaml)
-  3. Synthesised default  (built from FlowDefinition top-level fields)
+    1. Plugin-provided agent YAML (``agents/*.yaml``) or inline ``default_agent``
+    2. Workspace-local file (``.pocketcode/agents/<name>.yaml``)
+    3. Synthesised default (built from FlowDefinition top-level fields)
 
 A WARNING is logged on any name collision, identifying both conflicting sources.
 """
@@ -18,8 +18,8 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-class AgentManager:
-    """Runtime registry for Agent objects."""
+class CompositeAgentManager:
+    """Runtime registry for composite agent configuration objects."""
 
     def __init__(self, workspace_root: Path) -> None:
         self._workspace_root = Path(workspace_root).resolve()
@@ -46,7 +46,7 @@ class AgentManager:
 
             synth = Agent(
                 name=qname,
-                agent=qname,
+                flow=qname,
                 description=f"Synthesised default agent for {qname}.",
                 llm_profile=getattr(defn, "llm_profile", None),
                 extra_prompts=[],
@@ -59,6 +59,7 @@ class AgentManager:
                 synth.tools = None
             self._register(synth, collision_source="synthesised")
 
+        self._load_plugin_files()
         self._load_workspace_files()
 
     def get(self, name: str) -> Optional[Any]:
@@ -133,9 +134,22 @@ class AgentManager:
 
         self._agents[agent.name] = agent
 
-    def _load_workspace_files(self) -> None:
-        from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
+    def _load_plugin_files(self) -> None:
+        plugin_roots: set[Path] = set()
+        for defn in self._flow_definitions.values():
+            metadata = getattr(defn, "metadata", {}) or {}
+            plugin_root = metadata.get("plugin_root")
+            if isinstance(plugin_root, str) and plugin_root.strip():
+                plugin_roots.add(Path(plugin_root).resolve())
 
+        for plugin_root in sorted(plugin_roots):
+            agents_dir = plugin_root / "agents"
+            if not agents_dir.is_dir():
+                continue
+            for yaml_file in sorted(agents_dir.glob("*.yaml")):
+                self._load_agent_file(yaml_file, source="plugin")
+
+    def _load_workspace_files(self) -> None:
         yaml_files: List[Path] = []
         if self._legacy_workspace_agents_dir.exists():
             yaml_files.extend(sorted(self._legacy_workspace_agents_dir.glob("*.yaml")))
@@ -143,60 +157,78 @@ class AgentManager:
             yaml_files.extend(sorted(self._workspace_agents_dir.glob("*.yaml")))
 
         for yaml_file in yaml_files:
-            try:
-                raw = yaml.safe_load(yaml_file.read_text(encoding="utf-8")) or {}
-                if not isinstance(raw, dict):
-                    logger.warning(
-                        "Skipping agent file '%s': root must be a YAML mapping.", yaml_file
-                    )
-                    continue
+            self._load_agent_file(yaml_file, source="workspace")
 
-                name = raw.get("name")
-                flow = raw.get("flow") or raw.get("agent")
-                if not name:
-                    logger.warning(
-                        "Skipping agent file '%s': missing required field 'name'.", yaml_file
-                    )
-                    continue
-                if not flow:
-                    logger.warning(
-                        "Skipping agent file '%s': missing required field 'flow'.", yaml_file
-                    )
-                    continue
-
-                tool_confirmation_raw = raw.get("tool_confirmation", {})
-                if not isinstance(tool_confirmation_raw, dict):
-                    tool_confirmation_raw = {}
-
-                tools_raw = raw.get("tools")
-                if tools_raw is not None and not isinstance(tools_raw, list):
-                    tools_raw = None
-
-                agent = Agent(
-                    name=str(name),
-                    agent=str(flow),
-                    description=str(raw.get("description", "")),
-                    llm_profile=str(raw["llm_profile"]) if raw.get("llm_profile") else None,
-                    extra_prompts=[str(p) for p in raw.get("extra_prompts", []) if isinstance(p, str)],
-                    tools=[str(t) for t in tools_raw if isinstance(t, str)] if tools_raw is not None else None,
-                    tool_confirmation={
-                        "default": str(tool_confirmation_raw["default"])
-                        if tool_confirmation_raw.get("default")
-                        else None,
-                        "overrides": {
-                            str(k): str(v)
-                            for k, v in (tool_confirmation_raw.get("overrides") or {}).items()
-                            if isinstance(k, str) and isinstance(v, str)
-                        },
-                    },
-                    source="workspace",
-                    source_path=yaml_file.resolve(),
+    def _load_agent_file(self, yaml_file: Path, *, source: str) -> None:
+        from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
+        try:
+            raw = yaml.safe_load(yaml_file.read_text(encoding="utf-8")) or {}
+            if not isinstance(raw, dict):
+                logger.warning(
+                    "Skipping agent file '%s': root must be a YAML mapping.", yaml_file
                 )
-                self._register(agent, collision_source=str(yaml_file))
-            except yaml.YAMLError as exc:
-                logger.warning("Skipping agent file '%s': invalid YAML — %s", yaml_file, exc)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Skipping agent file '%s': unexpected error — %s", yaml_file, exc)
+                return
+
+            name = raw.get("name")
+            flow_name = raw.get("flow") or raw.get("agent")
+            if not name:
+                logger.warning(
+                    "Skipping agent file '%s': missing required field 'name'.", yaml_file
+                )
+                return
+            if not flow_name:
+                logger.warning(
+                    "Skipping agent file '%s': missing required field 'flow'.", yaml_file
+                )
+                return
+
+            flow_name = str(flow_name)
+            flow_def = self._flow_definitions.get(flow_name)
+
+            tool_confirmation_raw = raw.get("tool_confirmation", {})
+            if not isinstance(tool_confirmation_raw, dict):
+                tool_confirmation_raw = {}
+
+            has_tools_key = "tools" in raw
+            tools_raw = raw.get("tools") if has_tools_key else None
+            if tools_raw is not None and not isinstance(tools_raw, list):
+                tools_raw = None
+
+            inherited_tools = list(getattr(flow_def, "tools", None) or []) or None
+
+            agent = Agent(
+                name=str(name),
+                flow=flow_name,
+                description=str(raw.get("description", "")),
+                llm_profile=(
+                    str(raw["llm_profile"])
+                    if raw.get("llm_profile")
+                    else getattr(flow_def, "llm_profile", None)
+                ),
+                extra_prompts=[str(p) for p in raw.get("extra_prompts", []) if isinstance(p, str)],
+                tools=(
+                    [str(t) for t in tools_raw if isinstance(t, str)]
+                    if has_tools_key and tools_raw is not None
+                    else inherited_tools
+                ),
+                tool_confirmation={
+                    "default": str(tool_confirmation_raw["default"])
+                    if tool_confirmation_raw.get("default")
+                    else None,
+                    "overrides": {
+                        str(k): str(v)
+                        for k, v in (tool_confirmation_raw.get("overrides") or {}).items()
+                        if isinstance(k, str) and isinstance(v, str)
+                    },
+                },
+                source=source,
+                source_path=yaml_file.resolve() if source == "workspace" else None,
+            )
+            self._register(agent, collision_source=str(yaml_file))
+        except yaml.YAMLError as exc:
+            logger.warning("Skipping agent file '%s': invalid YAML — %s", yaml_file, exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Skipping agent file '%s': unexpected error — %s", yaml_file, exc)
 
     @staticmethod
     def _agent_to_yaml_dict(agent: Any) -> Dict[str, Any]:
@@ -226,4 +258,5 @@ class AgentManager:
         return data
 
 
-AgentProfileManager = AgentManager
+AgentManager = CompositeAgentManager
+AgentProfileManager = CompositeAgentManager

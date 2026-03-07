@@ -20,11 +20,12 @@ MIGRATION_GUIDE = """\
       3. Move personality.system_prompt → prompts.system.
       4. Convert tools list → tools dict (local_name: file.py:Class).
       5. Create a flows: block with 'module:' + 'entry_fn:' pointing to a
-         zero-arg Python factory that returns a PocketFlow Flow.
-      6. Remove the 'workflows:' list — express as a PocketFlow agent instead.
+            zero-arg Python factory in flows/<name>.py that returns a PocketFlow Flow.
+        6. Optionally add agents/*.yaml files for composite runtime agents that target those flows.
+        7. Remove the 'workflows:' list — express orchestration as a PocketFlow Flow instead.
     See specs/003-unified-plugin-namespace/contracts/manifest-v1.md for the full schema."""
 
-_LEGACY_SECTIONS = ("components", "workflows", "node_definitions", "flows", "modes")
+_LEGACY_SECTIONS = ("components", "workflows", "node_definitions", "modes")
 
 
 class ManifestSchemaError(ValueError):
@@ -151,8 +152,8 @@ def _migrate_agent_yaml(raw: dict, path: Path) -> ParsedManifest:
 
     # agent.yaml has no module/entry_fn — emit a second targeted warning
     logger.warning(
-        "LEGACY MANIFEST: '%s' has no 'module:' or 'entry_fn:' for its agent. "
-        "The agent '%s' will NOT be registered as a PocketFlow Flow. "
+        "LEGACY MANIFEST: '%s' has no 'module:' or 'entry_fn:' for its flow. "
+        "The legacy agent '%s' will NOT be registered as a PocketFlow Flow. "
         "Add flows: block with module+entry_fn to complete migration.",
         path,
         plugin_name,

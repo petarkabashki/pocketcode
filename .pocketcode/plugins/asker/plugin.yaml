@@ -1,6 +1,6 @@
 schema_version: 1
 name: asker
-description: Clarification agent that prompts the user for missing information and feeds answers back into the task context.
+description: Clarification plugin with user-input tools, prompts, flows, and composite agents.
 
 tools:
   ask_user: tools/user_input.py:AskUserInputTool
@@ -8,7 +8,7 @@ tools:
 flows:
   ask:
     description: Repository Q&A and clarification specialist.
-    module: agents/asker_agent.py
+    module: flows/ask.py
     entry_fn: create_flow
     llm_profile: gemini_fast
     tools:

@@ -9,7 +9,7 @@ tools:
 
 flows:
   micromanager:
-    module: agents/micromanager_agent.py
+    module: flows/micromanager.py
     entry_fn: create_flow
     description: Orchestrates specialist sub-agents (coder, architect, ask) to handle complex multi-step tasks
     llm_profile: default

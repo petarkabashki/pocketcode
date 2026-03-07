@@ -79,16 +79,20 @@ def _build_stats_text(status: Dict[str, Any]) -> str:
 def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
     runtime_flow = status.get("runtime_workflow") or "internal-flow"
     run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
-    current_flow = run_summary.get("current_agent") or status.get("flow") or "auto"
+    flow_display = str(status.get("selected_flow") or status.get("flow") or "auto")
 
-    agent_path = run_summary.get("agent_path", [])
-    if isinstance(agent_path, list) and len(agent_path) > 1:
-        flow_display = " -> ".join(str(name) for name in agent_path if isinstance(name, str))
-    else:
-        flow_display = str(current_flow)
-
-    current_llm_profile = run_summary.get("current_llm_profile") or status.get("global_llm_override") or "none"
-    current_llm_model = run_summary.get("current_llm_model") or "-"
+    current_llm_profile = str(
+        status.get("selected_llm_profile")
+        or status.get("global_llm_override")
+        or status.get("default_llm_profile")
+        or "none"
+    )
+    last_llm_profile = run_summary.get("current_llm_profile") if isinstance(run_summary, dict) else None
+    current_llm_model = (
+        run_summary.get("current_llm_model")
+        if isinstance(run_summary, dict) and last_llm_profile == current_llm_profile
+        else "-"
+    )
     active_agent = status.get("active_agent") or status.get("active_agent_profile") or "none"
     return (
         f"Runtime flow: {runtime_flow} | Flow: {flow_display} | "
@@ -194,8 +198,6 @@ class PocketCodeTextualApp(App[None]):
         Binding("f3", "view_profiles", "Edit Agent", priority=True),
         Binding("f4", "view_context", "Context", priority=True),
         Binding("f5", "view_run", "Run", priority=True),
-        Binding("f6", "next_agent", "Next Agent", priority=True),
-        Binding("shift+f6", "prev_agent", "Prev Agent", priority=True),
         Binding("f7", "next_profile", "Next Agent Profile", priority=True),
         Binding("shift+f7", "prev_profile", "Prev Agent Profile", priority=True),
         Binding("f8", "next_llm", "Next LLM", priority=True),
@@ -632,8 +634,8 @@ class PocketCodeTextualApp(App[None]):
                 yield Static("Shortcuts", classes="section-title")
                 yield Static(
                     "F1..F5 switch views\n"
-                    "F6/F7/F8 next agent/agent profile/LLM\n"
-                    "Shift+F6/F7/F8 previous agent/agent profile/LLM\n"
+                    "F7/F8 next agent profile/LLM\n"
+                    "Shift+F7/F8 previous agent profile/LLM\n"
                     "F9/F10 toggle panels\n"
                     "F11 toggle second header row\n"
                     "Ctrl+W cycle mode\n"
@@ -758,7 +760,7 @@ class PocketCodeTextualApp(App[None]):
                 yield Input(
                     id="main-input",
                     placeholder=(
-                        "Type a request or /command. F1..F5=view F6/F7/F8 next agent/profile/LLM "
+                        "Type a request or /command. F1..F5=view F7/F8 next agent profile/LLM "
                         "F9/F10=panels F11=header"
                     ),
                 )
@@ -780,7 +782,7 @@ class PocketCodeTextualApp(App[None]):
         self._refresh_ui()
         self.set_interval(0.1, self._drain_run_events)
         self._write_info(
-            "Pocketcode workspace ready. F1..F5 switch views, F6/F7/F8 move forward through agent-agent profile-LLM, Shift+F6/F7/F8 move backward, and F11 toggles the second header row."
+            "Pocketcode workspace ready. F1..F5 switch views, F7/F8 move forward through agent profile-LLM, Shift+F7/F8 move backward, and F11 toggles the second header row."
         )
         self.query_one("#main-input", Input).focus()
 
@@ -876,6 +878,15 @@ class PocketCodeTextualApp(App[None]):
             for profile_name in current_agent_profiles
         ) or ("No agents for the active flow",)
 
+        effective_llm_profile = (
+            active_profile.llm_profile
+            if active_profile is not None and active_profile.llm_profile
+            else self._engine.global_llm_override or status.get("default_llm_profile") or "none"
+        )
+        status_for_display = dict(status)
+        status_for_display["selected_flow"] = target_agent or current_agent or "auto"
+        status_for_display["selected_llm_profile"] = effective_llm_profile
+
         return TextualUIState(
             theme_name=self._theme_name,
             current_view=self._current_view,
@@ -883,7 +894,7 @@ class PocketCodeTextualApp(App[None]):
             right_panel_visible=self._show_right_panel,
             header_details_visible=self._show_header_details,
             header_toggle_label="Hide Details" if self._show_header_details else "Show Details",
-            status_text=_build_status_text(status, self._current_view),
+            status_text=_build_status_text(status_for_display, self._current_view),
             stats_text=_build_stats_text(status),
             view_title_text=_build_view_title_text(self._current_view),
             workspace_mode_select=SelectViewState(
@@ -1323,9 +1334,15 @@ class PocketCodeTextualApp(App[None]):
     def _set_main_input_placeholder(self, prompt: str | None = None) -> None:
         input_widget = self.query_one("#main-input", Input)
         input_widget.placeholder = prompt or (
-            "Type a request or /command. F1..F5=view F6/F7/F8 next agent/profile/LLM "
+            "Type a request or /command. F1..F5=view F7/F8 next agent profile/LLM "
             "F9/F10=panels F11=header"
         )
+
+    def _profile_cycle(self) -> list[str]:
+        profile_names: list[str] = []
+        for agent_name in self._engine.list_agents():
+            profile_names.extend(self._engine.list_agent_profiles(agent_name))
+        return profile_names
 
     def _remember_run_event(self, text: str) -> None:
         self._live_run_events.append(text)
@@ -1868,47 +1885,10 @@ class PocketCodeTextualApp(App[None]):
         self._apply_workspace_mode(next_mode, announce=True)
         self._sync_ui_from_engine()
 
-    def action_next_agent(self) -> None:
-        try:
-            agents = self._engine.list_agents()
-            if not agents:
-                self._write_error("No agents are available.")
-                return
-
-            current = self._engine.get_current_agent()
-            next_agent = _cycle_value(agents, current, 1, missing_index=-1)
-            self._engine.set_agent(next_agent)
-            self._write_info(f"Selected agent: {next_agent}")
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._sync_ui_from_engine()
-
-    def action_prev_agent(self) -> None:
-        try:
-            agents = self._engine.list_agents()
-            if not agents:
-                self._write_error("No agents are available.")
-                return
-
-            current = self._engine.get_current_agent()
-            prev_agent = _cycle_value(agents, current, -1, missing_index=0)
-            self._engine.set_agent(prev_agent)
-            self._write_info(f"Selected agent: {prev_agent}")
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._sync_ui_from_engine()
-
     def action_next_profile(self) -> None:
-        current_agent = self._engine.get_current_agent()
-        if not current_agent:
-            self._write_error("Select a flow before cycling agents.")
-            return
-
-        profiles = self._engine.list_agent_profiles(current_agent)
+        profiles = self._profile_cycle()
         if not profiles:
-            self._write_error(f"No agents are available for {current_agent}.")
+            self._write_error("No agent profiles are available.")
             return
 
         current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
@@ -1916,21 +1896,16 @@ class PocketCodeTextualApp(App[None]):
 
         try:
             self._engine.set_active_agent_profile(next_profile)
-            self._write_info(f"Activated agent: {next_profile}")
+            self._write_info(f"Activated agent profile: {next_profile}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
             self._sync_ui_from_engine()
 
     def action_prev_profile(self) -> None:
-        current_agent = self._engine.get_current_agent()
-        if not current_agent:
-            self._write_error("Select a flow before cycling agents.")
-            return
-
-        profiles = self._engine.list_agent_profiles(current_agent)
+        profiles = self._profile_cycle()
         if not profiles:
-            self._write_error(f"No agents are available for {current_agent}.")
+            self._write_error("No agent profiles are available.")
             return
 
         current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
@@ -1938,7 +1913,7 @@ class PocketCodeTextualApp(App[None]):
 
         try:
             self._engine.set_active_agent_profile(prev_profile)
-            self._write_info(f"Activated agent: {prev_profile}")
+            self._write_info(f"Activated agent profile: {prev_profile}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:

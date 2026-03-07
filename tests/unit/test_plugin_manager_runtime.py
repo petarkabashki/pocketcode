@@ -82,9 +82,9 @@ class TestPluginManagerRuntimeLoading:
                     "schema_version: 1",
                     "name: workspacepromptplug",
                     'description: "workspace prompt fallback test"',
-                    "agents:",
+                    "flows:",
                     "  planner:",
-                    '    module: "agents/planner.py"',
+                    '    module: "flows/planner.py"',
                     '    entry_fn: "create_flow"',
                     "    prompt_files:",
                     '      - "shared.md"',
@@ -92,7 +92,7 @@ class TestPluginManagerRuntimeLoading:
             ),
         )
         _write(
-            plugin_root / "agents" / "planner.py",
+            plugin_root / "flows" / "planner.py",
             "from pocketflow import Flow, Node\n\n"
             "class _Start(Node):\n"
             "    def prep(self, shared):\n"
@@ -120,15 +120,15 @@ class TestPluginManagerRuntimeLoading:
                     "schema_version: 1",
                     "name: workspaceplug",
                     'description: "workspace tool fallback test"',
-                    "agents:",
+                    "flows:",
                     "  planner:",
-                    '    module: "agents/planner.py"',
+                    '    module: "flows/planner.py"',
                     '    entry_fn: "create_flow"',
                 ]
             ),
         )
         _write(
-            plugin_root / "agents" / "planner.py",
+            plugin_root / "flows" / "planner.py",
             "from pocketflow import Flow, Node\n\n"
             "class _Start(Node):\n"
             "    def prep(self, shared):\n"
@@ -164,9 +164,9 @@ class TestPluginManagerRuntimeLoading:
                     "schema_version: 1",
                     "name: agentpromptplug",
                     'description: "agent prompt test"',
-                    "agents:",
+                    "flows:",
                     "  planner:",
-                    '    module: "agents/planner.py"',
+                    '    module: "flows/planner.py"',
                     '    entry_fn: "create_flow"',
                     "    prompts:",
                     '      - "prompts/system.md"',
@@ -174,7 +174,7 @@ class TestPluginManagerRuntimeLoading:
             ),
         )
         _write(
-            plugin_root / "agents" / "planner.py",
+            plugin_root / "flows" / "planner.py",
             "from pocketflow import Flow, Node\n\n"
             "class _Start(Node):\n"
             "    def prep(self, shared):\n"
@@ -202,9 +202,9 @@ class TestPluginManagerRuntimeLoading:
                     "schema_version: 1",
                     "name: brokenplug",
                     'description: "broken"',
-                    "agents:",
+                    "flows:",
                     "  broken:",
-                    '    module: "agents/broken.py"',
+                    '    module: "flows/broken.py"',
                 ]
             ),
         )

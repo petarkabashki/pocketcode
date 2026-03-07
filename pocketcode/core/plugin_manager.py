@@ -119,10 +119,10 @@ class PluginManager:
                     )
             
             # Register flows
-            for agent_name, flow in plugin.agents.items():
-                agent_def = FlowDefinition(
-                    name=agent_name,
-                    description=plugin.description or f"Programmatic agent from {plugin_name}",
+            for flow_name, flow in plugin.agents.items():
+                flow_def = FlowDefinition(
+                    name=flow_name,
+                    description=plugin.description or f"Programmatic flow from {plugin_name}",
                     is_programmatic=True,
                     flow_instance=flow,
                     metadata={
@@ -134,12 +134,12 @@ class PluginManager:
                     },
                 )
                 try:
-                    self.flows.register(plugin_name, agent_name, agent_def)
+                    self.flows.register(plugin_name, flow_name, flow_def)
                 except RegistryError:
                     logger.error(
                         "Plugin '%s' flow '%s' collides with existing registration. Skipping.",
                         plugin_name,
-                        agent_name,
+                        flow_name,
                     )
                 
             # Register LLM profiles from metadata if present
@@ -261,12 +261,12 @@ class PluginManager:
         self._load_plugin_llm_profiles(plugin_name, manifest.llm_profiles)
         self._load_plugin_prompts(plugin_name, plugin_root, manifest.prompts)
         self._load_plugin_tools(plugin_name, plugin_root, manifest.tools)
-        self._load_plugin_agents(plugin_name, plugin_root, manifest.flows)
+        self._load_plugin_flows(plugin_name, plugin_root, manifest.flows)
 
         # Explicitly ignore removed legacy sections.
         raw_manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         if isinstance(raw_manifest, dict):
-            for legacy_key in ("components", "workflows", "flows", "modes"):
+            for legacy_key in ("components", "workflows", "modes"):
                 if legacy_key in raw_manifest:
                     logger.warning(
                         "Plugin '%s' contains legacy '%s' section; it is ignored in agent-only runtime.",
@@ -567,23 +567,27 @@ class PluginManager:
                     exc,
                 )
 
-    def _load_plugin_agents(self, plugin_name: str, plugin_root: Path, agents_section: Dict[str, Any]) -> None:
-        if not isinstance(agents_section, dict):
-            logger.warning("Plugin '%s' agents section is not a mapping. Skipping.", plugin_name)
+    def _load_plugin_flows(self, plugin_name: str, plugin_root: Path, flows_section: Dict[str, Any]) -> None:
+        if not isinstance(flows_section, dict):
+            logger.warning("Plugin '%s' flows section is not a mapping. Skipping.", plugin_name)
             return
 
-        for agent_name, raw_definition in agents_section.items():
+        for flow_name, raw_definition in flows_section.items():
             definition = raw_definition if isinstance(raw_definition, dict) else {}
-            self._register_agent_definition(
-                agent_name=str(agent_name),
+            self._register_flow_definition(
+                flow_name=str(flow_name),
                 definition=definition,
                 plugin_name=plugin_name,
                 plugin_root=plugin_root,
             )
 
-    def _register_agent_definition(
+    def _load_plugin_agents(self, plugin_name: str, plugin_root: Path, agents_section: Dict[str, Any]) -> None:
+        """Backward-compatible alias for loading manifest flows."""
+        self._load_plugin_flows(plugin_name, plugin_root, agents_section)
+
+    def _register_flow_definition(
         self,
-        agent_name: str,
+        flow_name: str,
         definition: Dict[str, Any],
         plugin_name: str,
         plugin_root: Path,
@@ -624,7 +628,7 @@ class PluginManager:
             logger.warning(
                 "Plugin '%s' agent '%s' uses deprecated 'tool_packs'. Please migrate to 'tools'.",
                 plugin_name,
-                agent_name,
+                flow_name,
             )
 
         prompt_definition = dict(definition)
@@ -637,7 +641,7 @@ class PluginManager:
             inline_keys=("system_prompt", "prompt"),
             file_keys=("system_prompt_file", "prompt_file"),
             files_key="prompt_files",
-            default_files=[f"prompts/agents/{agent_name}.md"],
+            default_files=[f"prompts/flows/{flow_name}.md", f"prompts/agents/{flow_name}.md"],
             fallback_dirs=self._workspace_prompt_fallback_dirs(),
         )
 
@@ -672,8 +676,8 @@ class PluginManager:
         if not isinstance(raw_default_handoff_policy, dict):
             raw_default_handoff_policy = {}
 
-        agent_def = FlowDefinition(
-            name=agent_name,
+        flow_def = FlowDefinition(
+            name=flow_name,
             description=str(definition.get("description", "")),
             llm_profile=str(llm_profile) if llm_profile else None,
             tools=[str(item) for item in tools if isinstance(item, str)],
@@ -694,7 +698,7 @@ class PluginManager:
                 module_ref=definition.get("module"),
                 entry_fn_name=definition.get("entry_fn"),
                 plugin_root=plugin_root,
-                agent_name=agent_name,
+                agent_name=flow_name,
                 plugin_name=plugin_name,
             ),
             metadata={
@@ -706,7 +710,7 @@ class PluginManager:
         # default_agent_profile key for compatibility.
         raw_dap = definition.get("default_agent") or definition.get("default_agent_profile")
         if isinstance(raw_dap, dict):
-            qualified_name = f"{plugin_name}::{agent_name}"
+            qualified_name = f"{plugin_name}::{flow_name}"
             dap_name = raw_dap.get("name") or qualified_name
             dap_tools_raw = raw_dap.get("tools")
             dap_tc_raw = raw_dap.get("tool_confirmation") or {}
@@ -714,7 +718,7 @@ class PluginManager:
                 dap_tc_raw = {}
             dap_profile = Agent(
                 name=str(dap_name),
-                agent=qualified_name,
+                flow=qualified_name,
                 description=str(raw_dap.get("description", "")),
                 llm_profile=str(raw_dap["llm_profile"]) if raw_dap.get("llm_profile") else None,
                 extra_prompts=[
@@ -738,21 +742,21 @@ class PluginManager:
                 source="plugin",
                 source_path=None,
             )
-            agent_def.default_agent = dap_profile
+            flow_def.default_agent = dap_profile
             logger.debug(
                 "Plugin '%s' flow '%s': loaded default_agent '%s'.",
                 plugin_name,
-                agent_name,
+                flow_name,
                 dap_name,
             )
 
         try:
-            self.flows.register(plugin_name, agent_name, agent_def)
+            self.flows.register(plugin_name, flow_name, flow_def)
         except RegistryError as exc:
             logger.error(
                 "Plugin '%s' flow '%s' registry collision: %s — skipping.",
                 plugin_name,
-                agent_name,
+                flow_name,
                 exc,
             )
 

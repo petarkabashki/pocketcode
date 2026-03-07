@@ -1,6 +1,6 @@
 schema_version: 1
 name: core
-description: Built-in plugin with the default tools and runtime agents.
+description: Built-in plugin with the default tools, prompts, flows, and composite agents.
 
 tools:
   read_file: tools/filesystem.py:ReadFileTool
@@ -21,7 +21,7 @@ flows:
     description: >
       General-purpose ReAct agent. Reasons, calls core tools, and observes
       results in a Reason -> Act -> Observe loop until a final answer is reached.
-    module: agents/react_agent.py
+    module: flows/react.py
     entry_fn: create_flow
     llm_profile: gemini_default
     tools:

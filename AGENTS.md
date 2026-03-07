@@ -69,6 +69,7 @@ Plugin-declared > Workspace file > Synthesised default
 ### CLI Commands
 
 ```
+/prompts                                    List all available prompts.
 /agent list                                 List all available agents.
 /agent show [agent_name]                    Show details (default: active agent).
 /agent switch <agent_name>                  Activate an agent.
@@ -81,7 +82,7 @@ Plugin-declared > Workspace file > Synthesised default
 /flow <flow_name> [--agent <agent_name>]    Set flow + optionally activate an agent.
 ```
 
-Compatibility alias: `/agent-profile` → `/agent`
+Agent command shortcuts: `/ag` and `/ap` → `/agent`
 
 ### Status Bar Format
 
@@ -135,7 +136,7 @@ flows:
 | `pocketcode/core/engine.py` | `set_flow()`, `set_active_agent()`, `list_flows()`, `list_available_agents()` |
 | `pocketcode/core/agent_runtime.py` | LLM tier 4.5, tool filtering, extra_prompts injection |
 | `pocketcode/core/tool_runtime.py` | Confirmation tiers 1.5/4.5, tool allowlist pre-check |
-| `pocketcode/cli/command_handler.py` | `/flow` and `/agent` CLI surface, plus `/agent-profile` compatibility alias |
+| `pocketcode/cli/command_handler.py` | `/flow`, `/prompts`, and `/agent` CLI surface, with agent-only shortcuts |
 | `pocketcode/cli/completers.py` | `AgentCompleter` for tab-completion |
 | `pocketcode/cli/textual_app.py` | Status bar Flow/Agent segments, suggestion list |
 | `tests/unit/test_agent_profile_manager.py` | Agent manager unit tests |

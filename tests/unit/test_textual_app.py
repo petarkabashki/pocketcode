@@ -55,6 +55,8 @@ class TestUiTextHelpers:
             "active_agent": "coder.safe",
             "active_agent_profile": "coder.safe",
             "global_llm_override": "fast",
+            "selected_flow": "architect::architect",
+            "selected_llm_profile": "smart",
             "runtime_workflow": "internal-flow",
             "last_run_summary": {
                 "current_agent": "coder::coder",
@@ -66,9 +68,9 @@ class TestUiTextHelpers:
 
         text = _build_status_text(status, "control")
 
-        assert "Flow: coder::coder" in text
+        assert "Flow: architect::architect" in text
         assert "Agent: coder.safe" in text
-        assert "LLM: fast (gpt-test)" in text
+        assert "LLM: smart (-)" in text
         assert "View: Control Center" in text
 
     def test_view_title_text_matches_named_view(self):
@@ -173,6 +175,7 @@ class _TextualEngineStub:
     def set_active_agent_profile(self, name):
         self.set_active_agent_profile_calls.append(name)
         self.active_agent_profile = self._profiles.get(name, self._profile(name, self.current_agent))
+        self.current_agent = self.active_agent_profile.agent
 
     def clone_agent_profile(self, src_name, new_name):
         self.clone_agent_profile_calls.append((src_name, new_name))
@@ -258,7 +261,7 @@ class _TextualEngineStub:
 
 
 class TestTextualSelectStability:
-    def test_f6_selects_next_agent_without_reentering_selector_callbacks(self):
+    def test_f7_selects_next_agent_profile_across_agents_without_reentering_callbacks(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
             app = PocketCodeTextualApp(
@@ -271,7 +274,7 @@ class TestTextualSelectStability:
                 engine.set_agent_calls.clear()
                 engine.set_active_agent_profile_calls.clear()
 
-                await pilot.press("f6")
+                await pilot.press("f7")
                 await pilot.pause(0.05)
                 first_counts = (
                     len(engine.set_agent_calls),
@@ -279,13 +282,20 @@ class TestTextualSelectStability:
                 )
                 await pilot.pause(0.2)
 
-                assert engine.get_current_agent() == "b"
+                assert engine.get_current_agent() == "a"
                 assert first_counts == (
                     len(engine.set_agent_calls),
                     len(engine.set_active_agent_profile_calls),
                 )
-                assert engine.set_agent_calls == ["b"]
-                assert engine.set_active_agent_profile_calls == []
+                assert engine.set_agent_calls == []
+                assert engine.set_active_agent_profile_calls == ["a-safe"]
+
+                await pilot.press("f7")
+                await pilot.pause(0.05)
+
+                assert engine.get_current_agent() == "b"
+                assert engine.active_agent_profile.name == "b"
+                assert engine.set_active_agent_profile_calls == ["a-safe", "b"]
 
         asyncio.run(exercise())
 

@@ -1,6 +1,6 @@
 schema_version: 1
 name: coder
-description: Expert developer agent that writes code, creates files, and applies patches.
+description: Expert developer plugin with coding tools, prompts, flows, and composite agents.
 
 tools:
   write_to_file: tools/filesystem.py:WriteToFileTool
@@ -10,7 +10,7 @@ tools:
 flows:
   coder:
     description: Code implementation and editing specialist.
-    module: agents/coder_agent.py
+    module: flows/coder.py
     entry_fn: create_flow
     llm_profile: gemini_default
     tools:

@@ -14,6 +14,7 @@ BASE_COMMAND_SUGGESTIONS = [
     "/set",
     "/flows",
     "/flow",
+    "/prompts",
     "/agents",
     "/agent",
     "/llms",
@@ -41,7 +42,6 @@ BASE_COMMAND_SUGGESTIONS = [
     "/copy-all",
     "/exit",
     "/quit",
-    "/fl",
     "/ls",
     "/ag",
     "/ap",
@@ -119,7 +119,7 @@ def handle_command(
         print(f"  Tool Confirmation (session overrides): {status.get('session_tool_confirmation_overrides', {})}")
         return None
 
-    if command in {"/flows", "/agents", "/llms", "/tools", "/list"}:
+    if command in {"/flows", "/agents", "/prompts", "/llms", "/tools", "/list"}:
         return _handle_list_command(command=command, args=args, engine=engine)
 
     if command in {
@@ -139,12 +139,6 @@ def handle_command(
         return _handle_confirm_command(args, engine)
 
     if command == "/agent":
-        management_commands = {"help", "list", "show", "switch", "clone", "edit", "tools", "policy"}
-        if not args or args[0].lower() in management_commands:
-            return _handle_agent_command(args, engine)
-        return _handle_set_command(command="/flow", args=args, engine=engine)
-
-    if command == "/agent-profile":
         return _handle_agent_command(args, engine)
 
     print(f"Unknown command: {command}")
@@ -159,7 +153,6 @@ def _normalize_command(command: str) -> str:
         "/c": "/cancel",
         "/st": "/status",
         "/ls": "/list",
-        "/fl": "/flow",
         "/ag": "/agent",
         "/ap": "/agent",
         "/lm": "/llm",
@@ -173,6 +166,8 @@ def _normalize_command(command: str) -> str:
 def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine) -> Optional[str]:
     if command == "/flows":
         scope = "flows"
+    elif command == "/prompts":
+        scope = "prompts"
     elif command == "/agents":
         scope = "agents"
     elif command == "/llms":
@@ -181,7 +176,7 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         scope = "tools"
     else:
         if not args:
-            print("Usage: /list <flows|agents|llms|tools> [flow]")
+            print("Usage: /list <flows|prompts|agents|llms|tools> [flow]")
             return None
         scope = args[0].lower()
         args = args[1:]
@@ -207,6 +202,15 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         for agent in agents:
             marker = "*" if agent == active_name else " "
             print(f"  {marker} {agent}")
+        return None
+
+    if scope == "prompts":
+        prompts = engine.list_prompts() if hasattr(engine, "list_prompts") else []
+        print("Available prompts:")
+        for prompt in prompts:
+            print(f"    {prompt}")
+        if not prompts:
+            print("  (none)")
         return None
 
     if scope == "llms":
@@ -241,7 +245,7 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         return None
 
     print(f"Unknown list scope: {scope}")
-    print("Usage: /list <flows|agents|llms|tools> [flow]")
+    print("Usage: /list <flows|prompts|agents|llms|tools> [flow]")
     return None
 
 
@@ -510,11 +514,12 @@ def print_help() -> None:
 Pocketcode Commands:
   /help                          Show this help message.
   /list <scope> [opts]           List entities by scope.
-                                 Scopes: flows|agents|llms|tools [flow for tools]
+                                                                 Scopes: flows|prompts|agents|llms|tools [flow for tools]
   /set <target> <args...>        Set runtime selection/override.
                                  Targets: flow|llm|llm-flow|llm-handoff
   /flow <flow_name|auto>         Select the active flow.
                                  Optional: --agent <agent_name>
+    /prompts                       List registered prompts.
   /reload                        Reload plugins and runtime catalogs.
     /stop, /cancel                 Request cancellation of the active run.
   /status                        Show runtime status.
@@ -526,10 +531,10 @@ Pocketcode Commands:
 
 Compatibility aliases:
   /flows     -> /list flows
+    /prompts   -> /list prompts
   /agents    -> /list agents
   /llms      -> /list llms
   /tools     -> /list tools
-  /agent-profile -> /agent
   /llm       -> /set llm
   /llm-flow  -> /set llm-flow
   /llm-agent -> /set llm-flow
@@ -560,7 +565,6 @@ Textual convenience commands:
 
 Shortcut aliases:
   /ls   /list
-  /fl   /flow
   /ag   /agent
   /ap   /agent
   /lm   /llm
@@ -1067,7 +1071,7 @@ Usage with /flow:
   /flow <flow_name> [--agent <agent_name>]
 
 Compatibility:
-  /agent-profile ...                          Alias for /agent ...
+    Agent shortcuts only: /ag and /ap map to /agent.
 """
     print(text)
 

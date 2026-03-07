@@ -135,6 +135,9 @@ class PocketCodeEngine:
     def list_flows(self) -> List[str]:
         return self.list_agents()
 
+    def list_prompts(self) -> List[str]:
+        return self._plugins.prompts.list_all()
+
     def list_llm_profiles(self) -> List[str]:
         return self._llm_router.list_profile_names()
 

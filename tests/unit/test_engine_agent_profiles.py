@@ -20,7 +20,7 @@ class _ProfileManagerStub:
         profile = self._profiles[src_name]
         cloned = AgentProfile(
             name=new_name,
-            agent=profile.agent,
+            flow=profile.flow,
             description=profile.description,
             llm_profile=profile.llm_profile,
             extra_prompts=list(profile.extra_prompts),
@@ -59,7 +59,7 @@ class _PluginsWithToolResolution:
 class TestEngineAgentProfiles:
     def test_set_active_agent_profile_switches_current_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        profile = AgentProfile(name="coder.safe", agent="coder::coder", source="workspace")
+        profile = AgentProfile(name="coder.safe", flow="coder::coder", source="workspace")
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
         engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine.current_agent = None
@@ -72,7 +72,7 @@ class TestEngineAgentProfiles:
 
     def test_set_active_agent_profile_rejects_unknown_target_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        profile = AgentProfile(name="ghost.safe", agent="ghost::ghost", source="workspace")
+        profile = AgentProfile(name="ghost.safe", flow="ghost::ghost", source="workspace")
         engine._agent_profile_manager = _ProfileManagerStub({"ghost.safe": profile})
         engine._plugins = type("Plugins", (), {"agents": {}})()
         engine.current_agent = None
@@ -89,8 +89,8 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._agent_profile_manager = _ProfileManagerStub(
             {
-                "coder.safe": AgentProfile(name="coder.safe", agent="coder::coder"),
-                "asker.fast": AgentProfile(name="asker.fast", agent="asker::asker"),
+                "coder.safe": AgentProfile(name="coder.safe", flow="coder::coder"),
+                "asker.fast": AgentProfile(name="asker.fast", flow="asker::asker"),
             }
         )
 
@@ -101,7 +101,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(
             name="coder.safe",
-            agent="coder::coder",
+            flow="coder::coder",
             llm_profile=None,
             extra_prompts=["prompts/base.md"],
             tools=["filesystem::read_file"],
@@ -147,7 +147,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(
             name="coder.safe",
-            agent="coder::coder",
+            flow="coder::coder",
             llm_profile=None,
             extra_prompts=[],
             tools=["filesystem::read_file"],

@@ -17,9 +17,11 @@ as a [PocketFlow](pocketflow_agents.md) `Flow` factory.
 ```
 my_plugin/
 ├── plugin.yaml          # Required: unified manifest (schema_version: 1)
-├── agents/
+├── flows/
 │   ├── __init__.py      # Empty package init
-│   └── my_agent.py     # PocketFlow Node + Flow factory
+│   └── my_agent.py      # PocketFlow Node + Flow factory
+├── agents/
+│   └── my_agent.yaml    # Composite runtime agent targeting a flow
 ├── prompts/
 │   └── system.md       # Markdown system prompt
 └── tools/
@@ -42,7 +44,7 @@ tools:
 
 flows:
   my_agent:
-    module: "agents/my_agent.py"
+    module: "flows/my_agent.py"
     entry_fn: "create_flow"
     description: "Flow that does X."
     tools: [my_tool]
@@ -63,7 +65,7 @@ prompts:
 
 ---
 
-## Flow Factory (`agents/my_agent.py`)
+## Flow Factory (`flows/my_agent.py`)
 
 Each flow is a zero-argument factory function that returns a PocketFlow `Flow`.
 
@@ -92,9 +94,26 @@ Register the factory in `plugin.yaml` under `flows:`:
 ```yaml
 flows:
   my_agent:
-    module: "agents/my_agent.py"
+    module: "flows/my_agent.py"
     entry_fn: "create_flow"
     prompt_files: ["prompts/system.md"]
+```
+
+## Composite Agents (`agents/*.yaml`)
+
+Composite agents are YAML configuration objects that target a flow and optionally
+override prompts, tools, LLM, and confirmation policy.
+
+```yaml
+name: my_plugin::my_agent
+flow: my_plugin::my_agent
+description: Safe profile for the main flow.
+tools:
+  - my_tool
+extra_prompts:
+  - prompts/review.md
+tool_confirmation:
+  default: confirm
 ```
 
 ---
@@ -163,9 +182,10 @@ Migration steps:
 1. Rename `agent.yaml` → `plugin.yaml`.
 2. Add `schema_version: 1` as the first key.
 3. Convert the `tools:` list to a `tools:` dict: `local_name: "file.py:Class"`.
-4. Create an `agents/` directory with a `create_flow()` factory module.
+4. Create a `flows/` directory with a `create_flow()` factory module.
 5. Add a `flows:` block pointing to the factory.
-6. Remove `workflows:`, `components:`, and `node_definitions:` legacy sections.
+6. Optionally add `agents/*.yaml` composite agents that target those flows.
+7. Remove `workflows:`, `components:`, and `node_definitions:` legacy sections.
 
 See [`specs/003-unified-plugin-namespace/quickstart.md`](../specs/003-unified-plugin-namespace/quickstart.md)
 for a step-by-step walkthrough.

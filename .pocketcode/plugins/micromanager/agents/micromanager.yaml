@@ -1,0 +1,3 @@
+name: micromanager::micromanager
+flow: micromanager::micromanager
+description: Composite agent targeting the micromanager orchestration flow.

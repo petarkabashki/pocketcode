@@ -105,9 +105,10 @@ Precedence is: CLI flow > config flow > CLI global > dynamic handoff/flow choice
 
 ## CLI Commands
 
-- `/list <flows|agents|llms|tools>`
+- `/list <flows|prompts|agents|llms|tools>`
 - `/set <flow|llm|llm-flow|llm-handoff> ...`
 - `/flow <flow_name|auto> [--agent <agent_name>]`
+- `/prompts`
 - `/agent <list|show|switch|clone|edit|tools|policy> ...`
 - `/stop`, `/cancel`
 - `/reload`, `/status`
@@ -116,9 +117,8 @@ Precedence is: CLI flow > config flow > CLI global > dynamic handoff/flow choice
 
 Compatibility aliases remain available:
 
-- `/flows`, `/agents`, `/llms`, `/tools`
-- `/agent-profile` remains as an alias for `/agent`
-- Short aliases: `/ls`, `/fl`, `/ag`, `/ap`, `/lm`, `/lf`, `/la`, `/lh`, `/st`, `/c`, `/r`, `/q`
+- `/flows`, `/prompts`, `/agents`, `/llms`, `/tools`
+- Short aliases: `/ls`, `/ag`, `/ap`, `/lm`, `/lf`, `/la`, `/lh`, `/st`, `/c`, `/r`, `/q`
 
 Textual keyboard shortcuts:
 
@@ -293,7 +293,7 @@ tools:
 
 flows:
   my_agent:
-    module: "agents/my_agent.py"
+    module: "flows/my_agent.py"
     entry_fn: "create_flow"
     tools: [my_tool]
 ```

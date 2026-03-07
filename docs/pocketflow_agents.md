@@ -76,7 +76,7 @@ description: My plugin.
 
 flows:
   my_agent:
-    module: "agents/my_agent.py"
+    module: "flows/my_agent.py"
     entry_fn: "create_flow"
     description: "Does X using Y."
     tools: [my_tool]

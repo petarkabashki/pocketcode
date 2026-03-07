@@ -66,7 +66,7 @@ class TestLoadManifestSuccess:
         assert manifest.agents == {}
         assert manifest.prompts == {}
 
-    def test_full_plugin_yaml_with_tools_and_agents(self, tmp_path):
+    def test_full_plugin_yaml_with_tools_and_flows(self, tmp_path):
         p = write_yaml(
             tmp_path,
             "plugin.yaml",
@@ -77,9 +77,9 @@ class TestLoadManifestSuccess:
             tools:
               write_file: "tools/filesystem.py:WriteFileTool"
               git_diff: "tools/git.py:GitDiffTool"
-            agents:
+            flows:
               coder:
-                module: "agents/coder_agent.py"
+                module: "flows/coder_agent.py"
                 entry_fn: "create_flow"
                 description: "Writes code."
                 tools: [write_file, git_diff]
@@ -94,7 +94,7 @@ class TestLoadManifestSuccess:
             "git_diff": "tools/git.py:GitDiffTool",
         }
         assert "coder" in manifest.agents
-        assert manifest.agents["coder"]["module"] == "agents/coder_agent.py"
+        assert manifest.agents["coder"]["module"] == "flows/coder_agent.py"
         assert manifest.agents["coder"]["entry_fn"] == "create_flow"
 
     def test_name_defaults_to_parent_directory(self, tmp_path):
@@ -184,7 +184,7 @@ class TestManifestSchemaErrors:
             schema_version: 1
             name: bad
             description: ""
-            agents:
+            flows:
               bad_agent:
                 entry_fn: create_flow
             """,
@@ -200,9 +200,9 @@ class TestManifestSchemaErrors:
             schema_version: 1
             name: bad
             description: ""
-            agents:
+            flows:
               bad_agent:
-                module: agents/foo.py
+                module: flows/foo.py
             """,
         )
         with pytest.raises(ManifestSchemaError, match="entry_fn"):
@@ -216,7 +216,7 @@ class TestManifestSchemaErrors:
             schema_version: 1
             name: bad
             description: ""
-            agents:
+            flows:
               bad_agent:
                 description: no wiring
             """,
@@ -309,7 +309,7 @@ class TestAgentYamlLegacyLoading:
 
 
 class TestLegacySectionWarnings:
-    @pytest.mark.parametrize("section", ["components", "workflows", "node_definitions", "flows", "modes"])
+    @pytest.mark.parametrize("section", ["components", "workflows", "node_definitions", "modes"])
     def test_legacy_section_emits_warning(self, tmp_path, caplog, section):
         p = write_yaml(
             tmp_path,

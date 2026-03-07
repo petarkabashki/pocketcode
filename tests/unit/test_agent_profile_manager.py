@@ -87,7 +87,7 @@ class TestPluginDeclaredProfile:
         qname, defn = _make_agent_def("p", "a")
         declared = AgentProfile(
             name="p::a:custom",
-            agent=qname,
+            flow=qname,
             llm_profile="gpt-4",
             source="plugin",
         )
@@ -107,7 +107,7 @@ class TestPluginDeclaredProfile:
     def test_plugin_name_fallback_to_qualified(self, tmp_path):
         qname, defn = _make_agent_def("myplugin", "myagent")
         # Simulate plugin YAML where name field is absent (plugin_manager sets name=qname)
-        declared = AgentProfile(name=qname, agent=qname, source="plugin")
+        declared = AgentProfile(name=qname, flow=qname, source="plugin")
         defn.default_agent_profile = declared
 
         apm = AgentProfileManager(tmp_path)
@@ -115,6 +115,35 @@ class TestPluginDeclaredProfile:
 
         profile = apm.get(qname)
         assert profile.source == "plugin"
+
+    def test_plugin_local_agent_yaml_loads_and_inherits_flow_defaults(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent", llm_profile="gemini_fast")
+        defn.tools = ["tool.read", "tool.write"]
+        plugin_root = tmp_path / "plugins" / "plug"
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        (agents_dir / "agent.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "plug::agent",
+                    "flow": qname,
+                    "description": "Plugin-local composite agent.",
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        defn.metadata = {"plugin_root": str(plugin_root)}
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        profile = apm.get("plug::agent")
+        assert profile is not None
+        assert profile.source == "plugin"
+        assert profile.flow == qname
+        assert profile.llm_profile == "gemini_fast"
+        assert profile.tools == ["tool.read", "tool.write"]
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +164,7 @@ class TestWorkspaceYamlLoading:
         self._write_ws_profile(
             ws_profiles,
             "custom.yaml",
-            {"name": "custom", "agent": qname},
+            {"name": "custom", "flow": qname},
         )
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
@@ -145,7 +174,7 @@ class TestWorkspaceYamlLoading:
     def test_workspace_profile_source_is_workspace(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
         ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
-        self._write_ws_profile(ws_profiles, "ws.yaml", {"name": "ws", "agent": qname})
+        self._write_ws_profile(ws_profiles, "ws.yaml", {"name": "ws", "flow": qname})
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
@@ -155,7 +184,7 @@ class TestWorkspaceYamlLoading:
         qname, defn = _make_agent_def("plug", "agent")
         ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
         # workspace file claims the same name as the synthesised profile
-        self._write_ws_profile(ws_profiles, "collision.yaml", {"name": qname, "agent": qname, "llm_profile": "ws-llm"})
+        self._write_ws_profile(ws_profiles, "collision.yaml", {"name": qname, "flow": qname, "llm_profile": "ws-llm"})
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
@@ -165,11 +194,11 @@ class TestWorkspaceYamlLoading:
 
     def test_plugin_beats_workspace_same_name(self, tmp_path, caplog):
         qname, defn = _make_agent_def("plug", "agent")
-        declared = AgentProfile(name="shared", agent=qname, llm_profile="plugin-llm", source="plugin")
+        declared = AgentProfile(name="shared", flow=qname, llm_profile="plugin-llm", source="plugin")
         defn.default_agent_profile = declared
 
         ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
-        self._write_ws_profile(ws_profiles, "ws.yaml", {"name": "shared", "agent": qname, "llm_profile": "ws-llm"})
+        self._write_ws_profile(ws_profiles, "ws.yaml", {"name": "shared", "flow": qname, "llm_profile": "ws-llm"})
 
         apm = AgentProfileManager(tmp_path)
         with caplog.at_level("WARNING"):
