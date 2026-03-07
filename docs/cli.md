@@ -95,7 +95,7 @@ The full UI is used for interactive terminals when `textual` is importable.
 Behavior:
 
 - the runtime sets `cli_context["interface"] = "textual"`
-- `pocketcode/cli/textual_app.py::run_textual_cli()` constructs `PocketCodeTextualApp`
+- `pocketcode/cli/textual_app.py::run_textual_cli()` remains the stable entrypoint and forwards to the split Textual UI implementation under `pocketcode/cli/textual_ui/`
 - the app owns the screen state, input routing, picker dialogs, editing dialogs, and live run monitor
 - slash commands still route through `handle_command()` so the command layer remains shared with the basic CLI
 
@@ -426,9 +426,23 @@ This event stream is shared with the Textual UI so both interfaces present the s
 
 ## Textual UI Architecture
 
-The Textual UI lives in `pocketcode/cli/textual_app.py`.
+The public Textual UI import surface remains `pocketcode/cli/textual_app.py`, but the implementation is now split across `pocketcode/cli/textual_ui/`.
 
 The main app class is `PocketCodeTextualApp(App[None])`.
+
+Current module layout:
+
+- `pocketcode/cli/textual_app.py`: compatibility facade that re-exports the Textual UI surface
+- `pocketcode/cli/textual_ui/app.py`: final `PocketCodeTextualApp` composition and `run_textual_cli()`
+- `pocketcode/cli/textual_ui/base.py`: app shell, bindings, CSS, and layout composition
+- `pocketcode/cli/textual_ui/rendering_mixin.py`: UI state derivation, render caching, and run-event updates
+- `pocketcode/cli/textual_ui/selection_mixin.py`: profile, mode, LLM, confirmation, and system-settings selection flows
+- `pocketcode/cli/textual_ui/control_center_mixin.py`: F6 control-center category and action routing
+- `pocketcode/cli/textual_ui/config_editing_mixin.py`: agent, mode, LLM, and tool-policy editing helpers
+- `pocketcode/cli/textual_ui/asset_management_mixin.py`: clone, delete, preset, skill, and tool-selection flows
+- `pocketcode/cli/textual_ui/interaction_mixin.py`: input handling, UI event handlers, and user actions
+- `pocketcode/cli/textual_ui/picker_screens.py` and `pocketcode/cli/textual_ui/editor_screens.py`: modal screen classes
+- `pocketcode/cli/textual_ui/shared.py`: constants, helper functions, and immutable UI state dataclasses
 
 Core state owned by the app includes:
 
@@ -543,7 +557,7 @@ Event handling responsibilities:
 
 The Textual UI contains modal screens and picker flows for higher-level editing tasks.
 
-Current capabilities implemented in `textual_app.py` include:
+Current capabilities implemented across `pocketcode/cli/textual_ui/` include:
 
 - selecting the active agent profile
 - selecting a mode
@@ -618,7 +632,8 @@ Primary implementation files:
 - `pocketcode/cli/command_handler.py`: shared slash-command parsing, aliases, and engine mutation commands
 - `pocketcode/cli/runtime_events.py`: human-readable runtime event formatting
 - `pocketcode/cli/user_interaction.py`: console formatting and parsing for structured interaction requests
-- `pocketcode/cli/textual_app.py`: full-screen Textual shell, pickers, editors, run monitor, and persistence actions
+- `pocketcode/cli/textual_app.py`: stable Textual UI import surface and compatibility facade
+- `pocketcode/cli/textual_ui/`: split Textual shell implementation, modal screens, pickers, editors, run monitor, and persistence actions
 - `pocketcode/cli/completers.py`: small prompt-toolkit completer helpers that are currently not wired into the default startup path
 
 ## Current Non-Goals And Boundaries
@@ -630,4 +645,4 @@ The current CLI implementation does not provide:
 - persistent session context for `/context`; only Textual selection state and related runtime settings are persisted
 - a startup flag for directly selecting an agent profile
 
-When updating CLI behavior, keep this document in sync with both `pocketcode/main.py` and `pocketcode/cli/textual_app.py`.
+When updating CLI behavior, keep this document in sync with `pocketcode/main.py`, `pocketcode/cli/textual_app.py`, and the implementation modules under `pocketcode/cli/textual_ui/`.

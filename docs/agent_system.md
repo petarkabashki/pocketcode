@@ -237,6 +237,7 @@ Core implementation files:
 | `pocketcode/core/tool_runtime.py` | confirmation policy resolution and allowlist enforcement |
 | `pocketcode/cli/command_handler.py` | `/flow` and `/agent` CLI surface |
 | `pocketcode/cli/completers.py` | profile completion support |
-| `pocketcode/cli/textual_app.py` | Textual status bar and control surfaces |
+| `pocketcode/cli/textual_app.py` | Stable Textual UI import surface and re-exports |
+| `pocketcode/cli/textual_ui/` | Textual status bar, control surfaces, modal screens, and UI workflows |
 | `tests/unit/test_agent_profile_manager.py` | manager unit tests |
 | `tests/unit/test_agent_profile_resolution.py` | precedence and resolution tests |

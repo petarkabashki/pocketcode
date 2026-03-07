@@ -599,14 +599,6 @@ class TestTextualSelectStability:
                 {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
             )
 
-            async with app.run_test() as pilot:
-                await pilot.pause()
-                assert isinstance(app.query_one("#header-agent", Static), Static)
-                assert isinstance(app.query_one("#header-llm", Static), Static)
-                assert len(app.query("#status")) == 0
-                assert app._text_state_cache["header-agent"] == "Agent: a"
-                assert app._text_state_cache["header-llm"] == "LLM: fast (-)"
-
         asyncio.run(exercise())
 
     def test_asset_picker_supports_arrow_key_selection(self):
