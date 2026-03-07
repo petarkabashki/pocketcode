@@ -150,19 +150,85 @@ class ModeManager:
     def list(self) -> list[ModeDefinition]:
         return sorted(self._modes.values(), key=lambda mode: mode.name)
 
+    def get_mode_text(self, name: str) -> str:
+        mode = self.get(name)
+        if mode is None:
+            raise ValueError(f"Unknown mode '{name}'.")
+        source_path = mode.source_path
+        if source_path is not None and source_path.exists():
+            return source_path.read_text(encoding="utf-8")
+        return self._dump_mode_text(mode)
+
+    def save_text(self, name: str, markdown_text: str) -> Path:
+        mode = self._mode_from_text(markdown_text, source_path=self._modes_dir / f"{name}.md")
+        if mode.name != name:
+            raise ValueError(
+                f"Mode front matter name '{mode.name}' does not match target mode '{name}'. "
+                "Use clone to create a differently named mode."
+            )
+        self._modes_dir.mkdir(parents=True, exist_ok=True)
+        target_path = self._modes_dir / f"{name}.md"
+        target_path.write_text(markdown_text.strip() + "\n", encoding="utf-8")
+        self.load()
+        return target_path
+
+    def clone(self, src_name: str, new_name: str) -> Path:
+        source_mode = self.get(src_name)
+        if source_mode is None:
+            raise ValueError(f"Unknown mode '{src_name}'.")
+        cleaned_name = str(new_name).strip()
+        if not cleaned_name:
+            raise ValueError("Mode name cannot be empty.")
+        target_path = self._modes_dir / f"{cleaned_name}.md"
+        if target_path.exists():
+            raise ValueError(
+                f"Cannot clone: target file '{target_path}' already exists. "
+                "Choose a different name or remove the existing file first."
+            )
+        cloned_mode = ModeDefinition(
+            name=cleaned_name,
+            description=source_mode.description,
+            flow=source_mode.flow,
+            agent=source_mode.agent,
+            llm_profile=source_mode.llm_profile,
+            inline_prompt=source_mode.inline_prompt,
+            extra_prompts=list(source_mode.extra_prompts),
+            tools=list(source_mode.tools) if source_mode.tools is not None else None,
+            tools_specified=source_mode.tools_specified,
+            tool_confirmation=dict(source_mode.tool_confirmation or {}),
+            source="workspace",
+            source_path=target_path.resolve(),
+        )
+        self._modes_dir.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(self._dump_mode_text(cloned_mode), encoding="utf-8")
+        self.load()
+        return target_path
+
+    def delete(self, name: str) -> Path:
+        mode = self.get(name)
+        if mode is None:
+            raise ValueError(f"Unknown mode '{name}'.")
+        if mode.source_path is None:
+            raise ValueError(f"Mode '{name}' has no source path.")
+        target_path = Path(mode.source_path)
+        if not target_path.exists():
+            raise ValueError(f"Mode file does not exist: {target_path}")
+        target_path.unlink()
+        self.load()
+        return target_path
+
     def _load_mode_file(self, mode_path: Path) -> Optional[ModeDefinition]:
         try:
-            front_matter, body = parse_markdown_front_matter(
-                mode_path.read_text(encoding="utf-8")
-            )
+            return self._mode_from_text(mode_path.read_text(encoding="utf-8"), source_path=mode_path)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Skipping mode file '%s': %s", mode_path, exc)
             return None
 
-        raw_name = front_matter.get("name") or mode_path.stem
+    def _mode_from_text(self, markdown_text: str, *, source_path: Path) -> ModeDefinition:
+        front_matter, body = parse_markdown_front_matter(markdown_text)
+        raw_name = front_matter.get("name") or source_path.stem
         if not isinstance(raw_name, str) or not raw_name.strip():
-            logger.warning("Skipping mode file '%s': missing name.", mode_path)
-            return None
+            raise ValueError(f"Skipping mode file '{source_path}': missing name.")
 
         tools_specified, tools = normalize_tool_selection(front_matter.get("tools"))
         return ModeDefinition(
@@ -180,8 +246,33 @@ class ModeManager:
             tools=tools,
             tools_specified=tools_specified,
             tool_confirmation=normalize_tool_confirmation(front_matter.get("tool_confirmation")),
-            source_path=mode_path.resolve(),
+            source_path=source_path.resolve(),
         )
+
+    def _dump_mode_text(self, mode: ModeDefinition) -> str:
+        front_matter: Dict[str, Any] = {
+            "name": mode.name,
+        }
+        if mode.description:
+            front_matter["description"] = mode.description
+        if mode.flow:
+            front_matter["flow"] = mode.flow
+        if mode.agent:
+            front_matter["agent"] = mode.agent
+        if mode.llm_profile:
+            front_matter["llm_profile"] = mode.llm_profile
+        if mode.tools_specified:
+            front_matter["tools"] = list(mode.tools) if mode.tools is not None else []
+        if mode.extra_prompts:
+            front_matter["extra_prompts"] = list(mode.extra_prompts)
+        if mode.tool_confirmation:
+            front_matter["tool_confirmation"] = dict(mode.tool_confirmation)
+
+        front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
+        body = mode.inline_prompt.strip()
+        if body:
+            return f"---\n{front_matter_text}\n---\n{body}\n"
+        return f"---\n{front_matter_text}\n---\n"
 
 
 class SkillManager:

@@ -463,3 +463,67 @@ class TestEngineAgentProfiles:
         assert engine.enabled_skills == ["python-lint"]
         assert saved["runtime"]["textual"]["default_skills"] == ["python-lint"]
         assert "last_used" not in saved["runtime"]["textual"]
+
+    def test_set_last_used_global_llm_profile_persists_textual_selection(self, tmp_path):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {"runtime": {"textual": {}}}
+        engine._runtime_config = engine._config["runtime"]
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
+        )()
+        engine.global_llm_override = None
+
+        engine.set_last_used_global_llm_profile("smart")
+
+        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
+        assert engine.global_llm_override == "smart"
+        assert saved["runtime"]["textual"]["last_used"]["global_llm_profile"] == "smart"
+
+    def test_save_and_apply_textual_selection_preset_round_trips_runtime_state(self, tmp_path):
+        profile = AgentProfile(name="coder.safe", flow="coder::coder", source="workspace")
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {"runtime": {"textual": {}}}
+        engine._runtime_config = engine._config["runtime"]
+        engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
+        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._mode_manager = _ModeManagerStub({})
+        engine._skill_manager = _SkillManagerStub({"python-testing": SkillDefinition(name="python-testing")})
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
+        )()
+        engine._refresh_runtime_components = lambda: None
+        engine.current_agent = "coder::coder"
+        engine.active_agent_profile = profile
+        engine.active_mode = None
+        engine.global_llm_override = "smart"
+        engine.enabled_skills = ["python-testing"]
+        engine.auto_confirm_tools = True
+        engine.session_confirmation_overrides = {
+            "default_policy": "confirm",
+            "tool_policies": {},
+            "agent_policies": {},
+        }
+
+        engine.save_textual_selection_preset("review-set")
+        engine.active_agent_profile = None
+        engine.global_llm_override = None
+        engine.enabled_skills = []
+        engine.auto_confirm_tools = False
+        engine.clear_session_confirmation_overrides()
+
+        engine.apply_textual_selection_preset("review-set")
+
+        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
+        assert engine.active_agent_profile is not None
+        assert engine.active_agent_profile.name == "coder.safe"
+        assert engine.global_llm_override == "smart"
+        assert engine.enabled_skills == ["python-testing"]
+        assert engine.auto_confirm_tools is True
+        assert engine.session_confirmation_overrides["default_policy"] == "confirm"
+        assert "review-set" in saved["runtime"]["textual"]["selection_presets"]

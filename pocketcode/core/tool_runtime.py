@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 from pocketcode.core.interfaces import BaseTool
@@ -48,28 +49,66 @@ class ToolRuntime:
 
     def describe_tool(self, tool_name: str) -> Dict[str, Any]:
         tool_impl = self._resolve_tool(tool_name)
+        tool_instance = self._instantiate_tool(tool_impl)
 
         description = ""
         schema: Dict[str, Any] = {"type": "object", "properties": {}}
 
-        if isinstance(tool_impl, type) and issubclass(tool_impl, BaseTool):
-            instance = tool_impl()
-            description = instance.description
-            schema = instance.schema
-        elif isinstance(tool_impl, BaseTool):
-            description = tool_impl.description
-            schema = tool_impl.schema
+        if tool_instance is not None:
+            description = tool_instance.description
+            schema = tool_instance.schema
         elif callable(tool_impl):
             description = inspect.getdoc(tool_impl) or f"Callable tool '{tool_name}'."
             schema = self._schema_from_callable(tool_impl)
         else:
             description = f"Unsupported tool type: {type(tool_impl)}"
 
+        source_path = self._tool_source_path(tool_impl, tool_instance)
+        group_path = self._tool_group_path(tool_name, source_path)
+
         return {
             "name": tool_name,
             "description": description.strip(),
             "schema": schema,
+            "group_path": list(group_path),
+            "source_path": str(source_path) if source_path is not None else None,
         }
+
+    def _tool_source_path(
+        self,
+        tool_impl: Any,
+        tool_instance: BaseTool | None,
+    ) -> Path | None:
+        target = tool_instance.__class__ if tool_instance is not None else tool_impl
+        try:
+            source_file = inspect.getsourcefile(target) or inspect.getfile(target)
+        except (OSError, TypeError):
+            return None
+        if not source_file:
+            return None
+        return Path(source_file).resolve()
+
+    def _tool_group_path(self, tool_name: str, source_path: Path | None) -> tuple[str, ...]:
+        qualified = str(tool_name).replace("::", ".").strip()
+        namespace = qualified.split(".", 1)[0] if qualified and "." in qualified else (qualified or "other")
+        source_parts = self._tool_source_group_parts(source_path)
+        if not source_parts:
+            return (namespace,)
+        return (namespace, *source_parts)
+
+    def _tool_source_group_parts(self, source_path: Path | None) -> tuple[str, ...]:
+        if source_path is None:
+            return ()
+        stemmed = source_path.with_suffix("")
+        parts = stemmed.parts
+        if "tools" in parts:
+            tools_index = max(index for index, part in enumerate(parts) if part == "tools")
+            relative_parts = tuple(part for part in parts[tools_index + 1:] if part and part != "__init__")
+            if relative_parts:
+                return relative_parts
+        if stemmed.stem and stemmed.stem != "__init__":
+            return (stemmed.stem,)
+        return ()
 
     def execute_tool(
         self,

@@ -105,11 +105,13 @@ parameters:           # optional
 ```
 
 Textual UI notes:
-- `F3` opens the popup editor selector for agent config, LLM config, tool selection, and tool policies
-- `F4` opens the popup clone selector for agent and LLM configs
-- `F6` opens `Select` for active agent, runtime LLM override, skills, grouped/individual tool selection, tool policy editing, session confirmation, and system settings
+- `F3` opens the popup editor selector for agent config, mode config, LLM config, tool selection, and tool policies
+- `F4` opens the popup clone selector for agent, mode, and LLM configs
+- `F6` opens the `Control Center` for active agent/profile selection, mode selection, runtime LLM override, skills, grouped/individual tool selection, tool policy editing, selection presets, session confirmation, and system settings
 - searchable selection popups support `Ctrl+Down` to jump to the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted item
-- skill selection plus tool/tool-policy edits persist last-used state automatically; `Reset` clears the last-used override and `Save as Default` writes the current state into the default config
+- tool selection groups follow the tool file/folder path under `tools/`; separate files such as `tools/filesystem.py` and `tools/user_input.py` appear as separate groups, and deeper folders create nested groups
+- mode/profile/LLM/skill selection plus tool/tool-policy edits persist last-used state automatically; `Reset` clears the last-used override and `Save as Default` writes the current state into the default config
+- editing a plugin/synthesised LLM profile from the Textual UI prompts for a workspace clone first, then opens the YAML editor against that workspace copy
 - `System Settings` applies and saves theme, workspace mode, and default agent/LLM selections to `pocketcode.yml`
 
 ### Workspace Agent YAML Schema

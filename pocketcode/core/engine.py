@@ -86,6 +86,7 @@ class PocketCodeEngine:
         }
 
         self._validate_current_selections()
+        self._restore_textual_selection_state()
 
     def reload(self) -> None:
         self._plugins.load()
@@ -236,10 +237,17 @@ class PocketCodeEngine:
             agent_profiles = {}
         default_skills = textual_config.get("default_skills", [])
         last_used_skills = last_used.get("skills", [])
+        presets = textual_config.get("selection_presets", {})
         return {
             "default_skills": list(default_skills) if isinstance(default_skills, list) else [],
             "last_used_skills": list(last_used_skills) if isinstance(last_used_skills, list) else [],
             "agent_profiles": copy.deepcopy(agent_profiles),
+            "active_profile": last_used.get("active_profile"),
+            "active_mode": last_used.get("active_mode"),
+            "global_llm_profile": last_used.get("global_llm_profile"),
+            "session_confirmation_default": last_used.get("session_confirmation_default"),
+            "auto_confirm_tools": bool(last_used.get("auto_confirm_tools", self.auto_confirm_tools)),
+            "selection_presets": sorted(presets) if isinstance(presets, dict) else [],
         }
 
     def save_system_settings(
@@ -412,6 +420,107 @@ class PocketCodeEngine:
         textual["default_skills"] = normalized
         return self._write_workspace_config()
 
+    def set_last_used_active_profile(self, profile_name: Optional[str]) -> Path:
+        last_used = self._textual_last_used_config(create=True)
+        cleaned = str(profile_name).strip() if profile_name else ""
+        if cleaned:
+            self.set_active_agent_profile(cleaned)
+            last_used["active_profile"] = cleaned
+            last_used.pop("active_mode", None)
+        else:
+            last_used.pop("active_profile", None)
+        self._cleanup_textual_last_used_config()
+        return self._write_workspace_config()
+
+    def set_last_used_mode(self, mode_name: Optional[str]) -> Path:
+        last_used = self._textual_last_used_config(create=True)
+        cleaned = str(mode_name).strip() if mode_name else ""
+        if cleaned:
+            self.set_mode(cleaned)
+            last_used["active_mode"] = cleaned
+            last_used.pop("active_profile", None)
+        else:
+            self.set_mode(None)
+            last_used.pop("active_mode", None)
+        self._cleanup_textual_last_used_config()
+        return self._write_workspace_config()
+
+    def set_last_used_global_llm_profile(self, profile_name: Optional[str]) -> Path:
+        last_used = self._textual_last_used_config(create=True)
+        cleaned = str(profile_name).strip() if profile_name else ""
+        if cleaned:
+            self.set_global_llm_override(cleaned)
+            last_used["global_llm_profile"] = cleaned
+        else:
+            self.set_global_llm_override(None)
+            last_used.pop("global_llm_profile", None)
+        self._cleanup_textual_last_used_config()
+        return self._write_workspace_config()
+
+    def set_last_used_session_confirmation_default(self, policy: Optional[str]) -> Path:
+        last_used = self._textual_last_used_config(create=True)
+        normalized = self._normalize_confirmation_policy(policy)
+        self.set_session_confirmation_default(normalized)
+        if normalized is None:
+            last_used.pop("session_confirmation_default", None)
+        else:
+            last_used["session_confirmation_default"] = normalized
+        self._cleanup_textual_last_used_config()
+        return self._write_workspace_config()
+
+    def set_last_used_auto_confirm_tools(self, enabled: bool) -> Path:
+        last_used = self._textual_last_used_config(create=True)
+        self.auto_confirm_tools = bool(enabled)
+        if self.auto_confirm_tools == bool(self._runtime_config.get("auto_confirm_tools", False)):
+            last_used.pop("auto_confirm_tools", None)
+        else:
+            last_used["auto_confirm_tools"] = self.auto_confirm_tools
+        self._cleanup_textual_last_used_config()
+        return self._write_workspace_config()
+
+    def list_textual_selection_presets(self) -> List[str]:
+        presets = self._textual_selection_presets_config(create=False)
+        return sorted(str(name) for name in presets)
+
+    def get_textual_selection_preset(self, name: str) -> Dict[str, Any] | None:
+        presets = self._textual_selection_presets_config(create=False)
+        raw = presets.get(name)
+        if not isinstance(raw, dict):
+            return None
+        return self._normalize_textual_selection_snapshot(raw)
+
+    def save_textual_selection_preset(self, name: str) -> Path:
+        cleaned = str(name).strip()
+        if not cleaned:
+            raise ValueError("Selection preset name cannot be empty.")
+        presets = self._textual_selection_presets_config(create=True)
+        presets[cleaned] = self._capture_textual_selection_snapshot()
+        return self._write_workspace_config()
+
+    def apply_textual_selection_preset(self, name: str) -> Path:
+        preset = self.get_textual_selection_preset(name)
+        if preset is None:
+            raise ValueError(f"Unknown selection preset '{name}'.")
+        self._replace_last_used_selection_snapshot(preset)
+        self.active_mode = None
+        self.active_agent_profile = None
+        self.global_llm_override = None
+        self.clear_session_confirmation_overrides()
+        self.auto_confirm_tools = bool(self._runtime_config.get("auto_confirm_tools", False))
+        self._restore_textual_selection_state()
+        return self._write_workspace_config()
+
+    def delete_textual_selection_preset(self, name: str) -> Path:
+        presets = self._textual_selection_presets_config(create=True)
+        cleaned = str(name).strip()
+        if cleaned not in presets:
+            raise ValueError(f"Unknown selection preset '{cleaned}'.")
+        presets.pop(cleaned, None)
+        if not presets:
+            textual = self._textual_config(create=True)
+            textual.pop("selection_presets", None)
+        return self._write_workspace_config()
+
     def list_agent_profiles(self, agent_name: Optional[str] = None) -> List[str]:
         """Return known agent profile names, optionally filtered by target agent."""
         profiles = self._agent_profile_manager.list()
@@ -463,6 +572,60 @@ class PocketCodeEngine:
             "source_path": cloned.get("source_path"),
             "config": copy.deepcopy(cloned.get("config", {})),
         }
+
+    def delete_agent_profile(self, name: str) -> Path:
+        target_path = self._agent_profile_manager.delete(name)
+        if self.active_agent_profile is not None and self.active_agent_profile.name == name:
+            self.active_agent_profile = None
+        selection = self._textual_last_used_config(create=True)
+        if selection.get("active_profile") == name:
+            selection.pop("active_profile", None)
+        self._cleanup_textual_profile_state(name)
+        self._cleanup_invalid_textual_selection_presets(removed_profile=name)
+        if self.current_agent:
+            self._activate_default_profile_for(self.current_agent)
+        return self._write_workspace_config()
+
+    def delete_llm_profile(self, name: str) -> Path:
+        profile = self.get_llm_profile(name)
+        if profile is None or profile.get("source") != "workspace":
+            raise ValueError(
+                f"LLM profile '{name}' is not workspace-backed. Only workspace LLM profiles can be deleted."
+            )
+        target_path = self._workspace_llm_profile_manager.delete(name)
+        if self.global_llm_override == name:
+            self.global_llm_override = None
+        selection = self._textual_last_used_config(create=True)
+        if selection.get("global_llm_profile") == name:
+            selection.pop("global_llm_profile", None)
+        self._cleanup_invalid_textual_selection_presets(removed_llm=name)
+        self._reload_llm_runtime()
+        return self._write_workspace_config()
+
+    def get_mode_text(self, name: str) -> str:
+        return self._mode_manager.get_mode_text(name)
+
+    def clone_mode(self, src_name: str, new_name: str) -> Path:
+        target_path = self._mode_manager.clone(src_name, new_name)
+        self._mode_manager.load()
+        return target_path
+
+    def update_mode(self, name: str, *, markdown_text: str) -> Path:
+        target_path = self._mode_manager.save_text(name, markdown_text)
+        self._mode_manager.load()
+        if self.active_mode is not None and self.active_mode.name == name:
+            self.set_mode(name)
+        return target_path
+
+    def delete_mode(self, name: str) -> Path:
+        target_path = self._mode_manager.delete(name)
+        if self.active_mode is not None and self.active_mode.name == name:
+            self.set_mode(None)
+        selection = self._textual_last_used_config(create=True)
+        if selection.get("active_mode") == name:
+            selection.pop("active_mode", None)
+        self._cleanup_invalid_textual_selection_presets(removed_mode=name)
+        return self._write_workspace_config()
 
     def update_llm_profile(self, name: str, *, profile_config: Dict[str, Any]) -> Any:
         profile = self.get_llm_profile(name)
@@ -755,6 +918,9 @@ class PocketCodeEngine:
 
     def describe_tools_for_flow(self, flow_name: str) -> List[Dict[str, Any]]:
         return self.describe_tools_for_agent(flow_name)
+
+    def describe_tool(self, tool_name: str) -> Dict[str, Any]:
+        return self._tool_runtime.describe_tool(tool_name)
 
     def start_request(
         self,
@@ -1243,6 +1409,30 @@ class PocketCodeEngine:
             runtime_config=self._runtime_config,
         )
 
+    def _restore_textual_selection_state(self) -> None:
+        snapshot = self._current_last_used_selection_snapshot()
+        selected_mode = str(snapshot.get("active_mode") or "").strip()
+        selected_profile = str(snapshot.get("active_profile") or "").strip()
+        selected_llm = str(snapshot.get("global_llm_profile") or "").strip()
+        session_default = snapshot.get("session_confirmation_default")
+
+        if "auto_confirm_tools" in snapshot:
+            self.auto_confirm_tools = bool(snapshot.get("auto_confirm_tools"))
+
+        if session_default is not None:
+            self.set_session_confirmation_default(session_default)
+
+        if selected_mode and self._mode_manager.get(selected_mode) is not None:
+            self.set_mode(selected_mode)
+        elif selected_profile and self._base_agent_profile(selected_profile) is not None:
+            self.set_active_agent_profile(selected_profile)
+
+        if selected_llm:
+            try:
+                self.set_global_llm_override(selected_llm)
+            except Exception:
+                logger.warning("Ignoring missing last-used LLM profile '%s'.", selected_llm)
+
     def _write_workspace_config(self) -> Path:
         config_path = self._workspace_root / WORKSPACE_SETTINGS_FILENAME
         config_path.write_text(
@@ -1278,6 +1468,132 @@ class PocketCodeEngine:
         elif create:
             textual["last_used"] = last_used
         return last_used
+
+    def _textual_selection_presets_config(self, *, create: bool) -> Dict[str, Any]:
+        textual = self._textual_config(create=create)
+        presets = textual.get("selection_presets", {})
+        if not isinstance(presets, dict):
+            presets = {}
+            if create:
+                textual["selection_presets"] = presets
+        elif create:
+            textual["selection_presets"] = presets
+        return presets
+
+    def _capture_textual_selection_snapshot(self) -> Dict[str, Any]:
+        snapshot: Dict[str, Any] = {}
+        if self.active_mode is not None:
+            snapshot["active_mode"] = self.active_mode.name
+        elif self.active_agent_profile is not None:
+            snapshot["active_profile"] = self.active_agent_profile.name
+        if self.global_llm_override:
+            snapshot["global_llm_profile"] = self.global_llm_override
+        if self.enabled_skills:
+            snapshot["skills"] = list(self.enabled_skills)
+        session_default = self.session_confirmation_overrides.get("default_policy")
+        if session_default is not None:
+            snapshot["session_confirmation_default"] = session_default
+        snapshot["auto_confirm_tools"] = bool(self.auto_confirm_tools)
+        last_used = self._textual_last_used_config(create=False)
+        agent_profiles = last_used.get("agent_profiles", {})
+        if isinstance(agent_profiles, dict) and agent_profiles:
+            snapshot["agent_profiles"] = copy.deepcopy(agent_profiles)
+        return snapshot
+
+    def _normalize_textual_selection_snapshot(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        snapshot: Dict[str, Any] = {}
+        active_mode = str(raw.get("active_mode") or "").strip()
+        if active_mode:
+            snapshot["active_mode"] = active_mode
+        active_profile = str(raw.get("active_profile") or "").strip()
+        if active_profile:
+            snapshot["active_profile"] = active_profile
+        global_llm_profile = str(raw.get("global_llm_profile") or "").strip()
+        if global_llm_profile:
+            snapshot["global_llm_profile"] = global_llm_profile
+        if isinstance(raw.get("skills"), list):
+            snapshot["skills"] = self._normalize_skill_names(list(raw.get("skills", [])), strict=False)
+        session_default = self._normalize_confirmation_policy(raw.get("session_confirmation_default"))
+        if session_default is not None:
+            snapshot["session_confirmation_default"] = session_default
+        if "auto_confirm_tools" in raw:
+            snapshot["auto_confirm_tools"] = bool(raw.get("auto_confirm_tools"))
+        raw_agent_profiles = raw.get("agent_profiles", {})
+        if isinstance(raw_agent_profiles, dict):
+            cleaned_profiles: Dict[str, Any] = {}
+            for profile_name, state in raw_agent_profiles.items():
+                cleaned_name = str(profile_name).strip()
+                if not cleaned_name or not isinstance(state, dict):
+                    continue
+                cleaned_state: Dict[str, Any] = {}
+                if "tools" in state:
+                    tools = state.get("tools")
+                    cleaned_state["tools"] = self._normalize_tool_list(tools) if isinstance(tools, list) else None
+                if "tool_confirmation_overrides" in state:
+                    cleaned_state["tool_confirmation_overrides"] = self._normalized_confirmation_overrides(
+                        state.get("tool_confirmation_overrides", {})
+                    )
+                if cleaned_state:
+                    cleaned_profiles[cleaned_name] = cleaned_state
+            if cleaned_profiles:
+                snapshot["agent_profiles"] = cleaned_profiles
+        return snapshot
+
+    def _current_last_used_selection_snapshot(self) -> Dict[str, Any]:
+        last_used = self._textual_last_used_config(create=False)
+        if not isinstance(last_used, dict):
+            return {}
+        return self._normalize_textual_selection_snapshot(last_used)
+
+    def _replace_last_used_selection_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        normalized = self._normalize_textual_selection_snapshot(snapshot)
+        last_used = self._textual_last_used_config(create=True)
+        for key in (
+            "active_mode",
+            "active_profile",
+            "global_llm_profile",
+            "skills",
+            "session_confirmation_default",
+            "auto_confirm_tools",
+            "agent_profiles",
+        ):
+            if key in normalized:
+                value = normalized[key]
+                last_used[key] = copy.deepcopy(value) if isinstance(value, dict) else value
+            else:
+                last_used.pop(key, None)
+        self.enabled_skills = self._normalize_skill_names(normalized.get("skills", []), strict=False)
+        self._refresh_runtime_components()
+        self._cleanup_textual_last_used_config()
+
+    def _cleanup_invalid_textual_selection_presets(
+        self,
+        *,
+        removed_profile: str | None = None,
+        removed_llm: str | None = None,
+        removed_mode: str | None = None,
+    ) -> None:
+        presets = self._textual_selection_presets_config(create=False)
+        if not presets:
+            return
+        for preset_name, raw_snapshot in list(presets.items()):
+            if not isinstance(raw_snapshot, dict):
+                presets.pop(preset_name, None)
+                continue
+            snapshot = self._normalize_textual_selection_snapshot(raw_snapshot)
+            if removed_profile:
+                if snapshot.get("active_profile") == removed_profile:
+                    snapshot.pop("active_profile", None)
+                agent_profiles = snapshot.get("agent_profiles")
+                if isinstance(agent_profiles, dict):
+                    agent_profiles.pop(removed_profile, None)
+                    if not agent_profiles:
+                        snapshot.pop("agent_profiles", None)
+            if removed_llm and snapshot.get("global_llm_profile") == removed_llm:
+                snapshot.pop("global_llm_profile", None)
+            if removed_mode and snapshot.get("active_mode") == removed_mode:
+                snapshot.pop("active_mode", None)
+            presets[preset_name] = snapshot
 
     def _textual_profile_state(self, profile_name: str, *, create: bool) -> Dict[str, Any]:
         last_used = self._textual_last_used_config(create=create)

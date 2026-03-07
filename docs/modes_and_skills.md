@@ -117,13 +117,21 @@ CLI:
 
 Textual UI:
 
-- `F6` opens `Select`, including a skills picker for enabling or disabling session skills
+- `F6` opens the `Control Center`, which drills into agent, mode, LLM, skills, tools, tool policies, selection presets, session confirmation, and system settings
+- `F3` opens the edit selector for agent, mode, LLM, tools, and tool policies
+- `F4` opens the clone selector for agent, mode, and LLM configs
 - the right-hand inspector includes a `Skills` selection list for the same runtime toggles
 - skill selection supports both individual skills and top-level skill groups
-- skill selections are persisted as last-used state and automatically restored on startup
-- `F6` also exposes grouped or individual tool selection and tool policy editing; both use `Apply` for persisted last-used state, `Reset` to clear last-used overrides, and `Save as Default` to write the current selection into the default config
-- searchable selection popups support `Ctrl+Down` to jump into the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted item
-- `F6` also exposes a `System Settings` form that saves theme, workspace mode, and default agent/LLM values to `pocketcode.yml`
+- tool selection nests groups from the tool source path under `tools/`; separate files such as `tools/filesystem.py` and `tools/user_input.py` appear as separate groups, and nested folders create nested groups
+- mode, active profile, global LLM override, skills, session confirmation, auto-confirm, and per-profile tool/policy overrides are persisted as last-used state and restored on startup
+- the Textual console starts empty; startup status is shown in the header and control panels rather than injected into the output log
+- when launching the Textual UI, startup/plugin logs are written to `pocketcode.log` instead of the terminal stream to keep the screen clean
+- grouped or individual tool selection and tool policy editing use `Apply` for persisted last-used state, `Reset` to clear last-used overrides, and `Save as Default` to write the current selection into the default config
+- editing a plugin/synthesised agent or LLM config from the Textual UI prompts for a workspace clone first, then opens the editor against that new workspace-backed copy
+- the control center supports editing, cloning, and deleting the current workspace-backed mode, agent, and LLM configs
+- named selection presets save and reload the whole current runtime selection snapshot, including the active mode/profile, LLM override, skills, confirmation default, auto-confirm flag, and persisted per-profile tool/policy overrides
+- searchable selection popups support `Ctrl+Down` to jump into the list, `Ctrl+Up` to return to search, and `Space` to toggle the highlighted item without losing the current row
+- the control center also exposes a `System Settings` form that saves theme, workspace mode, and default agent/LLM values to `pocketcode.yml`
 
 This repo ships a workspace-builder skill pack under `.pocketcode/skills/`:
 

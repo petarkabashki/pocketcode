@@ -41,6 +41,7 @@ from pocketcode.core.run_handle import RunHandle
 logger = logging.getLogger(__name__)
 
 NO_LLM = "__none__"
+NO_MODE = "__none_mode__"
 UNSET_OPTION = "__unset__"
 INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
@@ -469,15 +470,32 @@ class ToolSelectionScreen(ModalScreen[dict[str, Any] | None]):
                 matches.append(option)
         return matches
 
-    def _refresh_tools(self) -> None:
+    def _refresh_tools(
+        self,
+        *,
+        preferred_highlighted_value: str | None = None,
+        preferred_highlighted_index: int | None = None,
+    ) -> None:
         filter_value = self.query_one("#tool-picker-filter", Input).value
         selection_list = self.query_one("#tool-picker-list", SelectionList)
         matching_tools = self._matching_tools(filter_value)
+        highlighted_index = selection_list.highlighted
+        highlighted_value: str | None = preferred_highlighted_value
+        if highlighted_value is None and highlighted_index is not None and selection_list.option_count:
+            try:
+                highlighted_value = str(selection_list.get_option_at_index(highlighted_index).value)
+            except Exception:
+                highlighted_value = None
+        if preferred_highlighted_index is None:
+            preferred_highlighted_index = highlighted_index
+        preserve_list_focus = self.focused is selection_list
         selection_list.clear_options()
         if not matching_tools:
             selection_list.add_options([(self._empty_message, LOADING_OPTION, False)])
             selection_list.disabled = True
             selection_list.highlighted = 0
+            if preserve_list_focus:
+                selection_list.focus()
             return
         selection_list.disabled = False
         selection_list.add_options(
@@ -486,7 +504,17 @@ class ToolSelectionScreen(ModalScreen[dict[str, Any] | None]):
                 for tool in matching_tools
             ]
         )
-        selection_list.highlighted = 0
+        next_highlighted = None
+        if highlighted_value is not None:
+            next_highlighted = next(
+                (index for index, tool in enumerate(matching_tools) if tool.value == highlighted_value),
+                None,
+            )
+        if next_highlighted is None and preferred_highlighted_index is not None:
+            next_highlighted = min(preferred_highlighted_index, len(matching_tools) - 1)
+        selection_list.highlighted = 0 if next_highlighted is None else next_highlighted
+        if preserve_list_focus:
+            selection_list.focus()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -561,9 +589,12 @@ class ToolSelectionScreen(ModalScreen[dict[str, Any] | None]):
                 self._selected_values.add(value)
             else:
                 self._selected_values.discard(value)
-            self._sync_group_selection_values()
+        self._sync_group_selection_values()
         if self.is_mounted:
-            self._refresh_tools()
+            self._refresh_tools(
+                preferred_highlighted_value=value,
+                preferred_highlighted_index=option_index,
+            )
 
     def _sync_group_selection_values(self) -> None:
         for group_value, member_values in self._grouped_values.items():
@@ -938,11 +969,10 @@ class PocketCodeTextualApp(App[None]):
     BINDINGS = [
         Binding("tab", "complete_input", "Complete Input", priority=True),
         Binding("f1", "view_chat", "Chat", priority=True),
-        Binding("f2", "view_control", "Control", priority=True),
         Binding("f3", "edit_asset", "Edit", priority=True),
         Binding("f4", "clone_asset", "Clone", priority=True),
         Binding("f5", "view_run", "Run", priority=True),
-        Binding("f6", "pick_asset", "Select", priority=True),
+        Binding("f6", "pick_asset", "Control", priority=True),
         Binding("f10", "toggle_right_panel", "Toggle Inspector"),
         Binding("alt+1", "view_chat", "Chat", show=False),
         Binding("alt+2", "view_control", "Control", show=False),
@@ -1370,8 +1400,7 @@ class PocketCodeTextualApp(App[None]):
                         yield Static("Auto-Confirm Tools", classes="field-label")
                         yield Switch(value=False, id="auto-confirm-switch")
                         with Horizontal(classes="button-row"):
-                            yield Button("Edit Asset", id="edit-asset-button-secondary", variant="primary")
-                            yield Button("Clone Asset", id="clone-asset-button-secondary")
+                            yield Button("Control Center", id="control-center-button", variant="primary")
                             yield Button("Reload Runtime", id="reload-button", variant="primary")
                             yield Button("Return to Chat", id="goto-chat-button")
                     with VerticalScroll(id="view-run", classes="view view-scroll"):
@@ -1379,7 +1408,7 @@ class PocketCodeTextualApp(App[None]):
                         yield TextArea("", id="run-preview", read_only=True)
                 yield Input(
                     id="main-input",
-                    placeholder="Type a request or /command. F1 chat F2 control F3 edit F4 clone F5 run F6 select",
+                    placeholder="Type a request or /command. F1 chat F3 edit F4 clone F5 run F6 control",
                 )
             with VerticalScroll(id="right-panel", classes="view"):
                 yield Static("Inspector", classes="panel-title")
@@ -1400,9 +1429,6 @@ class PocketCodeTextualApp(App[None]):
         self._refresh_suggestions()
         self._refresh_ui()
         self.set_interval(0.1, self._drain_run_events)
-        self._write_info(
-            "Pocketcode workspace ready. F3 opens edit, F4 opens clone, and F6 opens select."
-        )
         self.query_one("#main-input", Input).focus()
 
     def _refresh_suggestions(self) -> None:
@@ -1631,21 +1657,8 @@ class PocketCodeTextualApp(App[None]):
         if trimmed_now:
             self._trimmed_output_line_count += trimmed_now
             self._output_lines = trimmed_lines
-            self._load_text_area_text(
-                output_widget,
-                _build_output_text(self._output_lines, self._trimmed_output_line_count),
-            )
-        elif len(self._output_lines) == 1:
-            self._load_text_area_text(
-                output_widget,
-                _build_output_text(self._output_lines, self._trimmed_output_line_count),
-            )
-        else:
-            output_widget.insert(f"\n{line}")
-            self._text_state_cache[output_widget.id or ""] = _build_output_text(
-                self._output_lines,
-                self._trimmed_output_line_count,
-            )
+        text = _build_output_text(self._output_lines, self._trimmed_output_line_count)
+        self._load_text_area_text(output_widget, text)
         output_widget.scroll_end(animate=False)
 
     def _apply_workspace_mode(self, mode_name: str, *, announce: bool) -> None:
@@ -1785,6 +1798,78 @@ class PocketCodeTextualApp(App[None]):
             for group_name in sorted(grouped)
         }
 
+    def _tool_group_path(
+        self,
+        tool_name: str,
+        tool_detail: Dict[str, Any] | None = None,
+    ) -> tuple[str, ...]:
+        if isinstance(tool_detail, dict):
+            raw_group_path = tool_detail.get("group_path")
+            if isinstance(raw_group_path, (list, tuple)):
+                normalized = tuple(str(part).strip() for part in raw_group_path if str(part).strip())
+                if normalized:
+                    return normalized
+        return (_tool_group_name(tool_name),)
+
+    def _build_nested_tool_picker_options(
+        self,
+        tool_names: Iterable[str],
+        *,
+        selected_tools: set[str],
+        tool_details: dict[str, Dict[str, Any]] | None = None,
+    ) -> tuple[list[PickerOption], dict[str, tuple[str, ...]], set[str]]:
+        grouped_values_by_path: dict[tuple[str, ...], list[str]] = {}
+        child_groups: dict[tuple[str, ...], set[str]] = {}
+        leaf_tools: dict[tuple[str, ...], list[str]] = {}
+
+        for tool_name in sorted({str(name) for name in tool_names}):
+            group_path = self._tool_group_path(tool_name, (tool_details or {}).get(tool_name))
+            leaf_tools.setdefault(group_path, []).append(tool_name)
+            for depth in range(1, len(group_path) + 1):
+                prefix = group_path[:depth]
+                grouped_values_by_path.setdefault(prefix, []).append(tool_name)
+                parent = group_path[: depth - 1]
+                child_groups.setdefault(parent, set()).add(group_path[depth - 1])
+
+        picker_options: list[PickerOption] = []
+        grouped_values: dict[str, tuple[str, ...]] = {}
+        initial_selected_values = set(selected_tools)
+
+        def _append_group(path: tuple[str, ...], depth: int) -> None:
+            member_values = tuple(sorted(dict.fromkeys(grouped_values_by_path.get(path, []))))
+            if not member_values:
+                return
+            group_value = self._skill_group_value("/".join(path))
+            grouped_values[group_value] = member_values
+            if all(member_value in selected_tools for member_value in member_values):
+                initial_selected_values.add(group_value)
+            group_label = f"{'  ' * depth}Group: {path[-1]}"
+            group_search = " ".join(path)
+            picker_options.append(
+                PickerOption(
+                    group_value,
+                    group_label,
+                    description=f"Toggle all {len(member_values)} tools in {' / '.join(path)}",
+                    search_text=f"{group_search} group {' '.join(member_values)}",
+                )
+            )
+            for child_name in sorted(child_groups.get(path, set())):
+                _append_group(path + (child_name,), depth + 1)
+            for member_value in sorted(leaf_tools.get(path, [])):
+                picker_options.append(
+                    PickerOption(
+                        member_value,
+                        f"{'  ' * (depth + 1)}{member_value}",
+                        description=f"Group: {' / '.join(path)}",
+                        search_text=f"{member_value} {group_search}",
+                    )
+                )
+
+        for group_name in sorted(child_groups.get((), set())):
+            _append_group((group_name,), 0)
+
+        return picker_options, grouped_values, initial_selected_values
+
     def _active_skill_name_set(self) -> set[str]:
         return {
             str(getattr(skill, "name", skill))
@@ -1885,9 +1970,7 @@ class PocketCodeTextualApp(App[None]):
 
     def _set_main_input_placeholder(self, prompt: str | None = None) -> None:
         input_widget = self.query_one("#main-input", Input)
-        input_widget.placeholder = (
-            prompt or "Type a request or /command. F1 chat F2 control F3 edit F4 clone F5 run F6 select"
-        )
+        input_widget.placeholder = prompt or "Type a request or /command. F1 chat F3 edit F4 clone F5 run F6 control"
 
     def _profile_cycle(self) -> list[str]:
         profile_names: list[str] = []
@@ -2010,65 +2093,6 @@ class PocketCodeTextualApp(App[None]):
             callback=_handle_selection,
         )
 
-    def _asset_category_options(self) -> tuple[PickerOption, ...]:
-        active_profile = self._engine.active_agent_profile
-        session_default = self._engine.session_confirmation_overrides.get("default_policy") or "inherit"
-        active_skill_names = tuple(
-            str(getattr(skill, "name", skill))
-            for skill in (
-                self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else []
-            )
-        )
-        available_skill_count = len(self._engine.list_skills()) if hasattr(self._engine, "list_skills") else 0
-        return (
-            PickerOption(
-                value="profile",
-                label=f"Agent: {active_profile.name if active_profile else 'none'}",
-                description="Switch the active agent profile",
-                search_text="agent profile active",
-            ),
-            PickerOption(
-                value="llm",
-                label=f"LLM: {self._engine.global_llm_override or 'inherit'}",
-                description="Set the global LLM override",
-                search_text="llm model profile override",
-            ),
-            PickerOption(
-                value="skills",
-                label=(
-                    f"Skills: {', '.join(active_skill_names)}"
-                    if active_skill_names
-                    else f"Skills: none ({available_skill_count} available)"
-                ),
-                description="Enable or disable runtime skills",
-                search_text="skills capability packs selection",
-            ),
-            PickerOption(
-                value="tools",
-                label=f"Tools: {active_profile.name if active_profile else 'none'}",
-                description="Edit the active agent tool allowlist",
-                search_text="tools allowlist selection groups",
-            ),
-            PickerOption(
-                value="tool_policies",
-                label=f"Tool Policies: {active_profile.name if active_profile else 'none'}",
-                description="Edit per-tool confirmation overrides",
-                search_text="tool policy confirmation overrides",
-            ),
-            PickerOption(
-                value="session_confirm",
-                label=f"Session confirmation: {session_default}",
-                description="Set the default session confirmation policy",
-                search_text="session confirm tool policy",
-            ),
-            PickerOption(
-                value="system_settings",
-                label="System Settings",
-                description="Theme, workspace mode, and default agent/LLM saved to pocketcode.yml",
-                search_text="system settings theme workspace mode default agent llm config save",
-            ),
-        )
-
     def _open_profile_picker(self) -> None:
         profile_names = tuple(dict.fromkeys(self._profile_cycle()))
         active_profile = self._engine.active_agent_profile
@@ -2102,6 +2126,19 @@ class PocketCodeTextualApp(App[None]):
             on_select=self._apply_profile_selection,
             help_text="Choose the active agent profile.",
             empty_message="No agent profiles are available.",
+        )
+
+    def _open_mode_picker(self) -> None:
+        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+        options = [PickerOption(NO_MODE, "(clear)", "Disable the active mode")]
+        options.extend(PickerOption(name, name) for name in self._engine.list_modes())
+        self._show_picker(
+            title="Select Active Mode",
+            options=tuple(options),
+            current_value=active_mode.name if active_mode is not None else NO_MODE,
+            on_select=self._apply_mode_selection,
+            help_text="Choose the active runtime mode. Clear falls back to the selected agent profile.",
+            empty_message="No modes are available.",
         )
 
     def _open_llm_picker(self) -> None:
@@ -2151,46 +2188,281 @@ class PocketCodeTextualApp(App[None]):
             help_text="Choose the default confirmation policy for tools in this session.",
         )
 
+    def _asset_category_options(self) -> tuple[PickerOption, ...]:
+        active_profile = self._engine.active_agent_profile
+        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+        session_default = self._engine.session_confirmation_overrides.get("default_policy") or "inherit"
+        active_skill_names = tuple(
+            str(getattr(skill, "name", skill))
+            for skill in (
+                self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else []
+            )
+        )
+        available_skill_count = len(self._engine.list_skills()) if hasattr(self._engine, "list_skills") else 0
+        preset_count = len(self._engine.list_textual_selection_presets()) if hasattr(
+            self._engine, "list_textual_selection_presets"
+        ) else 0
+        return (
+            PickerOption(
+                value="profile",
+                label=f"Agent: {active_profile.name if active_profile else 'none'}",
+                description="Switch, edit, clone, or delete the active agent profile",
+                search_text="agent profile active edit clone delete",
+            ),
+            PickerOption(
+                value="mode",
+                label=f"Mode: {active_mode.name if active_mode else 'none'}",
+                description="Switch, clear, edit, clone, or delete a mode",
+                search_text="mode preset switch clear edit clone delete",
+            ),
+            PickerOption(
+                value="llm",
+                label=f"LLM: {self._engine.global_llm_override or 'inherit'}",
+                description="Switch, edit, clone, or delete the active LLM profile",
+                search_text="llm model profile override edit clone delete",
+            ),
+            PickerOption(
+                value="skills",
+                label=(
+                    f"Skills: {', '.join(active_skill_names)}"
+                    if active_skill_names
+                    else f"Skills: none ({available_skill_count} available)"
+                ),
+                description="Enable or disable runtime skills",
+                search_text="skills capability packs selection",
+            ),
+            PickerOption(
+                value="tools",
+                label=f"Tools: {active_profile.name if active_profile else 'none'}",
+                description="Edit the active agent tool allowlist",
+                search_text="tools allowlist selection groups",
+            ),
+            PickerOption(
+                value="tool_policies",
+                label=f"Tool Policies: {active_profile.name if active_profile else 'none'}",
+                description="Edit per-tool confirmation overrides",
+                search_text="tool policy confirmation overrides",
+            ),
+            PickerOption(
+                value="presets",
+                label=f"Selection Presets: {preset_count}",
+                description="Save, load, or delete whole selection snapshots",
+                search_text="selection preset snapshot save load delete",
+            ),
+            PickerOption(
+                value="session_confirm",
+                label=f"Session confirmation: {session_default}",
+                description="Set the default session confirmation policy",
+                search_text="session confirm tool policy",
+            ),
+            PickerOption(
+                value="system_settings",
+                label="System Settings",
+                description="Theme, workspace mode, and default agent/LLM saved to pocketcode.yml",
+                search_text="system settings theme workspace mode default agent llm config save",
+            ),
+        )
+
     def _open_asset_picker(self) -> None:
         self._show_picker(
-            title="Select",
+            title="Control Center",
             options=self._asset_category_options(),
             current_value=None,
             on_select=self._handle_asset_picker_selection,
-            help_text="Choose what to change, then select its active value.",
+            help_text="Choose a category, then drill into the action you want.",
         )
 
     def _handle_asset_picker_selection(self, selected_value: str) -> None:
-        openers = {
-            "profile": self._open_profile_picker,
-            "llm": self._open_llm_picker,
-            "skills": self._open_skill_selection_picker,
-            "tools": self._open_tool_selection_picker,
-            "tool_policies": self._open_tool_policy_editor,
-            "session_confirm": self._open_session_confirmation_picker,
-            "system_settings": self._open_system_settings_screen,
-        }
-        opener = openers.get(selected_value)
-        if opener is None:
+        options = self._asset_action_options(selected_value)
+        if not options:
             self._write_error(f"Unsupported asset picker target: {selected_value}")
             return
-        self.call_after_refresh(opener)
+        self.call_after_refresh(lambda: self._open_asset_action_picker(selected_value, options))
+
+    def _asset_action_options(self, category: str) -> tuple[PickerOption, ...]:
+        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+        if category == "profile":
+            return (
+                PickerOption("select", "Switch Active Profile", search_text="select switch active profile"),
+                PickerOption("edit", "Edit Current Profile", search_text="edit agent profile yaml"),
+                PickerOption("clone", "Clone Current Profile", search_text="clone agent profile workspace"),
+                PickerOption("delete", "Delete Current Profile", search_text="delete remove workspace agent"),
+            )
+        if category == "mode":
+            options = [
+                PickerOption("select", "Switch Active Mode", search_text="select switch mode"),
+                PickerOption("edit", "Edit Current Mode", search_text="edit mode markdown"),
+                PickerOption("clone", "Clone Current Mode", search_text="clone mode"),
+                PickerOption("delete", "Delete Current Mode", search_text="delete remove mode"),
+            ]
+            if active_mode is not None:
+                options.insert(1, PickerOption("clear", "Clear Active Mode", search_text="clear reset active mode"))
+            return tuple(options)
+        if category == "llm":
+            return (
+                PickerOption("select", "Switch Global LLM", search_text="select switch llm"),
+                PickerOption("edit", "Edit Current LLM", search_text="edit llm profile yaml"),
+                PickerOption("clone", "Clone Current LLM", search_text="clone llm profile"),
+                PickerOption("delete", "Delete Current LLM", search_text="delete remove workspace llm profile"),
+            )
+        if category == "skills":
+            return (PickerOption("select", "Select Skills", search_text="skills selection"),)
+        if category == "tools":
+            return (PickerOption("select", "Edit Allowed Tools", search_text="tool selection allowlist"),)
+        if category == "tool_policies":
+            return (PickerOption("edit", "Edit Tool Policies", search_text="tool policy overrides"),)
+        if category == "presets":
+            return (
+                PickerOption("save", "Save Current as Preset", search_text="save current selection preset"),
+                PickerOption("load", "Load Preset", search_text="load selection preset"),
+                PickerOption("delete", "Delete Preset", search_text="delete selection preset"),
+            )
+        if category == "session_confirm":
+            return (PickerOption("select", "Set Session Confirmation", search_text="session confirmation"),)
+        if category == "system_settings":
+            return (PickerOption("open", "Open System Settings", search_text="system settings"),)
+        return ()
+
+    def _open_asset_action_picker(self, category: str, options: tuple[PickerOption, ...]) -> None:
+        self._show_picker(
+            title=f"{category.replace('_', ' ').title()} Actions",
+            options=options,
+            current_value=None,
+            on_select=lambda action: self._handle_asset_action_selection(category, action),
+            help_text="Choose the action to run for this category.",
+        )
+
+    def _handle_asset_action_selection(self, category: str, action: str) -> None:
+        if category == "profile":
+            if action == "select":
+                self._open_profile_picker()
+                return
+            if action == "edit":
+                self._open_agent_editor()
+                return
+            if action == "clone":
+                self._open_name_prompt(
+                    title="Clone Agent Profile",
+                    placeholder="my-agent-safe",
+                    help_text="Enter the new workspace name / filename.",
+                    on_submit=lambda value: self._clone_selected_asset("agent", value),
+                )
+                return
+            if action == "delete":
+                self._confirm_delete_current_asset("agent")
+                return
+        if category == "mode":
+            if action == "select":
+                self._open_mode_picker()
+                return
+            if action == "clear":
+                if hasattr(self._engine, "set_last_used_mode"):
+                    self._engine.set_last_used_mode(None)
+                else:
+                    self._engine.set_mode(None)
+                self._write_info("Mode cleared.")
+                self._sync_ui_from_engine()
+                return
+            if action == "edit":
+                self._open_mode_editor()
+                return
+            if action == "clone":
+                self._open_name_prompt(
+                    title="Clone Mode",
+                    placeholder="review-copy",
+                    help_text="Enter the new mode name / filename.",
+                    on_submit=lambda value: self._clone_selected_asset("mode", value),
+                )
+                return
+            if action == "delete":
+                self._confirm_delete_current_asset("mode")
+                return
+        if category == "llm":
+            if action == "select":
+                self._open_llm_picker()
+                return
+            if action == "edit":
+                self._open_llm_profile_editor()
+                return
+            if action == "clone":
+                self._open_name_prompt(
+                    title="Clone LLM Profile",
+                    placeholder="my-llm-profile",
+                    help_text="Enter the new workspace name / filename.",
+                    on_submit=lambda value: self._clone_selected_asset("llm", value),
+                )
+                return
+            if action == "delete":
+                self._confirm_delete_current_asset("llm")
+                return
+        if category == "skills" and action == "select":
+            self._open_skill_selection_picker()
+            return
+        if category == "tools" and action == "select":
+            self._open_tool_selection_picker()
+            return
+        if category == "tool_policies" and action == "edit":
+            self._open_tool_policy_editor()
+            return
+        if category == "presets":
+            if action == "save":
+                self._open_name_prompt(
+                    title="Save Selection Preset",
+                    placeholder="review-session",
+                    help_text="Enter the preset name.",
+                    on_submit=self._save_selection_preset,
+                )
+                return
+            if action == "load":
+                self._open_selection_preset_picker("load")
+                return
+            if action == "delete":
+                self._open_selection_preset_picker("delete")
+                return
+        if category == "session_confirm" and action == "select":
+            self._open_session_confirmation_picker()
+            return
+        if category == "system_settings" and action == "open":
+            self._open_system_settings_screen()
+            return
+        self._write_error(f"Unsupported {category} action: {action}")
 
     def _apply_profile_selection(self, selected_value: str) -> None:
         active_profile = self._engine.active_agent_profile
         if active_profile is not None and active_profile.name == selected_value:
             return
-        self._engine.set_active_agent_profile(selected_value)
+        if hasattr(self._engine, "set_last_used_active_profile"):
+            self._engine.set_last_used_active_profile(selected_value)
+        else:
+            self._engine.set_active_agent_profile(selected_value)
         self._write_info(f"Activated agent profile: {selected_value}")
+
+    def _apply_mode_selection(self, selected_value: str) -> None:
+        target_mode = None if selected_value == NO_MODE else selected_value
+        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+        if active_mode is not None and target_mode == active_mode.name:
+            return
+        if active_mode is None and target_mode is None:
+            return
+        if hasattr(self._engine, "set_last_used_mode"):
+            self._engine.set_last_used_mode(target_mode)
+        else:
+            self._engine.set_mode(target_mode)
+        self._write_info(f"Mode: {target_mode or 'none'}")
 
     def _apply_llm_selection(self, selected_value: str) -> None:
         target_llm = None if selected_value == NO_LLM else selected_value
         if target_llm == self._engine.global_llm_override:
             return
-        self._engine.set_global_llm_override(target_llm)
+        if hasattr(self._engine, "set_last_used_global_llm_profile"):
+            self._engine.set_last_used_global_llm_profile(target_llm)
+        else:
+            self._engine.set_global_llm_override(target_llm)
         self._write_info(f"Global LLM override: {self._engine.global_llm_override or 'inherit'}")
 
     def _apply_workspace_mode_selection(self, selected_value: str) -> None:
+        if selected_value == self._workspace_mode:
+            return
         self._apply_workspace_mode(selected_value, announce=True)
 
     def _apply_theme_selection(self, selected_value: str) -> None:
@@ -2204,7 +2476,10 @@ class PocketCodeTextualApp(App[None]):
         current_default = self._engine.session_confirmation_overrides.get("default_policy")
         if target_default == current_default:
             return
-        self._engine.set_session_confirmation_default(target_default)
+        if hasattr(self._engine, "set_last_used_session_confirmation_default"):
+            self._engine.set_last_used_session_confirmation_default(target_default)
+        else:
+            self._engine.set_session_confirmation_default(target_default)
         self._write_info(
             f"Session confirmation default: "
             f"{self._engine.session_confirmation_overrides.get('default_policy') or 'inherit'}"
@@ -2294,6 +2569,10 @@ class PocketCodeTextualApp(App[None]):
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(source_name)).strip("-._")
         return f"{slug or 'agent'}-workspace"
 
+    def _suggest_workspace_llm_name(self, source_name: str) -> str:
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(source_name)).strip("-._")
+        return f"{slug or 'llm'}-workspace"
+
     def _ensure_workspace_agent_profile(
         self,
         *,
@@ -2319,6 +2598,35 @@ class PocketCodeTextualApp(App[None]):
             ),
         )
 
+    def _ensure_workspace_llm_profile(
+        self,
+        *,
+        action_label: str,
+        on_ready: Callable[[str], None],
+    ) -> None:
+        profile_name = self._current_llm_profile_name()
+        if not profile_name:
+            self._write_error("No active LLM profile available to edit.")
+            return
+        profile = getattr(self._engine, "get_llm_profile", lambda name=None: None)(profile_name)
+        if profile is None:
+            self._write_error(f"Unknown LLM profile '{profile_name}'.")
+            return
+        if profile.get("source") == "workspace":
+            on_ready(profile_name)
+            return
+        self._open_name_prompt(
+            title=f"Clone LLM Before {action_label.title()}",
+            placeholder=self._suggest_workspace_llm_name(profile_name),
+            help_text="This LLM profile has no workspace YAML yet. Enter the workspace name / filename to clone it first.",
+            on_submit=lambda value: self._clone_llm_for_edit(
+                profile_name,
+                value,
+                action_label=action_label,
+                on_ready=on_ready,
+            ),
+        )
+
     def _clone_agent_for_edit(
         self,
         source_name: str,
@@ -2336,6 +2644,27 @@ class PocketCodeTextualApp(App[None]):
             self._write_info(f"Cloned agent '{source_name}' to {target_path} for {action_label}.")
         else:
             self._write_info(f"Cloned agent '{source_name}' to workspace agent '{new_name}' for {action_label}.")
+        self.call_after_refresh(lambda: on_ready(new_name))
+
+    def _clone_llm_for_edit(
+        self,
+        source_name: str,
+        new_name: str,
+        *,
+        action_label: str,
+        on_ready: Callable[[str], None],
+    ) -> None:
+        if not hasattr(self._engine, "clone_llm_profile"):
+            self._write_error("This runtime does not support cloning LLM profiles.")
+            return
+        cloned = self._engine.clone_llm_profile(source_name, new_name)
+        self._engine.set_global_llm_override(new_name)
+        self._refresh_suggestions()
+        target_path = cloned.get("source_path") if isinstance(cloned, dict) else getattr(cloned, "source_path", None)
+        if target_path:
+            self._write_info(f"Cloned LLM profile '{source_name}' to {target_path} for {action_label}.")
+        else:
+            self._write_info(f"Cloned LLM profile '{source_name}' to workspace profile '{new_name}' for {action_label}.")
         self.call_after_refresh(lambda: on_ready(new_name))
 
     def _save_workspace_agent_profile(
@@ -2362,6 +2691,7 @@ class PocketCodeTextualApp(App[None]):
 
     def _edit_category_options(self) -> tuple[PickerOption, ...]:
         active_profile = self._engine.active_agent_profile
+        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         llm_profile = self._current_llm_profile_name()
         return (
             PickerOption(
@@ -2369,6 +2699,12 @@ class PocketCodeTextualApp(App[None]):
                 f"Agent Config: {active_profile.name if active_profile else 'none'}",
                 description="Edit active agent llm, prompts, and default confirmation",
                 search_text="agent config llm prompts confirmation",
+            ),
+            PickerOption(
+                "mode",
+                f"Mode Config: {active_mode.name if active_mode else 'none'}",
+                description="Edit the active mode markdown",
+                search_text="mode config markdown",
             ),
             PickerOption(
                 "llm",
@@ -2392,6 +2728,7 @@ class PocketCodeTextualApp(App[None]):
 
     def _clone_category_options(self) -> tuple[PickerOption, ...]:
         active_profile = self._engine.active_agent_profile
+        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         llm_profile = self._current_llm_profile_name()
         return (
             PickerOption(
@@ -2399,6 +2736,12 @@ class PocketCodeTextualApp(App[None]):
                 f"Agent Config: {active_profile.name if active_profile else 'none'}",
                 description="Clone the active agent profile into the workspace",
                 search_text="clone agent profile workspace",
+            ),
+            PickerOption(
+                "mode",
+                f"Mode Config: {active_mode.name if active_mode else 'none'}",
+                description="Clone the active mode",
+                search_text="clone mode markdown",
             ),
             PickerOption(
                 "llm",
@@ -2475,6 +2818,7 @@ class PocketCodeTextualApp(App[None]):
     def _handle_edit_asset_selection(self, selected_value: str) -> None:
         openers = {
             "agent": self._open_agent_editor,
+            "mode": self._open_mode_editor,
             "llm": self._open_llm_profile_editor,
             "tools": self._open_tool_selection_picker,
             "tool_policies": self._open_tool_policy_editor,
@@ -2489,6 +2833,8 @@ class PocketCodeTextualApp(App[None]):
         placeholder = "new-name"
         if selected_value == "agent":
             placeholder = "my-agent-safe"
+        elif selected_value == "mode":
+            placeholder = "review-copy"
         elif selected_value == "llm":
             placeholder = "my-llm-profile"
         self._open_name_prompt(
@@ -2565,17 +2911,39 @@ class PocketCodeTextualApp(App[None]):
         )
         self._write_info(f"Saved workspace agent '{profile_name}'.")
 
-    def _open_llm_profile_editor(self) -> None:
-        profile_name = self._current_llm_profile_name()
-        if not profile_name:
-            self._write_error("No active LLM profile available to edit.")
+    def _open_mode_editor(self) -> None:
+        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+        if active_mode is None:
+            self._write_error("No active mode selected.")
             return
+        if not hasattr(self._engine, "get_mode_text"):
+            self._write_error("This runtime does not support editing modes.")
+            return
+        initial_text = self._engine.get_mode_text(active_mode.name)
+        self._open_text_editor(
+            title=f"Edit Mode: {active_mode.name}",
+            help_text="Edit the mode markdown with YAML front matter. Ctrl+S saves.",
+            initial_text=initial_text,
+            on_submit=lambda text: self._apply_mode_edit(active_mode.name, text),
+        )
+
+    def _apply_mode_edit(self, mode_name: str, text: str) -> None:
+        if not hasattr(self._engine, "update_mode"):
+            raise ValueError("This runtime does not support editing modes.")
+        target_path = self._engine.update_mode(mode_name, markdown_text=text)
+        self._refresh_suggestions()
+        self._write_info(f"Saved mode '{mode_name}' to {target_path}.")
+
+    def _open_llm_profile_editor(self) -> None:
+        self._ensure_workspace_llm_profile(
+            action_label="editing llm config",
+            on_ready=self._open_workspace_llm_profile_editor,
+        )
+
+    def _open_workspace_llm_profile_editor(self, profile_name: str) -> None:
         profile = getattr(self._engine, "get_llm_profile", lambda name=None: None)(profile_name)
         if profile is None:
             self._write_error(f"Unknown LLM profile '{profile_name}'.")
-            return
-        if profile.get("source") != "workspace":
-            self._write_error(f"LLM profile '{profile_name}' must be cloned to the workspace before editing.")
             return
         self._open_text_editor(
             title=f"Edit LLM Config: {profile_name}",
@@ -2784,6 +3152,8 @@ class PocketCodeTextualApp(App[None]):
             self.action_view_control()
         elif button_id == "view-run-button":
             self.action_view_run()
+        elif button_id == "control-center-button":
+            self.action_pick_asset()
         elif button_id in {"edit-asset-button", "edit-asset-button-secondary"}:
             self.action_edit_asset()
         elif button_id in {"clone-asset-button", "clone-asset-button-secondary"}:
@@ -2826,7 +3196,10 @@ class PocketCodeTextualApp(App[None]):
 
         switch_id = event.switch.id or ""
         if switch_id == "auto-confirm-switch":
-            self._engine.auto_confirm_tools = bool(event.value)
+            if hasattr(self._engine, "set_last_used_auto_confirm_tools"):
+                self._engine.set_last_used_auto_confirm_tools(bool(event.value))
+            else:
+                self._engine.auto_confirm_tools = bool(event.value)
             state = "enabled" if event.value else "disabled"
             self._write_info(f"Auto-confirm tools {state}.")
             self._sync_ui_from_engine()
@@ -2850,7 +3223,10 @@ class PocketCodeTextualApp(App[None]):
             return
         profile_name = self._profile_list_names[option_index]
         try:
-            self._engine.set_active_agent_profile(profile_name)
+            if hasattr(self._engine, "set_last_used_active_profile"):
+                self._engine.set_last_used_active_profile(profile_name)
+            else:
+                self._engine.set_active_agent_profile(profile_name)
             self._write_info(f"Activated agent profile: {profile_name}")
         except Exception as exc:
             self._write_error(str(exc))
@@ -2927,11 +3303,156 @@ class PocketCodeTextualApp(App[None]):
                 self._write_info(f"Cloned active LLM profile to {target_path}.")
             else:
                 self._write_info(f"Cloned active LLM profile to workspace profile '{new_name}'.")
+        elif asset_name == "mode":
+            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+            if active_mode is None:
+                self._write_error("No active mode to clone.")
+                return
+            if not hasattr(self._engine, "clone_mode"):
+                self._write_error("This runtime does not support cloning modes.")
+                return
+            target_path = self._engine.clone_mode(active_mode.name, new_name)
+            if hasattr(self._engine, "set_last_used_mode"):
+                self._engine.set_last_used_mode(new_name)
+            else:
+                self._engine.set_mode(new_name)
+            self._write_info(f"Cloned active mode to {target_path}.")
         else:
             self._write_error(f"Unsupported clone target: {asset_name}")
             return
 
         self._refresh_suggestions()
+        self._sync_ui_from_engine()
+
+    def _confirm_delete_current_asset(self, asset_name: str) -> None:
+        current_name = None
+        if asset_name == "agent":
+            current_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
+        elif asset_name == "llm":
+            current_name = self._current_llm_profile_name()
+        elif asset_name == "mode":
+            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+            current_name = active_mode.name if active_mode is not None else None
+        if not current_name:
+            self._write_error(f"No active {asset_name} selected.")
+            return
+        self._show_picker(
+            title=f"Delete {asset_name.title()}",
+            options=(
+                PickerOption("delete", f"Delete {current_name}", search_text="confirm delete"),
+                PickerOption("cancel", "Cancel"),
+            ),
+            current_value=None,
+            on_select=lambda value: self._delete_current_asset(asset_name) if value == "delete" else None,
+            help_text=f"Delete the current {asset_name} config if it is workspace-backed.",
+        )
+
+    def _delete_current_asset(self, asset_name: str) -> None:
+        if asset_name == "agent":
+            active_profile = self._engine.active_agent_profile
+            if active_profile is None:
+                self._write_error("No active agent selected.")
+                return
+            if not hasattr(self._engine, "delete_agent_profile"):
+                self._write_error("This runtime does not support deleting agent profiles.")
+                return
+            target_path = self._engine.delete_agent_profile(active_profile.name)
+            self._write_info(f"Deleted workspace agent '{active_profile.name}' from {target_path}.")
+        elif asset_name == "llm":
+            profile_name = self._current_llm_profile_name()
+            if not profile_name:
+                self._write_error("No active LLM profile selected.")
+                return
+            if not hasattr(self._engine, "delete_llm_profile"):
+                self._write_error("This runtime does not support deleting LLM profiles.")
+                return
+            target_path = self._engine.delete_llm_profile(profile_name)
+            self._write_info(f"Deleted workspace LLM profile '{profile_name}' from {target_path}.")
+        elif asset_name == "mode":
+            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
+            if active_mode is None:
+                self._write_error("No active mode selected.")
+                return
+            if not hasattr(self._engine, "delete_mode"):
+                self._write_error("This runtime does not support deleting modes.")
+                return
+            target_path = self._engine.delete_mode(active_mode.name)
+            self._write_info(f"Deleted mode '{active_mode.name}' from {target_path}.")
+        else:
+            self._write_error(f"Unsupported delete target: {asset_name}")
+            return
+        self._refresh_suggestions()
+        self._sync_ui_from_engine()
+
+    def _save_selection_preset(self, preset_name: str) -> None:
+        if not hasattr(self._engine, "save_textual_selection_preset"):
+            raise ValueError("This runtime does not support selection presets.")
+        target_path = self._engine.save_textual_selection_preset(preset_name)
+        self._write_info(f"Saved selection preset '{preset_name}' to {target_path}.")
+        self._sync_ui_from_engine()
+
+    def _selection_preset_options(self) -> tuple[PickerOption, ...]:
+        if not hasattr(self._engine, "list_textual_selection_presets"):
+            return ()
+        preset_names = self._engine.list_textual_selection_presets()
+        options: list[PickerOption] = []
+        for preset_name in preset_names:
+            snapshot = self._engine.get_textual_selection_preset(preset_name) if hasattr(
+                self._engine, "get_textual_selection_preset"
+            ) else {}
+            description_parts = [
+                f"mode={snapshot.get('active_mode')}" if isinstance(snapshot, dict) and snapshot.get("active_mode") else "",
+                (
+                    f"profile={snapshot.get('active_profile')}"
+                    if isinstance(snapshot, dict) and snapshot.get("active_profile")
+                    else ""
+                ),
+                (
+                    f"llm={snapshot.get('global_llm_profile')}"
+                    if isinstance(snapshot, dict) and snapshot.get("global_llm_profile")
+                    else ""
+                ),
+            ]
+            options.append(
+                PickerOption(
+                    preset_name,
+                    preset_name,
+                    description=" | ".join(part for part in description_parts if part),
+                    search_text="selection preset snapshot",
+                )
+            )
+        return tuple(options)
+
+    def _open_selection_preset_picker(self, action: str) -> None:
+        options = self._selection_preset_options()
+        if not options:
+            self._write_error("No selection presets are available.")
+            return
+        self._show_picker(
+            title=f"{action.title()} Selection Preset",
+            options=options,
+            current_value=None,
+            on_select=lambda preset_name: self._apply_selection_preset_action(action, preset_name),
+            help_text=f"Choose a preset to {action}.",
+            empty_message="No selection presets are available.",
+        )
+
+    def _apply_selection_preset_action(self, action: str, preset_name: str) -> None:
+        if action == "load":
+            if not hasattr(self._engine, "apply_textual_selection_preset"):
+                self._write_error("This runtime does not support selection presets.")
+                return
+            self._engine.apply_textual_selection_preset(preset_name)
+            self._write_info(f"Loaded selection preset '{preset_name}'.")
+        elif action == "delete":
+            if not hasattr(self._engine, "delete_textual_selection_preset"):
+                self._write_error("This runtime does not support selection presets.")
+                return
+            self._engine.delete_textual_selection_preset(preset_name)
+            self._write_info(f"Deleted selection preset '{preset_name}'.")
+        else:
+            self._write_error(f"Unsupported preset action: {action}")
+            return
         self._sync_ui_from_engine()
 
     def _open_tool_selection_picker(self, profile_name: str | None = None) -> None:
@@ -2950,34 +3471,19 @@ class PocketCodeTextualApp(App[None]):
             self._write_error("No tools are available for the active agent.")
             return
         selected_tools = set(available_tools if active_profile.tools is None else active_profile.tools)
-        tool_groups = self._tool_group_members(available_tools)
-        grouped_values = {
-            self._skill_group_value(group_name): member_values
-            for group_name, member_values in tool_groups.items()
-        }
-        picker_options: list[PickerOption] = []
-        initial_selected_values = set(selected_tools)
-        for group_name, member_values in tool_groups.items():
-            group_value = self._skill_group_value(group_name)
-            if member_values and all(member_value in selected_tools for member_value in member_values):
-                initial_selected_values.add(group_value)
-            picker_options.append(
-                PickerOption(
-                    group_value,
-                    f"Group: {group_name}",
-                    description=f"Toggle all {len(member_values)} tools in this group",
-                    search_text=f"{group_name} group {' '.join(member_values)}",
-                )
-            )
-            picker_options.extend(
-                PickerOption(
-                    tool_name,
-                    f"  {tool_name}",
-                    description=f"Group: {group_name}",
-                    search_text=f"{tool_name} {group_name}",
-                )
-                for tool_name in member_values
-            )
+        tool_details = (
+            {
+                tool_name: self._engine.describe_tool(tool_name)
+                for tool_name in available_tools
+            }
+            if hasattr(self._engine, "describe_tool")
+            else {}
+        )
+        picker_options, grouped_values, initial_selected_values = self._build_nested_tool_picker_options(
+            available_tools,
+            selected_tools=selected_tools,
+            tool_details=tool_details,
+        )
 
         def _handle_selection(payload: dict[str, Any] | None) -> None:
             if payload is None:

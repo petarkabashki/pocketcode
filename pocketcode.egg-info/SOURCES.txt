@@ -30,7 +30,6 @@ pocketcode/core/llm_factory.py
 pocketcode/core/llm_router.py
 pocketcode/core/manifest_loader.py
 pocketcode/core/markdown_profiles.py
-pocketcode/core/mode_manager.py
 pocketcode/core/namespace_registry.py
 pocketcode/core/plugin_manager.py
 pocketcode/core/prompt_loader.py

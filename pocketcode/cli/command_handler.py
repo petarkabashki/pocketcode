@@ -798,10 +798,10 @@ Compatibility aliases:
 
 Keyboard shortcuts (Textual UI):
   Tab                           Complete current prompt input.
-  F1 / F2 / F5                  Switch Chat / Control / Run views.
-  F3                            Open the popup editor selector (agent, LLM, tools, tool policies).
-  F4                            Open the popup clone selector (agent, LLM).
-  F6                            Open Select (agent, LLM, skills, tools, tool policies, confirm, system settings).
+  F1 / F5                       Switch Chat / Run views.
+  F3                            Open the popup edit selector (agent, mode, LLM, tools, tool policies).
+  F4                            Open the popup clone selector (agent, mode, LLM).
+  F6                            Open the Control Center (agent, mode, LLM, skills, tools, policies, presets, confirm, system settings).
   F10                           Toggle the right inspector panel.
   Alt+1 / Alt+2 / Alt+5         Switch Chat / Control / Run views.
   Ctrl+Shift+A                  Copy full response console output.

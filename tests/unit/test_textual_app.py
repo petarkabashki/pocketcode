@@ -21,7 +21,7 @@ from pocketcode.cli.textual_app import (
     _build_view_title_text,
     _trim_output_lines,
 )
-from textual.widgets import Input, SelectionList, Static
+from textual.widgets import Input, SelectionList, Static, TextArea
 
 
 class TestTopStatsText:
@@ -126,19 +126,70 @@ class TestOutputHistoryHelpers:
         )
 
 
+class TestTextualOutputRendering:
+    def test_startup_output_starts_empty(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                output = app.query_one("#output", TextArea)
+
+                assert output.text == ""
+
+        asyncio.run(exercise())
+
+    def test_output_appends_lines_in_order_after_buffer_reset(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                output = app.query_one("#output", TextArea)
+                app._output_lines = []
+                app._trimmed_output_line_count = 0
+                app._load_text_area_text(output, "")
+
+                app._write_info("first")
+                app._write_info("second")
+                await pilot.pause(0.05)
+
+                assert output.text == "info> first\ninfo> second"
+
+        asyncio.run(exercise())
+
+
 class _TextualEngineStub:
     def __init__(self) -> None:
         self.current_agent = "a"
         self.active_agent_profile = self._profile("a", "a")
+        self.active_mode = None
         self.global_llm_override = None
         self.auto_confirm_tools = False
         self.session_confirmation_overrides: dict[str, str | None] = {}
         self.set_agent_calls: list[str | None] = []
         self.set_active_agent_profile_calls: list[str] = []
+        self.set_last_used_active_profile_calls: list[str | None] = []
+        self.set_last_used_mode_calls: list[str | None] = []
+        self.set_last_used_global_llm_profile_calls: list[str | None] = []
+        self.set_last_used_session_confirmation_default_calls: list[str | None] = []
+        self.set_last_used_auto_confirm_tools_calls: list[bool] = []
         self.clone_agent_profile_calls: list[tuple[str, str]] = []
         self.clone_llm_profile_calls: list[tuple[str, str]] = []
+        self.clone_mode_calls: list[tuple[str, str]] = []
         self.update_agent_profile_calls: list[dict[str, object]] = []
         self.update_llm_profile_calls: list[dict[str, object]] = []
+        self.update_mode_calls: list[dict[str, object]] = []
         self.save_system_settings_calls: list[dict[str, object]] = []
         self.set_last_used_skill_calls: list[list[str]] = []
         self.reset_last_used_skill_calls = 0
@@ -147,9 +198,22 @@ class _TextualEngineStub:
         self.reset_last_used_profile_tools_calls: list[str] = []
         self.set_last_used_profile_tool_policy_calls: list[tuple[str, dict[str, str]]] = []
         self.reset_last_used_profile_tool_policy_calls: list[str] = []
+        self.saved_selection_presets: list[str] = []
+        self.applied_selection_presets: list[str] = []
+        self.deleted_selection_presets: list[str] = []
         self.active_skills: list[str] = []
         self.skill_enabled: list[str] = []
         self.skill_disabled: list[str] = []
+        self._modes = {
+            "review": SimpleNamespace(name="review", source_path=Path("/tmp/review.md")),
+            "focus": SimpleNamespace(name="focus", source_path=Path("/tmp/focus.md")),
+        }
+        self._selection_presets = {
+            "review-session": {
+                "active_mode": "review",
+                "global_llm_profile": "smart",
+            }
+        }
         self._profiles = {
             "a": self._profile("a", "a"),
             "a-safe": self._profile("a-safe", "a"),
@@ -177,6 +241,17 @@ class _TextualEngineStub:
 
     def list_llm_profiles(self):
         return ["fast", "smart"]
+
+    def list_modes(self):
+        return list(self._modes)
+
+    def get_mode(self, name=None):
+        if name is None:
+            return self.active_mode
+        return self._modes.get(name)
+
+    def set_mode(self, name):
+        self.active_mode = self._modes.get(name) if name is not None else None
 
     def list_skills(self):
         return ["python-lint", "python-testing", "azure-prepare"]
@@ -238,6 +313,35 @@ class _TextualEngineStub:
         self.set_active_agent_profile_calls.append(name)
         self.active_agent_profile = self._profiles.get(name, self._profile(name, self.current_agent))
         self.current_agent = self.active_agent_profile.agent
+        self.active_mode = None
+
+    def set_last_used_active_profile(self, name):
+        self.set_last_used_active_profile_calls.append(name)
+        if name is None:
+            self.active_agent_profile = None
+            return Path("/tmp/pocketcode.yml")
+        self.set_active_agent_profile(name)
+        return Path("/tmp/pocketcode.yml")
+
+    def set_last_used_mode(self, name):
+        self.set_last_used_mode_calls.append(name)
+        self.set_mode(name)
+        return Path("/tmp/pocketcode.yml")
+
+    def set_last_used_global_llm_profile(self, value):
+        self.set_last_used_global_llm_profile_calls.append(value)
+        self.global_llm_override = value
+        return Path("/tmp/pocketcode.yml")
+
+    def set_last_used_session_confirmation_default(self, value):
+        self.set_last_used_session_confirmation_default_calls.append(value)
+        self.session_confirmation_overrides["default_policy"] = value
+        return Path("/tmp/pocketcode.yml")
+
+    def set_last_used_auto_confirm_tools(self, enabled):
+        self.set_last_used_auto_confirm_tools_calls.append(bool(enabled))
+        self.auto_confirm_tools = bool(enabled)
+        return Path("/tmp/pocketcode.yml")
 
     def clone_agent_profile(self, src_name, new_name):
         self.clone_agent_profile_calls.append((src_name, new_name))
@@ -268,6 +372,11 @@ class _TextualEngineStub:
             },
         }
 
+    def clone_mode(self, src_name, new_name):
+        self.clone_mode_calls.append((src_name, new_name))
+        self._modes[new_name] = SimpleNamespace(name=new_name, source_path=Path(f"/tmp/{new_name}.md"))
+        return Path(f"/tmp/{new_name}.md")
+
     def update_agent_profile(
         self,
         name,
@@ -296,6 +405,10 @@ class _TextualEngineStub:
                 "profile_config": profile_config,
             }
         )
+
+    def update_mode(self, name, *, markdown_text):
+        self.update_mode_calls.append({"name": name, "markdown_text": markdown_text})
+        return Path(f"/tmp/{name}.md")
 
     def get_system_settings(self):
         return {
@@ -329,6 +442,30 @@ class _TextualEngineStub:
 
     def save_default_skills(self, skill_names):
         self.save_default_skills_calls.append(list(skill_names))
+        return Path("/tmp/pocketcode.yml")
+
+    def list_textual_selection_presets(self):
+        return sorted(self._selection_presets)
+
+    def get_textual_selection_preset(self, name):
+        return self._selection_presets.get(name)
+
+    def save_textual_selection_preset(self, name):
+        self.saved_selection_presets.append(name)
+        self._selection_presets[name] = {"active_profile": self.active_agent_profile.name if self.active_agent_profile else None}
+        return Path("/tmp/pocketcode.yml")
+
+    def apply_textual_selection_preset(self, name):
+        self.applied_selection_presets.append(name)
+        preset = self._selection_presets.get(name, {})
+        mode_name = preset.get("active_mode")
+        if mode_name:
+            self.set_mode(mode_name)
+        return Path("/tmp/pocketcode.yml")
+
+    def delete_textual_selection_preset(self, name):
+        self.deleted_selection_presets.append(name)
+        self._selection_presets.pop(name, None)
         return Path("/tmp/pocketcode.yml")
 
     def set_last_used_profile_tools(self, profile_name, tools):
@@ -372,14 +509,32 @@ class _TextualEngineStub:
     def list_tools_for_agent(self, agent_name):
         return ["tool.read", "tool.write"]
 
+    def describe_tool(self, tool_name):
+        group_paths = {
+            "tool.read": ["tool", "filesystem"],
+            "tool.write": ["tool", "filesystem"],
+            "tool.ask": ["tool", "user_input"],
+        }
+        return {
+            "name": tool_name,
+            "description": "",
+            "schema": {"type": "object", "properties": {}},
+            "group_path": group_paths.get(tool_name, ["tool"]),
+            "source_path": None,
+        }
+
     def get_agent_prompt_sources(self, agent_name=None):
         return []
+
+    def get_mode_text(self, name):
+        return f"---\nname: {name}\n---\nPrompt\n"
 
     def status(self):
         return {
             "available_llm_profiles": self.list_llm_profiles(),
             "available_flows": self.list_agents(),
             "available_agents": self.list_agent_profiles(),
+            "available_modes": self.list_modes(),
             "available_skills": self.list_skills(),
             "session_tool_confirmation_overrides": self.session_confirmation_overrides,
             "flow": self.current_agent,
@@ -417,8 +572,43 @@ class _TextualEngineStub:
     def set_session_confirmation_default(self, value):
         self.session_confirmation_overrides["default_policy"] = value
 
+    def delete_agent_profile(self, name):
+        self._profiles.pop(name, None)
+        if self.active_agent_profile is not None and self.active_agent_profile.name == name:
+            self.active_agent_profile = None
+        return Path(f"/tmp/{name}.yaml")
+
+    def delete_llm_profile(self, name):
+        if self.global_llm_override == name:
+            self.global_llm_override = None
+        return Path(f"/tmp/{name}.yaml")
+
+    def delete_mode(self, name):
+        self._modes.pop(name, None)
+        if self.active_mode is not None and self.active_mode.name == name:
+            self.active_mode = None
+        return Path(f"/tmp/{name}.md")
+
 
 class TestTextualSelectStability:
+    def test_header_uses_static_agent_and_llm_labels(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert isinstance(app.query_one("#header-agent", Static), Static)
+                assert isinstance(app.query_one("#header-llm", Static), Static)
+                assert len(app.query("#status")) == 0
+                assert app._text_state_cache["header-agent"] == "Agent: a"
+                assert app._text_state_cache["header-llm"] == "LLM: fast (-)"
+
+        asyncio.run(exercise())
+
     def test_asset_picker_supports_arrow_key_selection(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
@@ -430,7 +620,12 @@ class TestTextualSelectStability:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                await pilot.press("f6", "down", "enter")
+                await pilot.press("f6", "down", "down", "enter")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+
+                await pilot.press("enter")
                 await pilot.pause(0.05)
 
                 assert isinstance(app.screen, AssetPickerScreen)
@@ -462,6 +657,10 @@ class TestTextualSelectStability:
                 await pilot.pause(0.05)
 
                 assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("select")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
                 app.screen.dismiss("smart")
                 await pilot.pause(0.1)
 
@@ -470,7 +669,7 @@ class TestTextualSelectStability:
 
         asyncio.run(exercise())
 
-    def test_header_uses_static_agent_and_llm_labels(self):
+    def test_f6_select_can_open_skill_selection_popup(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
             app = PocketCodeTextualApp(
@@ -480,11 +679,74 @@ class TestTextualSelectStability:
 
             async with app.run_test() as pilot:
                 await pilot.pause()
-                assert isinstance(app.query_one("#header-agent", Static), Static)
-                assert isinstance(app.query_one("#header-llm", Static), Static)
-                assert len(app.query("#status")) == 0
-                assert app._text_state_cache["header-agent"] == "Agent: a"
-                assert app._text_state_cache["header-llm"] == "LLM: fast (-)"
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("skills")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("select")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                assert app.screen._filter_placeholder == "Filter skills..."
+
+        asyncio.run(exercise())
+
+    def test_f6_select_can_open_tool_selection_popup(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("tools")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("select")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                assert any(option.label == "Group: tool" for option in app.screen._tools)
+
+        asyncio.run(exercise())
+
+    def test_f6_select_can_open_system_settings_screen(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("system_settings")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("open")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, SystemSettingsScreen)
 
         asyncio.run(exercise())
 
@@ -531,6 +793,74 @@ class TestToolSelectionPopup:
 
         assert screen._selected_values == {"__skill_group__:python", "python-lint", "python-testing"}
 
+    def test_nested_group_toggle_syncs_child_groups(self):
+        screen = ToolSelectionScreen(
+            title="Edit Allowed Tools",
+            tools=[
+                SimpleNamespace(value="__skill_group__:core", label="Group: core", description="", search_text=""),
+                SimpleNamespace(value="__skill_group__:core/filesystem", label="  Group: filesystem", description="", search_text=""),
+                SimpleNamespace(value="core.read_file", label="    core.read_file", description="", search_text=""),
+                SimpleNamespace(value="core.write_to_file", label="    core.write_to_file", description="", search_text=""),
+            ],
+            selected_values=[],
+            grouped_values={
+                "__skill_group__:core": ("core.read_file", "core.write_to_file"),
+                "__skill_group__:core/filesystem": ("core.read_file", "core.write_to_file"),
+            },
+        )
+        selection_list = SimpleNamespace(
+            id="tool-picker-list",
+            disabled=False,
+            selected={"__skill_group__:core"},
+            get_option_at_index=lambda index: SimpleNamespace(value="__skill_group__:core"),
+        )
+        event = SimpleNamespace(selection_list=selection_list, selection_index=0)
+
+        screen.on_selection_list_selection_toggled(event)
+
+        assert screen._selected_values == {
+            "__skill_group__:core",
+            "__skill_group__:core/filesystem",
+            "core.read_file",
+            "core.write_to_file",
+        }
+
+    def test_build_nested_tool_picker_options_uses_group_path_hierarchy(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+
+        picker_options, grouped_values, initial_selected_values = app._build_nested_tool_picker_options(
+            ["core.read_file", "core.ask_user_input"],
+            selected_tools={"core.read_file", "core.ask_user_input"},
+            tool_details={
+                "core.read_file": {"group_path": ["core", "filesystem"]},
+                "core.ask_user_input": {"group_path": ["core", "user_input"]},
+            },
+        )
+
+        assert [option.label for option in picker_options] == [
+            "Group: core",
+            "  Group: filesystem",
+            "    core.read_file",
+            "  Group: user_input",
+            "    core.ask_user_input",
+        ]
+        assert grouped_values == {
+            "__skill_group__:core": ("core.ask_user_input", "core.read_file"),
+            "__skill_group__:core/filesystem": ("core.read_file",),
+            "__skill_group__:core/user_input": ("core.ask_user_input",),
+        }
+        assert initial_selected_values == {
+            "__skill_group__:core",
+            "__skill_group__:core/filesystem",
+            "__skill_group__:core/user_input",
+            "core.ask_user_input",
+            "core.read_file",
+        }
+
     def test_edit_shortcut_can_open_tool_selection_popup(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
@@ -552,6 +882,30 @@ class TestToolSelectionPopup:
 
                 assert isinstance(app.screen, ToolSelectionScreen)
                 assert app.screen.query_one("#tool-picker-filter", Input).placeholder == "Filter tools..."
+
+        asyncio.run(exercise())
+
+    def test_llm_edit_prompts_for_clone_then_opens_editor(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_global_llm_override("smart")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                app._open_llm_profile_editor()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, NameInputScreen)
+                app.screen.dismiss("smart-workspace")
+                await pilot.pause(0.1)
+
+                assert engine.clone_llm_profile_calls == [("smart", "smart-workspace")]
+                assert isinstance(app.screen, TextEditorScreen)
 
         asyncio.run(exercise())
 
@@ -606,33 +960,11 @@ class TestToolSelectionPopup:
 
         asyncio.run(exercise())
 
-    def test_f6_select_can_open_skill_selection_popup(self):
-        async def exercise() -> None:
-            engine = _TextualEngineStub()
-            app = PocketCodeTextualApp(
-                engine,
-                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
-            )
-
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                await pilot.press("f6")
-                await pilot.pause(0.05)
-
-                assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("skills")
-                await pilot.pause(0.1)
-
-                assert isinstance(app.screen, ToolSelectionScreen)
-                assert app.screen._filter_placeholder == "Filter skills..."
-
-        asyncio.run(exercise())
-
-    def test_f6_select_can_open_tool_selection_popup(self):
+    def test_tool_picker_toggle_keeps_focus_on_current_item(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
             engine.set_active_agent_profile("a-safe")
+            engine.active_agent_profile.tools = []
             app = PocketCodeTextualApp(
                 engine,
                 {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
@@ -640,38 +972,26 @@ class TestToolSelectionPopup:
 
             async with app.run_test() as pilot:
                 await pilot.pause()
-
-                await pilot.press("f6")
+                app._open_tool_selection_picker()
                 await pilot.pause(0.05)
-
-                assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("tools")
-                await pilot.pause(0.1)
 
                 assert isinstance(app.screen, ToolSelectionScreen)
-                assert any(option.label == "Group: tool" for option in app.screen._tools)
-
-        asyncio.run(exercise())
-
-    def test_f6_select_can_open_system_settings_screen(self):
-        async def exercise() -> None:
-            engine = _TextualEngineStub()
-            app = PocketCodeTextualApp(
-                engine,
-                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
-            )
-
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                await pilot.press("f6")
+                await pilot.press("ctrl+down", "down", "down")
                 await pilot.pause(0.05)
 
-                assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("system_settings")
-                await pilot.pause(0.1)
+                selection_list = app.screen.query_one("#tool-picker-list", SelectionList)
+                assert app.screen.focused.id == "tool-picker-list"
+                assert selection_list.highlighted == 2
+                assert selection_list.get_option_at_index(2).value == "tool.read"
 
-                assert isinstance(app.screen, SystemSettingsScreen)
+                await pilot.press("space")
+                await pilot.pause(0.05)
+
+                selection_list = app.screen.query_one("#tool-picker-list", SelectionList)
+                assert app.screen.focused.id == "tool-picker-list"
+                assert selection_list.highlighted == 2
+                assert selection_list.get_option_at_index(2).value == "tool.read"
+                assert "tool.read" in app.screen._selected_values
 
         asyncio.run(exercise())
 
@@ -700,6 +1020,99 @@ class TestProfileCloneAndSave:
 
                 assert engine.clone_agent_profile_calls == [("a", "a-workspace")]
                 assert engine.active_agent_profile.name == "a-workspace"
+
+        asyncio.run(exercise())
+
+    def test_control_center_can_select_mode(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("mode")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("select")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("review")
+                await pilot.pause(0.05)
+
+                assert engine.set_last_used_mode_calls == ["review"]
+                assert engine.active_mode is not None
+                assert engine.active_mode.name == "review"
+
+        asyncio.run(exercise())
+
+    def test_control_center_can_save_selection_preset(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("presets")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("save")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, NameInputScreen)
+                app.screen.dismiss("focus-session")
+                await pilot.pause(0.05)
+
+                assert engine.saved_selection_presets == ["focus-session"]
+
+        asyncio.run(exercise())
+
+    def test_control_center_can_delete_current_mode(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_mode("review")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("mode")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("delete")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("delete")
+                await pilot.pause(0.05)
+
+                assert "review" not in engine._modes
 
         asyncio.run(exercise())
 

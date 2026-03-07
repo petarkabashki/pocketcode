@@ -129,6 +129,22 @@ class CompositeAgentManager:
         )
         logger.debug("Saved agent '%s' to %s", agent.name, agent.source_path)
 
+    def delete(self, name: str) -> Path:
+        agent = self.get(name)
+        if agent is None:
+            raise ValueError(f"Unknown agent profile '{name}'.")
+        if agent.source != "workspace" or agent.source_path is None:
+            raise ValueError(
+                f"Agent profile '{name}' is not workspace-backed. Only workspace agents can be deleted."
+            )
+        target_path = Path(agent.source_path)
+        if not target_path.exists():
+            raise ValueError(f"Agent profile file does not exist: {target_path}")
+        target_path.unlink()
+        logger.debug("Deleted workspace agent '%s' from %s", name, target_path)
+        self.reload(self._flow_definitions)
+        return target_path
+
     def reload(self, flow_definitions: Dict[str, Any]) -> None:
         self.load(flow_definitions)
 

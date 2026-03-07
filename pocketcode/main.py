@@ -18,7 +18,7 @@ from pocketcode.core.engine import PocketCodeEngine
 logger = logging.getLogger(__name__)
 
 
-def _configure_logging(log_level: str) -> None:
+def _configure_logging(log_level: str, *, stream: bool = True) -> None:
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
 
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -27,15 +27,15 @@ def _configure_logging(log_level: str) -> None:
     root_logger.handlers.clear()
     root_logger.setLevel(numeric_level)
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(numeric_level)
-    stream_handler.setFormatter(formatter)
-
     file_handler = logging.FileHandler("pocketcode.log")
     file_handler.setLevel(numeric_level)
     file_handler.setFormatter(formatter)
 
-    root_logger.addHandler(stream_handler)
+    if stream:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(numeric_level)
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
     root_logger.addHandler(file_handler)
 
 
@@ -214,7 +214,7 @@ def run() -> None:
         sys.exit(1)
 
     log_level = str(config.get("runtime", {}).get("log_level", os.environ.get("LOG_LEVEL", "INFO")))
-    _configure_logging(log_level)
+    _configure_logging(log_level, stream=force_basic_cli or args.prompt is not None)
 
     try:
         engine = PocketCodeEngine(config=config, workspace_root=os.getcwd())
@@ -275,8 +275,8 @@ def run() -> None:
             sys.exit(1)
         return
 
-    _print_startup(engine)
     if force_basic_cli:
+        _print_startup(engine)
         _run_basic_interactive_cli(engine=engine, cli_context=cli_context)
         return
 

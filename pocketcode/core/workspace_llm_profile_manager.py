@@ -99,6 +99,18 @@ class WorkspaceLlmProfileManager:
         logger.debug("Saved workspace LLM profile '%s' to %s", cleaned_name, target_path)
         return target_path
 
+    def delete(self, name: str) -> Path:
+        cleaned_name = str(name).strip()
+        if not cleaned_name:
+            raise ValueError("LLM profile name cannot be empty.")
+        target_path = self._workspace_llm_profiles_dir / f"{cleaned_name}.yaml"
+        if not target_path.exists():
+            raise ValueError(f"Workspace LLM profile not found: {target_path}")
+        target_path.unlink()
+        logger.debug("Deleted workspace LLM profile '%s' from %s", cleaned_name, target_path)
+        self.reload()
+        return target_path
+
     def _load_profile_file(self, yaml_file: Path) -> None:
         try:
             raw = yaml.safe_load(yaml_file.read_text(encoding="utf-8")) or {}
