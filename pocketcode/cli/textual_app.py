@@ -3,13 +3,16 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 from contextlib import redirect_stdout
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable
+from typing import Any, Callable, Dict, Iterable
 
+import yaml
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
 from textual.widgets import (
     Button,
@@ -23,8 +26,9 @@ from textual.widgets import (
     Switch,
     TextArea,
 )
+from textual.widgets.option_list import Option
 
-from pocketcode.cli.command_handler import handle_command, list_command_suggestions
+from pocketcode.cli.command_handler import _skill_group_name, handle_command, list_command_suggestions
 from pocketcode.cli.runtime_events import format_runtime_event
 from pocketcode.cli.user_interaction import (
     describe_interaction_request,
@@ -36,18 +40,14 @@ from pocketcode.core.run_handle import RunHandle
 
 logger = logging.getLogger(__name__)
 
-AUTO_AGENT = "__auto__"
-DEFAULT_PROFILE = "__default__"
 NO_LLM = "__none__"
+UNSET_OPTION = "__unset__"
 INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
-NO_TOOL = "__no_tool__"
 MAX_OUTPUT_LINES = 400
+SKILL_GROUP_PREFIX = "__skill_group__:"
 VIEW_TITLES = {
-    "chat": "Chat Workspace",
     "control": "Control Center",
-    "profiles": "Edit Agent",
-    "context": "Context Builder",
     "run": "Run Inspector",
 }
 THEME_OPTIONS = {
@@ -56,12 +56,23 @@ THEME_OPTIONS = {
     "ember": "Ember",
 }
 WORKSPACE_MODES = {
-    "balanced": {"label": "Balanced", "view": "chat", "left": True, "right": True},
-    "chat_focus": {"label": "Chat Focus", "view": "chat", "left": False, "right": True},
-    "control_desk": {"label": "Control Desk", "view": "control", "left": True, "right": True},
-    "minimal": {"label": "Minimal", "view": "chat", "left": False, "right": False},
-    "review": {"label": "Review", "view": "run", "left": True, "right": True},
+    "balanced": {"label": "Balanced", "view": "chat", "right": True},
+    "chat_focus": {"label": "Chat Focus", "view": "chat", "right": True},
+    "control_desk": {"label": "Control Desk", "view": "control", "right": True},
+    "minimal": {"label": "Minimal", "view": "chat", "right": False},
+    "review": {"label": "Review", "view": "run", "right": True},
 }
+
+
+def _tool_group_name(tool_name: str) -> str:
+    cleaned = str(tool_name).strip()
+    if not cleaned:
+        return "other"
+    if "::" in cleaned:
+        return cleaned.split("::", 1)[0]
+    if "." in cleaned:
+        return cleaned.split(".", 1)[0]
+    return "other"
 
 
 def _build_stats_text(status: Dict[str, Any]) -> str:
@@ -76,10 +87,9 @@ def _build_stats_text(status: Dict[str, Any]) -> str:
     )
 
 
-def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
-    runtime_flow = status.get("runtime_workflow") or "internal-flow"
+def _resolve_status_display_parts(status: Dict[str, Any]) -> tuple[str, str, str, str]:
+    runtime_flow = status.get("runtime_flow") or status.get("runtime_workflow") or "internal-flow"
     run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
-    flow_display = str(status.get("selected_flow") or status.get("flow") or "auto")
 
     current_llm_profile = str(
         status.get("selected_llm_profile")
@@ -93,27 +103,60 @@ def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
         if isinstance(run_summary, dict) and last_llm_profile == current_llm_profile
         else "-"
     )
-    active_agent = status.get("active_agent") or status.get("active_agent_profile") or "none"
-    return (
-        f"Runtime flow: {runtime_flow} | Flow: {flow_display} | "
-        f"Agent: {active_agent} | LLM: {current_llm_profile} ({current_llm_model}) | "
-        f"View: {VIEW_TITLES.get(current_view, current_view)}"
+    active_agent = (
+        status.get("selected_agent")
+        or status.get("agent")
+        or status.get("active_agent")
+        or status.get("active_agent_profile")
+        or "none"
     )
+    return runtime_flow, active_agent, current_llm_profile, current_llm_model
+
+
+def _build_status_text(status: Dict[str, Any], current_view: str) -> str:
+    runtime_flow, active_agent, current_llm_profile, current_llm_model = _resolve_status_display_parts(status)
+    return f"Runtime flow: {runtime_flow} | Agent: {active_agent} | LLM: {current_llm_profile} ({current_llm_model})"
+
+
+def _build_header_summary_text(status: Dict[str, Any]) -> str:
+    runtime_flow, _, _, _ = _resolve_status_display_parts(status)
+    return f"Runtime flow: {runtime_flow}"
+
+
+def _build_header_agent_text(status: Dict[str, Any]) -> str:
+    _, active_agent, _, _ = _resolve_status_display_parts(status)
+    return f"Agent: {active_agent}"
+
+
+def _build_header_llm_text(status: Dict[str, Any]) -> str:
+    _, _, current_llm_profile, current_llm_model = _resolve_status_display_parts(status)
+    return f"LLM: {current_llm_profile} ({current_llm_model})"
 
 
 def _build_view_title_text(view_name: str) -> str:
-    return (
-        f"{VIEW_TITLES.get(view_name, view_name)} | "
-        "Runtime controls live in Control. Agent edits live in Edit Agent."
-    )
+    return VIEW_TITLES.get(view_name, "")
 
 
 def _build_profile_editor_hint(active_profile: Any) -> str:
     if active_profile is None:
-        return "Select a flow or agent to edit agent settings."
+        return "Select an agent to edit agent settings."
     if active_profile.source == "workspace":
         return f"Editing workspace agent '{active_profile.name}'. Save persists tools, prompts, and LLM."
     return f"Agent '{active_profile.name}' is plugin/synthesised. Clone it to a workspace agent to edit."
+
+
+def _dump_yaml_text(payload: Dict[str, Any]) -> str:
+    text = yaml.safe_dump(payload, sort_keys=False, allow_unicode=False).strip()
+    return text or "{}"
+
+
+def _load_yaml_mapping(text: str, *, label: str) -> Dict[str, Any]:
+    loaded = yaml.safe_load(text) if text.strip() else {}
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{label} must be a YAML mapping.")
+    return loaded
 
 
 def _trim_output_lines(lines: list[str], max_lines: int) -> tuple[list[str], int]:
@@ -132,16 +175,6 @@ def _build_output_text(lines: list[str], trimmed_line_count: int) -> str:
     return "\n".join([notice, *lines]) if lines else notice
 
 
-def _cycle_value(values: list[Any], current: Any, step: int, *, missing_index: int) -> Any:
-    if not values:
-        raise ValueError("Cannot cycle an empty value list.")
-    try:
-        idx = values.index(current)
-    except ValueError:
-        idx = missing_index
-    return values[(idx + step) % len(values)]
-
-
 @dataclass(frozen=True)
 class SelectViewState:
     options: tuple[tuple[str, str], ...]
@@ -152,67 +185,640 @@ class SelectViewState:
 class TextualUIState:
     theme_name: str
     current_view: str
-    left_panel_visible: bool
     right_panel_visible: bool
-    header_details_visible: bool
-    header_toggle_label: str
     status_text: str
-    stats_text: str
+    header_agent_text: str
+    header_llm_text: str
     view_title_text: str
     workspace_mode_select: SelectViewState
     theme_select: SelectViewState
-    agent_select: SelectViewState
     profile_select: SelectViewState
     llm_select: SelectViewState
     session_confirm_select: SelectViewState
     auto_confirm_tools: bool
-    profile_editor_hint: str
-    clone_disabled: bool
-    profile_llm_select: SelectViewState
-    profile_confirm_select: SelectViewState
-    profile_allow_all_tools: bool
-    profile_allow_all_tools_disabled: bool
-    profile_tool_options: tuple[tuple[str, str, bool], ...]
-    profile_tool_list_disabled: bool
-    profile_policy_tool_select: SelectViewState
-    profile_policy_value_select: SelectViewState
-    profile_policy_summary_text: str
-    profile_prompts_text: str
-    profile_prompts_disabled: bool
-    save_profile_disabled: bool
     inspector_summary_text: str
     inspector_context_text: str
+    skill_list_options: tuple[tuple[str, str, bool], ...]
     inspector_tools_text: str
     inspector_prompts_text: str
     profile_list_names: tuple[str, ...]
     profile_list_labels: tuple[str, ...]
-    context_preview_text: str
     run_preview_text: str
 
+
+@dataclass(frozen=True)
+class PickerOption:
+    value: str
+    label: str
+    description: str = ""
+    search_text: str = ""
+
+
+class AssetPickerScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("up", "cursor_up", "Up", show=False, priority=True),
+        Binding("down", "cursor_down", "Down", show=False, priority=True),
+        Binding("escape", "cancel", "Close", show=False),
+        Binding("enter", "submit", "Choose", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    AssetPickerScreen {
+        align: center middle;
+        background: rgba(2, 6, 23, 0.72);
+    }
+
+    #asset-picker-modal {
+        width: 76;
+        max-width: 90vw;
+        height: 24;
+        max-height: 85vh;
+        border: round #0ea5e9;
+        background: #020617;
+        padding: 1;
+    }
+
+    #asset-picker-title {
+        color: #e0f2fe;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #asset-picker-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    #asset-picker-filter {
+        margin-bottom: 1;
+    }
+
+    #asset-picker-options {
+        height: 1fr;
+        border: round #334155;
+        background: #0b1220;
+    }
+    """
+
+    def __init__(
+        self,
+        *,
+        title: str,
+        options: Iterable[PickerOption],
+        current_value: str | None = None,
+        help_text: str = "Use arrows to move, Enter to select, Esc to close.",
+        empty_message: str = "No matching options.",
+    ) -> None:
+        super().__init__()
+        self._title = title
+        self._options = tuple(options)
+        self._current_value = current_value
+        self._help_text = help_text
+        self._empty_message = empty_message
+        self._visible_values: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="asset-picker-modal"):
+            yield Static(self._title, id="asset-picker-title")
+            yield Static(self._help_text, id="asset-picker-help")
+            yield Input(placeholder="Filter options...", id="asset-picker-filter")
+            yield OptionList(id="asset-picker-options")
+
+    def on_mount(self) -> None:
+        self._refresh_options()
+        self.query_one("#asset-picker-filter", Input).focus()
+
+    def _matching_options(self, term: str) -> list[PickerOption]:
+        lowered = term.strip().lower()
+        if not lowered:
+            return list(self._options)
+        matches: list[PickerOption] = []
+        for option in self._options:
+            haystack = " ".join(
+                part
+                for part in [option.label, option.value, option.description, option.search_text]
+                if part
+            ).lower()
+            if lowered in haystack:
+                matches.append(option)
+        return matches
+
+    def _refresh_options(self) -> None:
+        filter_value = self.query_one("#asset-picker-filter", Input).value
+        option_list = self.query_one("#asset-picker-options", OptionList)
+        matching_options = self._matching_options(filter_value)
+        self._visible_values = [option.value for option in matching_options]
+        option_list.clear_options()
+        if not matching_options:
+            option_list.add_option(Option(self._empty_message, disabled=True))
+            option_list.highlighted = 0
+            return
+
+        option_list.add_options(
+            [
+                Option(
+                    f"{'* ' if option.value == self._current_value else '  '}{option.label}"
+                    + (f" [{option.description}]" if option.description else ""),
+                    id=option.value,
+                )
+                for option in matching_options
+            ]
+        )
+        try:
+            highlight_index = self._visible_values.index(self._current_value) if self._current_value is not None else 0
+        except ValueError:
+            highlight_index = 0
+        option_list.highlighted = highlight_index
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_submit(self) -> None:
+        option_list = self.query_one("#asset-picker-options", OptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None or highlighted >= len(self._visible_values):
+            return
+        self.dismiss(self._visible_values[highlighted])
+
+    def action_cursor_up(self) -> None:
+        option_list = self.query_one("#asset-picker-options", OptionList)
+        if self._visible_values:
+            option_list.action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        option_list = self.query_one("#asset-picker-options", OptionList)
+        if self._visible_values:
+            option_list.action_cursor_down()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "asset-picker-filter":
+            self._refresh_options()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "asset-picker-filter":
+            self.action_submit()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id != "asset-picker-options" or event.option_id is None:
+            return
+        self.dismiss(str(event.option_id))
+
+
+class ToolSelectionScreen(ModalScreen[list[str] | None]):
+    BINDINGS = [
+        Binding("escape", "cancel", "Close", show=False),
+        Binding("ctrl+s", "apply", "Apply", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ToolSelectionScreen {
+        align: center middle;
+        background: rgba(2, 6, 23, 0.72);
+    }
+
+    #tool-picker-modal {
+        width: 88;
+        max-width: 95vw;
+        height: 30;
+        max-height: 90vh;
+        border: round #0ea5e9;
+        background: #020617;
+        padding: 1;
+    }
+
+    #tool-picker-title {
+        color: #e0f2fe;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #tool-picker-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    #tool-picker-filter {
+        margin-bottom: 1;
+    }
+
+    #tool-picker-list {
+        height: 1fr;
+        border: round #334155;
+        background: #0b1220;
+        margin-bottom: 1;
+    }
+
+    #tool-picker-actions {
+        height: auto;
+    }
+    """
+
+    def __init__(
+        self,
+        *,
+        title: str,
+        tools: Iterable[PickerOption],
+        selected_values: Iterable[str],
+        help_text: str = "Filter tools, toggle with Space, then choose Apply.",
+        empty_message: str = "No matching tools.",
+        filter_placeholder: str = "Filter tools...",
+        grouped_values: Dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        super().__init__()
+        self._title = title
+        self._tools = tuple(tools)
+        self._selected_values = set(str(value) for value in selected_values)
+        self._help_text = help_text
+        self._empty_message = empty_message
+        self._filter_placeholder = filter_placeholder
+        self._grouped_values = {
+            str(group_value): tuple(str(item) for item in grouped_items)
+            for group_value, grouped_items in (grouped_values or {}).items()
+        }
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="tool-picker-modal"):
+            yield Static(self._title, id="tool-picker-title")
+            yield Static(self._help_text, id="tool-picker-help")
+            yield Input(placeholder=self._filter_placeholder, id="tool-picker-filter")
+            yield SelectionList(id="tool-picker-list")
+            with Horizontal(id="tool-picker-actions", classes="button-row"):
+                yield Button("Apply", id="tool-picker-apply", variant="primary")
+                yield Button("Cancel", id="tool-picker-cancel")
+
+    def on_mount(self) -> None:
+        self._refresh_tools()
+        self.query_one("#tool-picker-filter", Input).focus()
+
+    def _matching_tools(self, term: str) -> list[PickerOption]:
+        lowered = term.strip().lower()
+        if not lowered:
+            return list(self._tools)
+        matches: list[PickerOption] = []
+        for option in self._tools:
+            haystack = " ".join(
+                part
+                for part in (option.label, option.value, option.description, option.search_text)
+                if part
+            ).lower()
+            if lowered in haystack:
+                matches.append(option)
+        return matches
+
+    def _refresh_tools(self) -> None:
+        filter_value = self.query_one("#tool-picker-filter", Input).value
+        selection_list = self.query_one("#tool-picker-list", SelectionList)
+        matching_tools = self._matching_tools(filter_value)
+        selection_list.clear_options()
+        if not matching_tools:
+            selection_list.add_options([(self._empty_message, LOADING_OPTION, False)])
+            selection_list.disabled = True
+            return
+        selection_list.disabled = False
+        selection_list.add_options(
+            [
+                (tool.label, tool.value, tool.value in self._selected_values)
+                for tool in matching_tools
+            ]
+        )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_apply(self) -> None:
+        self.dismiss(sorted(self._selected_values))
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "tool-picker-filter":
+            self._refresh_tools()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id == "tool-picker-apply":
+            self.action_apply()
+        elif button_id == "tool-picker-cancel":
+            self.action_cancel()
+
+    def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
+        if event.selection_list.id != "tool-picker-list" or event.selection_list.disabled:
+            return
+        option_index = getattr(event, "selection_index", getattr(event, "index", None))
+        if option_index is None:
+            return
+        option = event.selection_list.get_option_at_index(option_index)
+        value = str(option.value)
+        if value == LOADING_OPTION:
+            return
+        if value in self._grouped_values:
+            if value in event.selection_list.selected:
+                self._selected_values.add(value)
+                self._selected_values.update(self._grouped_values[value])
+            else:
+                self._selected_values.discard(value)
+                for member_value in self._grouped_values[value]:
+                    self._selected_values.discard(member_value)
+        else:
+            if value in event.selection_list.selected:
+                self._selected_values.add(value)
+            else:
+                self._selected_values.discard(value)
+            self._sync_group_selection_values()
+        if self.is_mounted:
+            self._refresh_tools()
+
+    def _sync_group_selection_values(self) -> None:
+        for group_value, member_values in self._grouped_values.items():
+            if member_values and all(member_value in self._selected_values for member_value in member_values):
+                self._selected_values.add(group_value)
+            else:
+                self._selected_values.discard(group_value)
+
+
+class NameInputScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("escape", "cancel", "Close", show=False),
+        Binding("enter", "submit", "Submit", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    NameInputScreen {
+        align: center middle;
+        background: rgba(2, 6, 23, 0.72);
+    }
+
+    #name-input-modal {
+        width: 62;
+        max-width: 90vw;
+        height: auto;
+        border: round #0ea5e9;
+        background: #020617;
+        padding: 1;
+    }
+
+    #name-input-title {
+        color: #e0f2fe;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #name-input-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    #name-input-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, *, title: str, placeholder: str, help_text: str) -> None:
+        super().__init__()
+        self._title = title
+        self._placeholder = placeholder
+        self._help_text = help_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="name-input-modal"):
+            yield Static(self._title, id="name-input-title")
+            yield Static(self._help_text, id="name-input-help")
+            yield Input(placeholder=self._placeholder, id="name-input-field")
+            with Horizontal(id="name-input-actions", classes="button-row"):
+                yield Button("Submit", id="name-input-submit", variant="primary")
+                yield Button("Cancel", id="name-input-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#name-input-field", Input).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_submit(self) -> None:
+        value = self.query_one("#name-input-field", Input).value.strip()
+        if not value:
+            return
+        self.dismiss(value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "name-input-field":
+            self.action_submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id == "name-input-submit":
+            self.action_submit()
+        elif button_id == "name-input-cancel":
+            self.action_cancel()
+
+
+class TextEditorScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("escape", "cancel", "Close", show=False),
+        Binding("ctrl+s", "submit", "Save", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    TextEditorScreen {
+        align: center middle;
+        background: rgba(2, 6, 23, 0.72);
+    }
+
+    #text-editor-modal {
+        width: 96;
+        max-width: 95vw;
+        height: 32;
+        max-height: 90vh;
+        border: round #0ea5e9;
+        background: #020617;
+        padding: 1;
+    }
+
+    #text-editor-title {
+        color: #e0f2fe;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #text-editor-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    #text-editor-body {
+        height: 1fr;
+        margin-bottom: 1;
+    }
+
+    #text-editor-actions {
+        height: auto;
+    }
+    """
+
+    def __init__(self, *, title: str, help_text: str, initial_text: str) -> None:
+        super().__init__()
+        self._title = title
+        self._help_text = help_text
+        self._initial_text = initial_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="text-editor-modal"):
+            yield Static(self._title, id="text-editor-title")
+            yield Static(self._help_text, id="text-editor-help")
+            yield TextArea(self._initial_text, id="text-editor-body")
+            with Horizontal(id="text-editor-actions", classes="button-row"):
+                yield Button("Save", id="text-editor-save", variant="primary")
+                yield Button("Cancel", id="text-editor-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#text-editor-body", TextArea).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_submit(self) -> None:
+        self.dismiss(self.query_one("#text-editor-body", TextArea).text)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id == "text-editor-save":
+            self.action_submit()
+        elif button_id == "text-editor-cancel":
+            self.action_cancel()
+
+
+class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
+    BINDINGS = [
+        Binding("escape", "cancel", "Close", show=False),
+        Binding("ctrl+s", "apply", "Apply", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    SystemSettingsScreen {
+        align: center middle;
+        background: rgba(2, 6, 23, 0.72);
+    }
+
+    #system-settings-modal {
+        width: 84;
+        max-width: 95vw;
+        height: auto;
+        border: round #0ea5e9;
+        background: #020617;
+        padding: 1;
+    }
+
+    #system-settings-title {
+        color: #e0f2fe;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #system-settings-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    #system-settings-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        *,
+        theme_name: str,
+        workspace_mode: str,
+        default_agent: str | None,
+        default_llm_profile: str | None,
+        available_agents: Iterable[str],
+        available_llm_profiles: Iterable[str],
+    ) -> None:
+        super().__init__()
+        self._theme_name = str(theme_name)
+        self._workspace_mode = str(workspace_mode)
+        self._default_agent = str(default_agent) if default_agent else UNSET_OPTION
+        self._default_llm_profile = str(default_llm_profile) if default_llm_profile else UNSET_OPTION
+        self._available_agents = tuple(str(name) for name in available_agents)
+        self._available_llm_profiles = tuple(str(name) for name in available_llm_profiles)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="system-settings-modal"):
+            yield Static("System Settings", id="system-settings-title")
+            yield Static(
+                "Apply saves these defaults to pocketcode.yml and updates the running UI/runtime.",
+                id="system-settings-help",
+            )
+            yield Static("Theme Preset", classes="field-label")
+            yield Select(
+                [(label, key) for key, label in THEME_OPTIONS.items()],
+                id="system-theme-select",
+                allow_blank=False,
+                value=self._theme_name,
+            )
+            yield Static("Workspace Mode", classes="field-label")
+            yield Select(
+                [(item["label"], key) for key, item in WORKSPACE_MODES.items()],
+                id="system-workspace-mode-select",
+                allow_blank=False,
+                value=self._workspace_mode,
+            )
+            yield Static("Default Agent", classes="field-label")
+            yield Select(
+                [("(unset)", UNSET_OPTION), *((name, name) for name in self._available_agents)],
+                id="system-default-agent-select",
+                allow_blank=False,
+                value=self._default_agent,
+            )
+            yield Static("Default LLM Profile", classes="field-label")
+            yield Select(
+                [("(unset)", UNSET_OPTION), *((name, name) for name in self._available_llm_profiles)],
+                id="system-default-llm-select",
+                allow_blank=False,
+                value=self._default_llm_profile,
+            )
+            with Horizontal(id="system-settings-actions", classes="button-row"):
+                yield Button("Apply", id="system-settings-apply", variant="primary")
+                yield Button("Cancel", id="system-settings-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#system-theme-select", Select).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_apply(self) -> None:
+        default_agent = self.query_one("#system-default-agent-select", Select).value
+        default_llm_profile = self.query_one("#system-default-llm-select", Select).value
+        self.dismiss(
+            {
+                "theme_name": str(self.query_one("#system-theme-select", Select).value),
+                "workspace_mode": str(self.query_one("#system-workspace-mode-select", Select).value),
+                "default_agent": None if str(default_agent) == UNSET_OPTION else str(default_agent),
+                "default_llm_profile": None if str(default_llm_profile) == UNSET_OPTION else str(default_llm_profile),
+            }
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id == "system-settings-apply":
+            self.action_apply()
+        elif button_id == "system-settings-cancel":
+            self.action_cancel()
 
 class PocketCodeTextualApp(App[None]):
     BINDINGS = [
         Binding("tab", "complete_input", "Complete Input", priority=True),
         Binding("f1", "view_chat", "Chat", priority=True),
         Binding("f2", "view_control", "Control", priority=True),
-        Binding("f3", "view_profiles", "Edit Agent", priority=True),
-        Binding("f4", "view_context", "Context", priority=True),
+        Binding("f3", "edit_asset", "Edit", priority=True),
+        Binding("f4", "clone_asset", "Clone", priority=True),
         Binding("f5", "view_run", "Run", priority=True),
-        Binding("f7", "next_profile", "Next Agent Profile", priority=True),
-        Binding("shift+f7", "prev_profile", "Prev Agent Profile", priority=True),
-        Binding("f8", "next_llm", "Next LLM", priority=True),
-        Binding("shift+f8", "prev_llm", "Prev LLM", priority=True),
-        Binding("f9", "toggle_left_panel", "Toggle Nav"),
+        Binding("f6", "pick_asset", "Select", priority=True),
         Binding("f10", "toggle_right_panel", "Toggle Inspector"),
-        Binding("f11", "toggle_header", "Toggle Header"),
-        Binding("ctrl+p", "next_profile", "Next Agent Profile", priority=True),
-        Binding("ctrl+shift+p", "prev_profile", "Prev Agent Profile", priority=True),
-        Binding("ctrl+w", "next_workspace_mode", "Next Mode"),
-        Binding("alt+1", "view_chat", "Chat"),
-        Binding("alt+2", "view_control", "Control"),
-        Binding("alt+3", "view_profiles", "Edit Agent"),
-        Binding("alt+4", "view_context", "Context"),
-        Binding("alt+5", "view_run", "Run"),
+        Binding("alt+1", "view_chat", "Chat", show=False),
+        Binding("alt+2", "view_control", "Control", show=False),
+        Binding("alt+5", "view_run", "Run", show=False),
         Binding("ctrl+shift+a", "copy_output", "Copy Output"),
         Binding("ctrl+y", "copy_last_response", "Copy Last"),
         Binding("ctrl+r", "reload_runtime", "Reload"),
@@ -247,12 +853,13 @@ class PocketCodeTextualApp(App[None]):
         color: #f8fafc;
     }
 
-    Screen.theme-ocean #stats {
-        background: #1f2937;
-        color: #d1fae5;
+    Screen.theme-ocean #header-agent,
+    Screen.theme-ocean #header-llm {
+        background: #0b4f6c;
+        color: #f8fafc;
+        border: round #0ea5e9;
     }
 
-    Screen.theme-ocean .sidebar,
     Screen.theme-ocean .view {
         background: #111827;
         border: round #334155;
@@ -267,7 +874,7 @@ class PocketCodeTextualApp(App[None]):
     Screen.theme-ocean .card,
     Screen.theme-ocean #output,
     Screen.theme-ocean #profile-list,
-    Screen.theme-ocean #profile-tool-list,
+    Screen.theme-ocean #profile-tools-summary,
     Screen.theme-ocean #profile-prompts,
     Screen.theme-ocean #context-preview,
     Screen.theme-ocean #run-preview,
@@ -302,12 +909,13 @@ class PocketCodeTextualApp(App[None]):
         color: #f0fdf4;
     }
 
-    Screen.theme-forest #stats {
-        background: #1f2937;
-        color: #d9f99d;
+    Screen.theme-forest #header-agent,
+    Screen.theme-forest #header-llm {
+        background: #14532d;
+        color: #f0fdf4;
+        border: round #65a30d;
     }
 
-    Screen.theme-forest .sidebar,
     Screen.theme-forest .view {
         background: #102018;
         border: round #365314;
@@ -322,7 +930,7 @@ class PocketCodeTextualApp(App[None]):
     Screen.theme-forest .card,
     Screen.theme-forest #output,
     Screen.theme-forest #profile-list,
-    Screen.theme-forest #profile-tool-list,
+    Screen.theme-forest #profile-tools-summary,
     Screen.theme-forest #profile-prompts,
     Screen.theme-forest #context-preview,
     Screen.theme-forest #run-preview,
@@ -357,12 +965,13 @@ class PocketCodeTextualApp(App[None]):
         color: #fff7ed;
     }
 
-    Screen.theme-ember #stats {
-        background: #3f1d0f;
-        color: #fed7aa;
+    Screen.theme-ember #header-agent,
+    Screen.theme-ember #header-llm {
+        background: #9a3412;
+        color: #fff7ed;
+        border: round #fb923c;
     }
 
-    Screen.theme-ember .sidebar,
     Screen.theme-ember .view {
         background: #22140d;
         border: round #9a3412;
@@ -377,7 +986,7 @@ class PocketCodeTextualApp(App[None]):
     Screen.theme-ember .card,
     Screen.theme-ember #output,
     Screen.theme-ember #profile-list,
-    Screen.theme-ember #profile-tool-list,
+    Screen.theme-ember #profile-tools-summary,
     Screen.theme-ember #profile-prompts,
     Screen.theme-ember #context-preview,
     Screen.theme-ember #run-preview,
@@ -421,23 +1030,15 @@ class PocketCodeTextualApp(App[None]):
         text-style: bold;
     }
 
-    #toggle-header-button {
+    #header-agent,
+    #header-llm {
         width: auto;
-        min-width: 14;
-        margin: 0;
-    }
-
-    #header-details {
-        height: auto;
-        margin-bottom: 0;
-    }
-
-    #stats {
+        min-width: 20;
         height: 1;
-        padding: 0;
-        background: #1f2937;
-        color: #d1fae5;
+        margin: 0 0 0 1;
+        padding: 0 1;
         content-align: left middle;
+        text-style: bold;
     }
 
     #workspace {
@@ -445,18 +1046,21 @@ class PocketCodeTextualApp(App[None]):
         padding: 0;
     }
 
-    .sidebar {
-        width: 28;
-        min-width: 20;
-        border: round #334155;
-        background: #111827;
-        padding: 0;
-    }
-
     #main-column {
         width: 1fr;
         min-width: 60;
         margin: 0;
+    }
+
+    #right-panel {
+        width: 34;
+        min-width: 30;
+        max-width: 38;
+    }
+
+    #view-tabs {
+        height: auto;
+        margin-bottom: 1;
     }
 
     #view-title {
@@ -533,22 +1137,20 @@ class PocketCodeTextualApp(App[None]):
     }
 
     Button {
-        width: 1fr;
+        width: auto;
+        min-width: 12;
         margin-bottom: 0;
     }
 
-    #shortcut-list {
-        color: #cbd5e1;
-    }
-
-    #profile-list {
+    #profile-list,
+    #skill-list {
         height: 10;
         margin-bottom: 0;
         border: round #334155;
         background: #020617;
     }
 
-    #profile-tool-list {
+    #profile-tools-summary {
         height: 12;
         border: round #334155;
         background: #020617;
@@ -561,8 +1163,6 @@ class PocketCodeTextualApp(App[None]):
         color: #e2e8f0;
     }
 
-    #profile-prompts,
-    #context-preview,
     #run-preview,
     #inspector-context,
     #inspector-tools,
@@ -573,7 +1173,6 @@ class PocketCodeTextualApp(App[None]):
         color: #e2e8f0;
     }
 
-    #context-preview,
     #run-preview,
     #inspector-context,
     #inspector-tools,
@@ -590,17 +1189,25 @@ class PocketCodeTextualApp(App[None]):
         super().__init__()
         self._engine = engine
         self._cli_context = cli_context
+        system_settings = (
+            engine.get_system_settings()
+            if hasattr(engine, "get_system_settings")
+            else {
+                "theme_name": "ocean",
+                "workspace_mode": "balanced",
+                "default_agent": None,
+                "default_llm_profile": None,
+            }
+        )
         self._busy = False
         self._active_run: RunHandle | None = None
         self._pending_input_request: dict[str, Any] | None = None
         self._live_run_status = "idle"
         self._live_run_events: list[str] = []
-        self._show_header_details = True
-        self._show_left_panel = True
         self._show_right_panel = True
         self._current_view = "chat"
-        self._theme_name = "ocean"
-        self._workspace_mode = "balanced"
+        self._theme_name = str(system_settings.get("theme_name") or "ocean")
+        self._workspace_mode = str(system_settings.get("workspace_mode") or "balanced")
         self._output_lines: list[str] = []
         self._trimmed_output_line_count = 0
         self._last_assistant_response: str = ""
@@ -611,39 +1218,16 @@ class PocketCodeTextualApp(App[None]):
         self._text_state_cache: dict[str, str] = {}
         self._option_list_state_cache: dict[str, tuple[str, ...]] = {}
         self._selection_list_state_cache: dict[str, tuple[tuple[str, str, bool], ...]] = {}
-        self._draft_profile_name: str | None = None
-        self._draft_profile_tool_overrides: dict[str, str] = {}
-        self._selected_profile_policy_tool: str | None = None
         self._ui_state: TextualUIState | None = None
+        self._apply_workspace_mode(self._workspace_mode, announce=False)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="topbar"):
             with Horizontal(id="topbar-main"):
                 yield Static(id="status")
-                yield Button("Hide Details", id="toggle-header-button")
-            with Vertical(id="header-details"):
-                yield Static(id="stats")
+                yield Static(id="header-agent")
+                yield Static(id="header-llm")
         with Horizontal(id="workspace"):
-            with VerticalScroll(id="left-panel", classes="sidebar"):
-                yield Static("Workspace Views", classes="panel-title")
-                yield Button("Chat", id="view-chat-button", variant="primary")
-                yield Button("Control", id="view-control-button")
-                yield Button("Edit Agent", id="view-profiles-button")
-                yield Button("Context", id="view-context-button")
-                yield Button("Run", id="view-run-button")
-                yield Static("Shortcuts", classes="section-title")
-                yield Static(
-                    "F1..F5 switch views\n"
-                    "F7/F8 next agent profile/LLM\n"
-                    "Shift+F7/F8 previous agent profile/LLM\n"
-                    "F9/F10 toggle panels\n"
-                    "F11 toggle second header row\n"
-                    "Ctrl+W cycle mode\n"
-                    "Alt+1..5 switch views\n"
-                    "Ctrl+R reload runtime",
-                    id="shortcut-list",
-                    classes="card",
-                )
             with Vertical(id="main-column"):
                 yield Static(id="view-title")
                 with ContentSwitcher(initial="view-chat", id="view-switcher"):
@@ -666,8 +1250,6 @@ class PocketCodeTextualApp(App[None]):
                             value=self._theme_name,
                         )
                         yield Static("Active Agent", classes="field-label")
-                        yield Select([("loading...", LOADING_OPTION)], id="agent-select", allow_blank=False)
-                        yield Static("Active Agent Profile", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="profile-select", allow_blank=False)
                         yield Static("Global LLM Override", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="llm-select", allow_blank=False)
@@ -685,92 +1267,26 @@ class PocketCodeTextualApp(App[None]):
                         yield Static("Auto-Confirm Tools", classes="field-label")
                         yield Switch(value=False, id="auto-confirm-switch")
                         with Horizontal(classes="button-row"):
+                            yield Button("Edit Asset", id="edit-asset-button-secondary", variant="primary")
+                            yield Button("Clone Asset", id="clone-asset-button-secondary")
                             yield Button("Reload Runtime", id="reload-button", variant="primary")
-                            yield Button("Open Edit Agent", id="goto-profiles-button")
-                            yield Button("Open Run Inspector", id="goto-run-button")
-                    with VerticalScroll(id="view-profiles", classes="view view-scroll"):
-                        yield Static("Active agent settings save back to workspace YAML.", classes="hint")
-                        yield Static("", id="profile-editor-hint", classes="hint")
-                        yield Static("Clone Active Agent To Workspace", classes="field-label")
-                        yield Input(id="clone-profile-name", placeholder="my-agent-safe")
-                        yield Button("Clone Active Agent", id="clone-profile-button", variant="primary")
-                        yield Static("Agent LLM", classes="field-label")
-                        yield Select([("loading...", LOADING_OPTION)], id="profile-llm-select", allow_blank=False)
-                        yield Static("Agent Confirmation Default", classes="field-label")
-                        yield Select(
-                            [
-                                ("inherit", INHERIT_POLICY),
-                                ("allow", "allow"),
-                                ("confirm", "confirm"),
-                                ("deny", "deny"),
-                            ],
-                            id="profile-confirm-select",
-                            allow_blank=False,
-                        )
-                        yield Static("Allow All Agent Tools", classes="field-label")
-                        yield Switch(value=True, id="profile-all-tools-switch")
-                        yield Static("Allowed Tools", classes="field-label")
-                        yield SelectionList(id="profile-tool-list")
-                        yield Static("Tool Policy Target", classes="field-label")
-                        yield Select([("(no tools)", NO_TOOL)], id="profile-policy-tool-select", allow_blank=False)
-                        yield Static("Selected Tool Policy Override", classes="field-label")
-                        yield Select(
-                            [
-                                ("inherit", INHERIT_POLICY),
-                                ("allow", "allow"),
-                                ("confirm", "confirm"),
-                                ("deny", "deny"),
-                            ],
-                            id="profile-tool-policy-select",
-                            allow_blank=False,
-                        )
-                        yield Static("Tool Policy Overrides", classes="field-label")
-                        yield TextArea("", id="profile-policy-summary", read_only=True)
-                        yield Static("Extra Prompt Paths (one path per line)", classes="field-label")
-                        yield TextArea("", id="profile-prompts")
-                        yield Button("Save Agent", id="save-profile-button", variant="success")
-                    with VerticalScroll(id="view-context", classes="view view-scroll"):
-                        yield Static("Context controls update the next request scope.", classes="hint")
-                        yield Static("Context Type", classes="field-label")
-                        yield Select(
-                            [
-                                ("file", "file"),
-                                ("folder", "folder"),
-                                ("url", "url"),
-                                ("snippet", "snippet"),
-                            ],
-                            id="context-type-select",
-                            allow_blank=False,
-                            value="file",
-                        )
-                        yield Static("Context Name (snippet only)", classes="field-label")
-                        yield Input(id="context-name-input", placeholder="snippet-name")
-                        yield Static("Context Value", classes="field-label")
-                        yield Input(id="context-value-input", placeholder="/path/to/file or https://example.com")
-                        with Horizontal(classes="button-row"):
-                            yield Button("Add", id="context-add-button", variant="primary")
-                            yield Button("Remove", id="context-remove-button", variant="warning")
-                            yield Button("Clear Type", id="context-clear-type-button")
-                            yield Button("Clear All", id="context-clear-all-button", variant="error")
-                        yield Static("Current Context", classes="section-title")
-                        yield TextArea("", id="context-preview", read_only=True)
+                            yield Button("Return to Chat", id="goto-chat-button")
                     with VerticalScroll(id="view-run", classes="view view-scroll"):
                         yield Static("Last run summary and effective runtime state.", classes="hint")
                         yield TextArea("", id="run-preview", read_only=True)
                 yield Input(
                     id="main-input",
-                    placeholder=(
-                        "Type a request or /command. F1..F5=view F7/F8 next agent profile/LLM "
-                        "F9/F10=panels F11=header"
-                    ),
+                    placeholder="Type a request or /command. F1 chat F2 control F3 edit F4 clone F5 run F6 select",
                 )
-            with VerticalScroll(id="right-panel", classes="sidebar"):
+            with VerticalScroll(id="right-panel", classes="view"):
                 yield Static("Inspector", classes="panel-title")
                 yield Static("", id="inspector-summary", classes="card")
                 yield Static("Session Context", classes="section-title")
                 yield TextArea("", id="inspector-context", read_only=True)
-                yield Static("Agents For Active Flow", classes="section-title")
+                yield Static("Available Agent Profiles", classes="section-title")
                 yield OptionList(id="profile-list")
+                yield Static("Skills", classes="section-title")
+                yield SelectionList(id="skill-list")
                 yield Static("Active Tools", classes="section-title")
                 yield TextArea("", id="inspector-tools", read_only=True)
                 yield Static("Prompt Sources", classes="section-title")
@@ -782,7 +1298,7 @@ class PocketCodeTextualApp(App[None]):
         self._refresh_ui()
         self.set_interval(0.1, self._drain_run_events)
         self._write_info(
-            "Pocketcode workspace ready. F1..F5 switch views, F7/F8 move forward through agent profile-LLM, Shift+F7/F8 move backward, and F11 toggles the second header row."
+            "Pocketcode workspace ready. F3 opens edit, F4 opens clone, and F6 opens select."
         )
         self.query_one("#main-input", Input).focus()
 
@@ -790,29 +1306,6 @@ class PocketCodeTextualApp(App[None]):
         words = list_command_suggestions(self._engine)
         self._suggestions = words
         self.query_one("#main-input", Input).suggester = SuggestFromList(words, case_sensitive=False)
-
-    def _ensure_profile_policy_draft(self, active_profile: Any) -> dict[str, str]:
-        profile_name = active_profile.name if active_profile else None
-        if profile_name != self._draft_profile_name:
-            overrides: dict[str, str] = {}
-            if active_profile and isinstance(active_profile.tool_confirmation, dict):
-                raw_overrides = active_profile.tool_confirmation.get("overrides", {})
-                if isinstance(raw_overrides, dict):
-                    overrides = {
-                        str(tool_name): str(policy)
-                        for tool_name, policy in raw_overrides.items()
-                        if policy is not None
-                    }
-            self._draft_profile_name = profile_name
-            self._draft_profile_tool_overrides = overrides
-            self._selected_profile_policy_tool = None
-        return dict(self._draft_profile_tool_overrides)
-
-    def _resolve_profile_policy_tool(self, tool_names: tuple[str, ...]) -> str:
-        if self._selected_profile_policy_tool in tool_names:
-            return str(self._selected_profile_policy_tool)
-        self._selected_profile_policy_tool = tool_names[0] if tool_names else None
-        return self._selected_profile_policy_tool or NO_TOOL
 
     def _render_profile_policy_summary(self, overrides: dict[str, str]) -> str:
         if not overrides:
@@ -822,61 +1315,65 @@ class PocketCodeTextualApp(App[None]):
             lines.append(f"- {tool_name}: {overrides[tool_name]}")
         return "\n".join(lines)
 
+    def _render_profile_tools_summary(
+        self,
+        available_tools: tuple[str, ...],
+        *,
+        allow_all: bool,
+        selected_tools: set[str],
+    ) -> str:
+        if not available_tools:
+            return "No tools available for this agent."
+        if allow_all:
+            return "All agent tools are allowed."
+        visible_tools = [tool_name for tool_name in available_tools if tool_name in selected_tools]
+        if not visible_tools:
+            return "No tools selected."
+        return "\n".join(f"- {tool_name}" for tool_name in visible_tools)
+
+    def _current_llm_profile_name(self) -> str | None:
+        status = self._engine.status()
+        current = (
+            status.get("selected_llm_profile")
+            or status.get("global_llm_override")
+            or status.get("default_llm_profile")
+        )
+        return str(current) if current else None
+
     def _build_ui_state(self) -> TextualUIState:
         status = self._engine.status()
         current_agent = self._engine.get_current_agent()
         active_profile = self._engine.active_agent_profile
-        current_agent_profiles = tuple(self._engine.list_agent_profiles(current_agent)) if current_agent else ()
+        all_profile_names = tuple(dict.fromkeys(self._profile_cycle()))
         current_agent_tools = tuple(self._engine.list_tools_for_agent(current_agent)) if current_agent else ()
         prompt_sources = tuple(self._engine.get_agent_prompt_sources(current_agent)) if current_agent else ()
         active_profile_name = active_profile.name if active_profile else None
-        target_agent = active_profile.agent if active_profile is not None else current_agent
-        if target_agent == current_agent:
-            target_agent_tools = current_agent_tools
-        else:
-            target_agent_tools = tuple(self._engine.list_tools_for_agent(target_agent)) if target_agent else ()
+        active_skill_names = tuple(
+            str(getattr(skill, "name", skill))
+            for skill in (
+                self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else []
+            )
+        )
 
         llm_profile_names = tuple(str(name) for name in status.get("available_llm_profiles", []))
-        available_agents = tuple(str(agent) for agent in status.get("available_flows", status.get("available_agents", [])))
         session_default = status.get("session_tool_confirmation_overrides", {}).get("default_policy") or INHERIT_POLICY
-        profile_default = (
-            active_profile.tool_confirmation.get("default")
-            if active_profile and isinstance(active_profile.tool_confirmation, dict)
-            else None
-        )
-        editable = bool(active_profile and active_profile.source == "workspace")
-        profile_allow_all_tools = active_profile.tools is None if active_profile else True
-        allowed_tools = set(active_profile.tools) if active_profile and active_profile.tools is not None else set(target_agent_tools)
-        profile_tool_options = tuple(
-            (tool_name, tool_name, tool_name in allowed_tools) for tool_name in target_agent_tools
-        )
-        profile_tool_overrides = self._ensure_profile_policy_draft(active_profile)
-        selected_policy_tool = self._resolve_profile_policy_tool(target_agent_tools)
-        selected_policy_value = (
-            profile_tool_overrides.get(selected_policy_tool, INHERIT_POLICY)
-            if selected_policy_tool != NO_TOOL
-            else INHERIT_POLICY
-        )
-        selected_profile = (
-            active_profile.name
-            if active_profile is not None and active_profile.agent == current_agent
-            else DEFAULT_PROFILE
-        )
         summary_lines = [
-            f"Flow: {current_agent or 'auto'}",
             f"Agent: {active_profile_name or 'none'}",
+            f"Runtime flow: {status.get('runtime_workflow') or 'internal-flow'}",
             f"Agent source: {active_profile.source if active_profile else '-'}",
             f"Global LLM: {self._engine.global_llm_override or 'inherit'}",
+            f"Skills: {', '.join(active_skill_names) if active_skill_names else 'none'}",
             f"Auto-confirm: {'on' if self._engine.auto_confirm_tools else 'off'}",
             f"Session confirm: {session_default}",
+            _build_stats_text(status),
         ]
         if active_profile and active_profile.description:
             summary_lines.append(f"Agent note: {active_profile.description}")
 
         profile_list_labels = tuple(
             f"{'* ' if active_profile_name == profile_name else '  '}{profile_name}"
-            for profile_name in current_agent_profiles
-        ) or ("No agents for the active flow",)
+            for profile_name in all_profile_names
+        ) or ("No agent profiles available",)
 
         effective_llm_profile = (
             active_profile.llm_profile
@@ -884,18 +1381,21 @@ class PocketCodeTextualApp(App[None]):
             else self._engine.global_llm_override or status.get("default_llm_profile") or "none"
         )
         status_for_display = dict(status)
-        status_for_display["selected_flow"] = target_agent or current_agent or "auto"
-        status_for_display["selected_llm_profile"] = effective_llm_profile
+        status_for_display.setdefault("selected_agent", active_profile_name or "none")
+        status_for_display.setdefault("selected_llm_profile", effective_llm_profile)
+        profile_select_options = (
+            tuple((profile_name, profile_name) for profile_name in all_profile_names)
+            if all_profile_names
+            else (("No agent profiles available", LOADING_OPTION),)
+        )
 
         return TextualUIState(
             theme_name=self._theme_name,
             current_view=self._current_view,
-            left_panel_visible=self._show_left_panel,
             right_panel_visible=self._show_right_panel,
-            header_details_visible=self._show_header_details,
-            header_toggle_label="Hide Details" if self._show_header_details else "Show Details",
-            status_text=_build_status_text(status_for_display, self._current_view),
-            stats_text=_build_stats_text(status),
+            status_text=_build_header_summary_text(status_for_display),
+            header_agent_text=_build_header_agent_text(status_for_display),
+            header_llm_text=_build_header_llm_text(status_for_display),
             view_title_text=_build_view_title_text(self._current_view),
             workspace_mode_select=SelectViewState(
                 options=tuple((item["label"], key) for key, item in WORKSPACE_MODES.items()),
@@ -905,14 +1405,9 @@ class PocketCodeTextualApp(App[None]):
                 options=tuple((label, key) for key, label in THEME_OPTIONS.items()),
                 value=self._theme_name,
             ),
-            agent_select=SelectViewState(
-                options=(("auto", AUTO_AGENT),) + tuple((agent, agent) for agent in available_agents),
-                value=current_agent or AUTO_AGENT,
-            ),
             profile_select=SelectViewState(
-                options=(("(default for agent)", DEFAULT_PROFILE),)
-                + tuple((profile_name, profile_name) for profile_name in current_agent_profiles),
-                value=selected_profile,
+                options=profile_select_options,
+                value=active_profile_name or LOADING_OPTION,
             ),
             llm_select=SelectViewState(
                 options=(("(inherit)", NO_LLM),) + tuple((name, name) for name in llm_profile_names),
@@ -928,49 +1423,13 @@ class PocketCodeTextualApp(App[None]):
                 value=session_default,
             ),
             auto_confirm_tools=bool(self._engine.auto_confirm_tools),
-            profile_editor_hint=_build_profile_editor_hint(active_profile),
-            clone_disabled=active_profile is None,
-            profile_llm_select=SelectViewState(
-                options=(("(inherit)", NO_LLM),) + tuple((name, name) for name in llm_profile_names),
-                value=active_profile.llm_profile if active_profile and active_profile.llm_profile else NO_LLM,
-            ),
-            profile_confirm_select=SelectViewState(
-                options=(
-                    ("inherit", INHERIT_POLICY),
-                    ("allow", "allow"),
-                    ("confirm", "confirm"),
-                    ("deny", "deny"),
-                ),
-                value=profile_default or INHERIT_POLICY,
-            ),
-            profile_allow_all_tools=profile_allow_all_tools,
-            profile_allow_all_tools_disabled=not editable,
-            profile_tool_options=profile_tool_options,
-            profile_tool_list_disabled=not editable or profile_allow_all_tools,
-            profile_policy_tool_select=SelectViewState(
-                options=tuple((tool_name, tool_name) for tool_name in target_agent_tools) or (("(no tools)", NO_TOOL),),
-                value=selected_policy_tool,
-            ),
-            profile_policy_value_select=SelectViewState(
-                options=(
-                    ("inherit", INHERIT_POLICY),
-                    ("allow", "allow"),
-                    ("confirm", "confirm"),
-                    ("deny", "deny"),
-                ),
-                value=selected_policy_value,
-            ),
-            profile_policy_summary_text=self._render_profile_policy_summary(profile_tool_overrides),
-            profile_prompts_text="\n".join(active_profile.extra_prompts) if active_profile else "",
-            profile_prompts_disabled=not editable,
-            save_profile_disabled=not editable,
             inspector_summary_text="\n".join(summary_lines),
             inspector_context_text=self._render_context_summary(status),
+            skill_list_options=self._render_skill_options(status),
             inspector_tools_text=self._render_tool_summary(current_agent, active_profile, list(current_agent_tools)),
             inspector_prompts_text=self._render_prompt_summary({"prompt_sources": list(prompt_sources)}, active_profile),
-            profile_list_names=current_agent_profiles,
+            profile_list_names=all_profile_names,
             profile_list_labels=profile_list_labels,
-            context_preview_text=self._render_context_preview(),
             run_preview_text=self._render_run_preview(status),
         )
 
@@ -979,36 +1438,21 @@ class PocketCodeTextualApp(App[None]):
             self.screen.remove_class(class_name)
         self.screen.add_class(f"theme-{theme_name}")
 
-    def _apply_panel_visibility(self, *, left_visible: bool, right_visible: bool) -> None:
-        self.query_one("#left-panel", VerticalScroll).display = left_visible
+    def _apply_panel_visibility(self, *, right_visible: bool) -> None:
         self.query_one("#right-panel", VerticalScroll).display = right_visible
 
     def _apply_view_state(self, view_name: str, view_title_text: str) -> None:
         self.query_one("#view-switcher", ContentSwitcher).current = f"view-{view_name}"
-        self._set_static_text(self.query_one("#view-title", Static), view_title_text)
-        for button_id, target_view in {
-            "#view-chat-button": "chat",
-            "#view-control-button": "control",
-            "#view-profiles-button": "profiles",
-            "#view-context-button": "context",
-            "#view-run-button": "run",
-        }.items():
-            button = self.query_one(button_id, Button)
-            button.variant = "primary" if target_view == view_name else "default"
+        title_widget = self.query_one("#view-title", Static)
+        title_widget.display = bool(view_title_text)
+        self._set_static_text(title_widget, view_title_text)
 
     def _apply_ui_state(self, state: TextualUIState) -> None:
         previous = self._ui_state
         if previous is None or previous.theme_name != state.theme_name:
             self._apply_theme_name(state.theme_name)
-        if (
-            previous is None
-            or previous.left_panel_visible != state.left_panel_visible
-            or previous.right_panel_visible != state.right_panel_visible
-        ):
-            self._apply_panel_visibility(
-                left_visible=state.left_panel_visible,
-                right_visible=state.right_panel_visible,
-            )
+        if previous is None or previous.right_panel_visible != state.right_panel_visible:
+            self._apply_panel_visibility(right_visible=state.right_panel_visible)
         if (
             previous is None
             or previous.current_view != state.current_view
@@ -1016,10 +1460,9 @@ class PocketCodeTextualApp(App[None]):
         ):
             self._apply_view_state(state.current_view, state.view_title_text)
 
-        self.query_one("#header-details", Vertical).display = state.header_details_visible
-        self.query_one("#toggle-header-button", Button).label = state.header_toggle_label
         self._set_static_text(self.query_one("#status", Static), state.status_text)
-        self._set_static_text(self.query_one("#stats", Static), state.stats_text)
+        self._set_static_text(self.query_one("#header-agent", Static), state.header_agent_text)
+        self._set_static_text(self.query_one("#header-llm", Static), state.header_llm_text)
 
         self._syncing_controls = True
         try:
@@ -1032,11 +1475,6 @@ class PocketCodeTextualApp(App[None]):
                 self.query_one("#theme-select", Select),
                 state.theme_select.options,
                 state.theme_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#agent-select", Select),
-                state.agent_select.options,
-                state.agent_select.value,
             )
             self._set_select_options(
                 self.query_one("#profile-select", Select),
@@ -1054,61 +1492,16 @@ class PocketCodeTextualApp(App[None]):
                 state.session_confirm_select.value,
             )
             self.query_one("#auto-confirm-switch", Switch).value = state.auto_confirm_tools
-            self._set_select_options(
-                self.query_one("#profile-llm-select", Select),
-                state.profile_llm_select.options,
-                state.profile_llm_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#profile-confirm-select", Select),
-                state.profile_confirm_select.options,
-                state.profile_confirm_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#profile-policy-tool-select", Select),
-                state.profile_policy_tool_select.options,
-                state.profile_policy_tool_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#profile-tool-policy-select", Select),
-                state.profile_policy_value_select.options,
-                state.profile_policy_value_select.value,
-            )
-            profile_all_tools = self.query_one("#profile-all-tools-switch", Switch)
-            profile_all_tools.value = state.profile_allow_all_tools
         finally:
             self._syncing_controls = False
 
-        self._set_static_text(self.query_one("#profile-editor-hint", Static), state.profile_editor_hint)
-        self.query_one("#clone-profile-name", Input).disabled = state.clone_disabled
-        self.query_one("#clone-profile-button", Button).disabled = state.clone_disabled
-        self.query_one("#profile-llm-select", Select).disabled = state.save_profile_disabled
-        self.query_one("#profile-confirm-select", Select).disabled = state.save_profile_disabled
-        self.query_one("#profile-all-tools-switch", Switch).disabled = state.profile_allow_all_tools_disabled
-        self._set_selection_list_options(
-            self.query_one("#profile-tool-list", SelectionList),
-            state.profile_tool_options,
-        )
-        self.query_one("#profile-tool-list", SelectionList).disabled = state.profile_tool_list_disabled
-        self.query_one("#profile-policy-tool-select", Select).disabled = state.save_profile_disabled
-        self.query_one("#profile-tool-policy-select", Select).disabled = (
-            state.save_profile_disabled or state.profile_policy_tool_select.value == NO_TOOL
-        )
-        self._set_text_area_text(
-            self.query_one("#profile-policy-summary", TextArea),
-            state.profile_policy_summary_text,
-        )
-        self._set_text_area_text(self.query_one("#profile-prompts", TextArea), state.profile_prompts_text)
-        self.query_one("#profile-prompts", TextArea).disabled = state.profile_prompts_disabled
-        self.query_one("#save-profile-button", Button).disabled = state.save_profile_disabled
-
         self._profile_list_names = list(state.profile_list_names)
         self._set_option_list_labels(self.query_one("#profile-list", OptionList), state.profile_list_labels)
+        self._set_selection_list_options(self.query_one("#skill-list", SelectionList), state.skill_list_options)
         self._set_static_text(self.query_one("#inspector-summary", Static), state.inspector_summary_text)
         self._set_text_area_text(self.query_one("#inspector-context", TextArea), state.inspector_context_text)
         self._set_text_area_text(self.query_one("#inspector-tools", TextArea), state.inspector_tools_text)
         self._set_text_area_text(self.query_one("#inspector-prompts", TextArea), state.inspector_prompts_text)
-        self._set_text_area_text(self.query_one("#context-preview", TextArea), state.context_preview_text)
         self._set_text_area_text(self.query_one("#run-preview", TextArea), state.run_preview_text)
 
         self._ui_state = state
@@ -1158,7 +1551,6 @@ class PocketCodeTextualApp(App[None]):
         if config is None:
             return
         self._workspace_mode = mode_name
-        self._show_left_panel = bool(config["left"])
         self._show_right_panel = bool(config["right"])
         self._current_view = str(config["view"])
         if announce:
@@ -1242,11 +1634,15 @@ class PocketCodeTextualApp(App[None]):
         lines: list[str] = []
         if allowed is None:
             lines.append("Tool scope: unrestricted")
+            visible_tools = tool_names
         else:
             lines.append("Tool scope: profile allowlist")
-        for tool_name in tool_names:
-            marker = "[x]" if allowed is None or tool_name in allowed else "[ ]"
-            lines.append(f"{marker} {tool_name}")
+            visible_tools = [tool_name for tool_name in tool_names if tool_name in allowed]
+        if not visible_tools:
+            lines.append("(no tools selected)")
+            return "\n".join(lines)
+        for tool_name in visible_tools:
+            lines.append(f"[x] {tool_name}")
         return "\n".join(lines)
 
     def _render_prompt_summary(self, agent_meta: Dict[str, Any], active_profile: Any) -> str:
@@ -1262,6 +1658,59 @@ class PocketCodeTextualApp(App[None]):
         if not lines:
             return "No prompt sources registered."
         return "\n".join(lines)
+
+    def _skill_group_value(self, group_name: str) -> str:
+        return f"{SKILL_GROUP_PREFIX}{group_name}"
+
+    def _is_skill_group_value(self, value: str) -> bool:
+        return str(value).startswith(SKILL_GROUP_PREFIX)
+
+    def _skill_group_members(self, skill_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
+        grouped: dict[str, list[str]] = {}
+        for skill_name in sorted({str(name) for name in skill_names}):
+            grouped.setdefault(_skill_group_name(skill_name), []).append(skill_name)
+        return {
+            group_name: tuple(grouped[group_name])
+            for group_name in sorted(grouped)
+        }
+
+    def _tool_group_members(self, tool_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
+        grouped: dict[str, list[str]] = {}
+        for tool_name in sorted({str(name) for name in tool_names}):
+            grouped.setdefault(_tool_group_name(tool_name), []).append(tool_name)
+        return {
+            group_name: tuple(grouped[group_name])
+            for group_name in sorted(grouped)
+        }
+
+    def _active_skill_name_set(self) -> set[str]:
+        return {
+            str(getattr(skill, "name", skill))
+            for skill in (
+                self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else []
+            )
+        }
+
+    def _render_skill_options(self, status: Dict[str, Any]) -> tuple[tuple[str, str, bool], ...]:
+        available_skills = tuple(str(name) for name in status.get("available_skills", []) or [])
+        active_skill_names = self._active_skill_name_set()
+        if not available_skills:
+            return (("No skills available", LOADING_OPTION, False),)
+        grouped_skills = self._skill_group_members(available_skills)
+        options: list[tuple[str, str, bool]] = []
+        for group_name, member_values in grouped_skills.items():
+            options.append(
+                (
+                    f"Group: {group_name} ({len(member_values)})",
+                    self._skill_group_value(group_name),
+                    bool(member_values) and all(member_value in active_skill_names for member_value in member_values),
+                )
+            )
+            options.extend(
+                (f"  {skill_name}", skill_name, skill_name in active_skill_names)
+                for skill_name in member_values
+            )
+        return tuple(options)
 
     def _set_select_options(
         self,
@@ -1326,6 +1775,7 @@ class PocketCodeTextualApp(App[None]):
         widget.clear_options()
         if option_tuple:
             widget.add_options(option_tuple)
+        widget.disabled = len(option_tuple) == 1 and option_tuple[0][1] == LOADING_OPTION
         self._selection_list_state_cache[cache_key] = option_tuple
 
     def _sync_ui_from_engine(self) -> None:
@@ -1333,9 +1783,8 @@ class PocketCodeTextualApp(App[None]):
 
     def _set_main_input_placeholder(self, prompt: str | None = None) -> None:
         input_widget = self.query_one("#main-input", Input)
-        input_widget.placeholder = prompt or (
-            "Type a request or /command. F1..F5=view F7/F8 next agent profile/LLM "
-            "F9/F10=panels F11=header"
+        input_widget.placeholder = (
+            prompt or "Type a request or /command. F1 chat F2 control F3 edit F4 clone F5 run F6 select"
         )
 
     def _profile_cycle(self) -> list[str]:
@@ -1423,36 +1872,674 @@ class PocketCodeTextualApp(App[None]):
     def _format_runtime_event(self, event: Dict[str, Any]) -> str:
         return format_runtime_event(event)
 
-    def _sync_profile_policy_controls(self) -> None:
-        selected_tool = str(self.query_one("#profile-policy-tool-select", Select).value)
-        selected_policy = (
-            self._draft_profile_tool_overrides.get(selected_tool, INHERIT_POLICY)
-            if selected_tool != NO_TOOL
-            else INHERIT_POLICY
+    def _show_picker(
+        self,
+        *,
+        title: str,
+        options: Iterable[PickerOption],
+        current_value: str | None,
+        on_select: Callable[[str], None],
+        help_text: str = "Use arrows to move, Enter to select, Esc to close.",
+        empty_message: str = "No matching options.",
+    ) -> None:
+        option_list = tuple(options)
+        if not option_list:
+            self._write_error(f"No options available for {title.lower()}.")
+            return
+
+        def _handle_selection(selected_value: str | None) -> None:
+            if selected_value is None:
+                return
+            try:
+                on_select(selected_value)
+            except Exception as exc:
+                self._write_error(str(exc))
+            finally:
+                self._sync_ui_from_engine()
+
+        self.push_screen(
+            AssetPickerScreen(
+                title=title,
+                options=option_list,
+                current_value=current_value,
+                help_text=help_text,
+                empty_message=empty_message,
+            ),
+            callback=_handle_selection,
         )
-        self._syncing_controls = True
-        try:
-            self.query_one("#profile-tool-policy-select", Select).value = selected_policy
-        finally:
-            self._syncing_controls = False
-        self.query_one("#profile-tool-policy-select", Select).disabled = (
-            self.query_one("#save-profile-button", Button).disabled or selected_tool == NO_TOOL
+
+    def _asset_category_options(self) -> tuple[PickerOption, ...]:
+        active_profile = self._engine.active_agent_profile
+        session_default = self._engine.session_confirmation_overrides.get("default_policy") or "inherit"
+        active_skill_names = tuple(
+            str(getattr(skill, "name", skill))
+            for skill in (
+                self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else []
+            )
         )
-        self._set_text_area_text(
-            self.query_one("#profile-policy-summary", TextArea),
-            self._render_profile_policy_summary(self._draft_profile_tool_overrides),
+        available_skill_count = len(self._engine.list_skills()) if hasattr(self._engine, "list_skills") else 0
+        return (
+            PickerOption(
+                value="profile",
+                label=f"Agent: {active_profile.name if active_profile else 'none'}",
+                description="Switch the active agent profile",
+                search_text="agent profile active",
+            ),
+            PickerOption(
+                value="llm",
+                label=f"LLM: {self._engine.global_llm_override or 'inherit'}",
+                description="Set the global LLM override",
+                search_text="llm model profile override",
+            ),
+            PickerOption(
+                value="skills",
+                label=(
+                    f"Skills: {', '.join(active_skill_names)}"
+                    if active_skill_names
+                    else f"Skills: none ({available_skill_count} available)"
+                ),
+                description="Enable or disable runtime skills",
+                search_text="skills capability packs selection",
+            ),
+            PickerOption(
+                value="tools",
+                label=f"Tools: {active_profile.name if active_profile else 'none'}",
+                description="Edit the active agent tool allowlist",
+                search_text="tools allowlist selection groups",
+            ),
+            PickerOption(
+                value="tool_policies",
+                label=f"Tool Policies: {active_profile.name if active_profile else 'none'}",
+                description="Edit per-tool confirmation overrides",
+                search_text="tool policy confirmation overrides",
+            ),
+            PickerOption(
+                value="session_confirm",
+                label=f"Session confirmation: {session_default}",
+                description="Set the default session confirmation policy",
+                search_text="session confirm tool policy",
+            ),
+            PickerOption(
+                value="system_settings",
+                label="System Settings",
+                description="Theme, workspace mode, and default agent/LLM saved to pocketcode.yml",
+                search_text="system settings theme workspace mode default agent llm config save",
+            ),
         )
+
+    def _open_profile_picker(self) -> None:
+        profile_names = tuple(dict.fromkeys(self._profile_cycle()))
+        active_profile = self._engine.active_agent_profile
+        options: list[PickerOption] = []
+        for profile_name in profile_names:
+            profile = None
+            try:
+                if hasattr(self._engine, "get_agent"):
+                    profile = self._engine.get_agent(profile_name)
+                elif hasattr(self._engine, "get_agent_profile"):
+                    profile = self._engine.get_agent_profile(profile_name)
+            except Exception:
+                profile = None
+            description_parts = [
+                str(getattr(profile, "agent", "") or ""),
+                str(getattr(profile, "source", "") or ""),
+            ]
+            description = " | ".join(part for part in description_parts if part)
+            options.append(
+                PickerOption(
+                    profile_name,
+                    profile_name,
+                    description=description,
+                    search_text=getattr(profile, "agent", "") if profile is not None else "",
+                )
+            )
+        self._show_picker(
+            title="Select Active Agent Profile",
+            options=options,
+            current_value=active_profile.name if active_profile is not None else None,
+            on_select=self._apply_profile_selection,
+            help_text="Choose the active agent profile.",
+            empty_message="No agent profiles are available.",
+        )
+
+    def _open_llm_picker(self) -> None:
+        self._show_picker(
+            title="Select Global LLM Override",
+            options=(PickerOption(NO_LLM, "Inherit", "Use the engine default"),)
+            + tuple(PickerOption(name, name) for name in self._engine.list_llm_profiles()),
+            current_value=self._engine.global_llm_override or NO_LLM,
+            on_select=self._apply_llm_selection,
+            help_text="Choose the active runtime LLM override. Inherit falls back to the default resolution chain.",
+            empty_message="No LLM profiles are available.",
+        )
+
+    def _open_workspace_mode_picker(self) -> None:
+        self._show_picker(
+            title="Select Workspace Mode",
+            options=tuple(
+                PickerOption(mode_name, config["label"], f"View: {config['view']}")
+                for mode_name, config in WORKSPACE_MODES.items()
+            ),
+            current_value=self._workspace_mode,
+            on_select=self._apply_workspace_mode_selection,
+            help_text="Choose a layout preset for the Textual workspace.",
+        )
+
+    def _open_theme_picker(self) -> None:
+        self._show_picker(
+            title="Select Theme",
+            options=tuple(PickerOption(theme_name, theme_label) for theme_name, theme_label in THEME_OPTIONS.items()),
+            current_value=self._theme_name,
+            on_select=self._apply_theme_selection,
+            help_text="Choose a theme preset for the Textual workspace.",
+        )
+
+    def _open_session_confirmation_picker(self) -> None:
+        current_value = self._engine.session_confirmation_overrides.get("default_policy") or INHERIT_POLICY
+        self._show_picker(
+            title="Select Session Confirmation Default",
+            options=(
+                PickerOption(INHERIT_POLICY, "Inherit", "Use config or agent defaults"),
+                PickerOption("allow", "Allow"),
+                PickerOption("confirm", "Confirm"),
+                PickerOption("deny", "Deny"),
+            ),
+            current_value=current_value,
+            on_select=self._apply_session_confirmation_selection,
+            help_text="Choose the default confirmation policy for tools in this session.",
+        )
+
+    def _open_asset_picker(self) -> None:
+        self._show_picker(
+            title="Select",
+            options=self._asset_category_options(),
+            current_value=None,
+            on_select=self._handle_asset_picker_selection,
+            help_text="Choose what to change, then select its active value.",
+        )
+
+    def _handle_asset_picker_selection(self, selected_value: str) -> None:
+        openers = {
+            "profile": self._open_profile_picker,
+            "llm": self._open_llm_picker,
+            "skills": self._open_skill_selection_picker,
+            "tools": self._open_tool_selection_picker,
+            "tool_policies": self._open_tool_policy_editor,
+            "session_confirm": self._open_session_confirmation_picker,
+            "system_settings": self._open_system_settings_screen,
+        }
+        opener = openers.get(selected_value)
+        if opener is None:
+            self._write_error(f"Unsupported asset picker target: {selected_value}")
+            return
+        self.call_after_refresh(opener)
+
+    def _apply_profile_selection(self, selected_value: str) -> None:
+        active_profile = self._engine.active_agent_profile
+        if active_profile is not None and active_profile.name == selected_value:
+            return
+        self._engine.set_active_agent_profile(selected_value)
+        self._write_info(f"Activated agent profile: {selected_value}")
+
+    def _apply_llm_selection(self, selected_value: str) -> None:
+        target_llm = None if selected_value == NO_LLM else selected_value
+        if target_llm == self._engine.global_llm_override:
+            return
+        self._engine.set_global_llm_override(target_llm)
+        self._write_info(f"Global LLM override: {self._engine.global_llm_override or 'inherit'}")
+
+    def _apply_workspace_mode_selection(self, selected_value: str) -> None:
+        self._apply_workspace_mode(selected_value, announce=True)
+
+    def _apply_theme_selection(self, selected_value: str) -> None:
+        if selected_value == self._theme_name:
+            return
+        self._theme_name = selected_value
+        self._write_info(f"Theme preset: {THEME_OPTIONS.get(selected_value, selected_value)}.")
+
+    def _apply_session_confirmation_selection(self, selected_value: str) -> None:
+        target_default = None if selected_value == INHERIT_POLICY else selected_value
+        current_default = self._engine.session_confirmation_overrides.get("default_policy")
+        if target_default == current_default:
+            return
+        self._engine.set_session_confirmation_default(target_default)
+        self._write_info(
+            f"Session confirmation default: "
+            f"{self._engine.session_confirmation_overrides.get('default_policy') or 'inherit'}"
+        )
+
+    def _open_system_settings_screen(self) -> None:
+        settings = (
+            self._engine.get_system_settings()
+            if hasattr(self._engine, "get_system_settings")
+            else {
+                "theme_name": self._theme_name,
+                "workspace_mode": self._workspace_mode,
+                "default_agent": None,
+                "default_llm_profile": None,
+            }
+        )
+
+        def _handle_submit(payload: dict[str, str | None] | None) -> None:
+            if payload is None:
+                return
+            try:
+                self._apply_system_settings(payload)
+            except Exception as exc:
+                self._write_error(str(exc))
+            finally:
+                self._sync_ui_from_engine()
+
+        self.push_screen(
+            SystemSettingsScreen(
+                theme_name=str(settings.get("theme_name") or self._theme_name),
+                workspace_mode=str(settings.get("workspace_mode") or self._workspace_mode),
+                default_agent=str(settings.get("default_agent")) if settings.get("default_agent") else None,
+                default_llm_profile=(
+                    str(settings.get("default_llm_profile")) if settings.get("default_llm_profile") else None
+                ),
+                available_agents=self._engine.list_agents(),
+                available_llm_profiles=self._engine.list_llm_profiles(),
+            ),
+            callback=_handle_submit,
+        )
+
+    def _apply_system_settings(self, payload: dict[str, str | None]) -> None:
+        theme_name = str(payload.get("theme_name") or self._theme_name)
+        workspace_mode = str(payload.get("workspace_mode") or self._workspace_mode)
+        default_agent = str(payload.get("default_agent")) if payload.get("default_agent") else None
+        default_llm_profile = (
+            str(payload.get("default_llm_profile"))
+            if payload.get("default_llm_profile")
+            else None
+        )
+
+        if not hasattr(self._engine, "save_system_settings"):
+            raise ValueError("This runtime does not support saving system settings.")
+
+        config_path = self._engine.save_system_settings(
+            theme_name=theme_name,
+            workspace_mode=workspace_mode,
+            default_agent=default_agent,
+            default_llm_profile=default_llm_profile,
+        )
+        self._theme_name = theme_name
+        self._apply_workspace_mode(workspace_mode, announce=False)
+        if default_agent:
+            self._engine.set_agent(default_agent)
+        self._refresh_suggestions()
+        self._write_info(f"Applied system settings and saved to {config_path}.")
+
+    def _active_profile_policy_overrides(self, active_profile: Any) -> dict[str, str]:
+        if not active_profile or not isinstance(active_profile.tool_confirmation, dict):
+            return {}
+        raw_overrides = active_profile.tool_confirmation.get("overrides", {})
+        if not isinstance(raw_overrides, dict):
+            return {}
+        return {
+            str(tool_name): str(policy)
+            for tool_name, policy in raw_overrides.items()
+            if policy is not None
+        }
+
+    def _active_profile_default_confirmation(self, active_profile: Any) -> str | None:
+        if not active_profile or not isinstance(active_profile.tool_confirmation, dict):
+            return None
+        value = active_profile.tool_confirmation.get("default")
+        return str(value) if value else None
+
+    def _suggest_workspace_agent_name(self, source_name: str) -> str:
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(source_name)).strip("-._")
+        return f"{slug or 'agent'}-workspace"
+
+    def _ensure_workspace_agent_profile(
+        self,
+        *,
+        action_label: str,
+        on_ready: Callable[[str], None],
+    ) -> None:
+        active_profile = self._engine.active_agent_profile
+        if active_profile is None:
+            self._write_error("No active agent selected.")
+            return
+        if active_profile.source == "workspace":
+            on_ready(active_profile.name)
+            return
+        self._open_name_prompt(
+            title=f"Clone Agent Before {action_label.title()}",
+            placeholder=self._suggest_workspace_agent_name(active_profile.name),
+            help_text="This agent has no workspace YAML yet. Enter the workspace name / filename to clone it first.",
+            on_submit=lambda value: self._clone_agent_for_edit(
+                active_profile.name,
+                value,
+                action_label=action_label,
+                on_ready=on_ready,
+            ),
+        )
+
+    def _clone_agent_for_edit(
+        self,
+        source_name: str,
+        new_name: str,
+        *,
+        action_label: str,
+        on_ready: Callable[[str], None],
+    ) -> None:
+        cloner = getattr(self._engine, "clone_agent", None) or getattr(self._engine, "clone_agent_profile")
+        cloned = cloner(source_name, new_name)
+        self._engine.set_active_agent_profile(new_name)
+        self._refresh_suggestions()
+        target_path = getattr(cloned, "source_path", None)
+        if target_path:
+            self._write_info(f"Cloned agent '{source_name}' to {target_path} for {action_label}.")
+        else:
+            self._write_info(f"Cloned agent '{source_name}' to workspace agent '{new_name}' for {action_label}.")
+        self.call_after_refresh(lambda: on_ready(new_name))
+
+    def _save_workspace_agent_profile(
+        self,
+        profile_name: str,
+        *,
+        llm_profile: str | None,
+        tools: list[str] | None,
+        extra_prompts: list[str],
+        tool_confirmation_default: str | None,
+        tool_confirmation_overrides: dict[str, str],
+    ) -> None:
+        updater = getattr(self._engine, "update_agent", None) or getattr(self._engine, "update_agent_profile")
+        updater(
+            profile_name,
+            llm_profile=llm_profile,
+            tools=tools,
+            extra_prompts=extra_prompts,
+            tool_confirmation_default=tool_confirmation_default,
+            tool_confirmation_overrides=tool_confirmation_overrides,
+        )
+        self._refresh_suggestions()
+        self._sync_ui_from_engine()
+
+    def _edit_category_options(self) -> tuple[PickerOption, ...]:
+        active_profile = self._engine.active_agent_profile
+        llm_profile = self._current_llm_profile_name()
+        return (
+            PickerOption(
+                "agent",
+                f"Agent Config: {active_profile.name if active_profile else 'none'}",
+                description="Edit active agent llm, prompts, and default confirmation",
+                search_text="agent config llm prompts confirmation",
+            ),
+            PickerOption(
+                "llm",
+                f"LLM Config: {llm_profile or 'none'}",
+                description="Edit the current LLM profile config",
+                search_text="llm config provider model parameters",
+            ),
+            PickerOption(
+                "tools",
+                f"Tool Selection: {active_profile.name if active_profile else 'none'}",
+                description="Edit the active agent tool allowlist",
+                search_text="tool selection allowlist",
+            ),
+            PickerOption(
+                "tool_policies",
+                f"Tool Policies: {active_profile.name if active_profile else 'none'}",
+                description="Edit per-tool confirmation overrides",
+                search_text="tool policies overrides confirmation",
+            ),
+        )
+
+    def _clone_category_options(self) -> tuple[PickerOption, ...]:
+        active_profile = self._engine.active_agent_profile
+        llm_profile = self._current_llm_profile_name()
+        return (
+            PickerOption(
+                "agent",
+                f"Agent Config: {active_profile.name if active_profile else 'none'}",
+                description="Clone the active agent profile into the workspace",
+                search_text="clone agent profile workspace",
+            ),
+            PickerOption(
+                "llm",
+                f"LLM Config: {llm_profile or 'none'}",
+                description="Clone the current LLM profile into the workspace",
+                search_text="clone llm profile workspace",
+            ),
+        )
+
+    def _open_edit_asset_picker(self) -> None:
+        self._show_picker(
+            title="Edit Asset",
+            options=self._edit_category_options(),
+            current_value=None,
+            on_select=self._handle_edit_asset_selection,
+            help_text="Choose which config asset to edit.",
+        )
+
+    def _open_clone_asset_picker(self) -> None:
+        self._show_picker(
+            title="Clone Asset",
+            options=self._clone_category_options(),
+            current_value=None,
+            on_select=self._handle_clone_asset_selection,
+            help_text="Choose which config asset to clone.",
+        )
+
+    def _open_name_prompt(
+        self,
+        *,
+        title: str,
+        placeholder: str,
+        help_text: str,
+        on_submit: Callable[[str], None],
+    ) -> None:
+        def _handle_submit(value: str | None) -> None:
+            if value is None:
+                return
+            try:
+                on_submit(value)
+            except Exception as exc:
+                self._write_error(str(exc))
+            finally:
+                self._sync_ui_from_engine()
+
+        self.push_screen(
+            NameInputScreen(title=title, placeholder=placeholder, help_text=help_text),
+            callback=_handle_submit,
+        )
+
+    def _open_text_editor(
+        self,
+        *,
+        title: str,
+        help_text: str,
+        initial_text: str,
+        on_submit: Callable[[str], None],
+    ) -> None:
+        def _handle_submit(text: str | None) -> None:
+            if text is None:
+                return
+            try:
+                on_submit(text)
+            except Exception as exc:
+                self._write_error(str(exc))
+            finally:
+                self._sync_ui_from_engine()
+
+        self.push_screen(
+            TextEditorScreen(title=title, help_text=help_text, initial_text=initial_text),
+            callback=_handle_submit,
+        )
+
+    def _handle_edit_asset_selection(self, selected_value: str) -> None:
+        openers = {
+            "agent": self._open_agent_editor,
+            "llm": self._open_llm_profile_editor,
+            "tools": self._open_tool_selection_picker,
+            "tool_policies": self._open_tool_policy_editor,
+        }
+        opener = openers.get(selected_value)
+        if opener is None:
+            self._write_error(f"Unsupported edit target: {selected_value}")
+            return
+        self.call_after_refresh(opener)
+
+    def _handle_clone_asset_selection(self, selected_value: str) -> None:
+        placeholder = "new-name"
+        if selected_value == "agent":
+            placeholder = "my-agent-safe"
+        elif selected_value == "llm":
+            placeholder = "my-llm-profile"
+        self._open_name_prompt(
+            title=f"Clone {selected_value.replace('_', ' ').title()}",
+            placeholder=placeholder,
+            help_text="Enter the new workspace name / filename.",
+            on_submit=lambda value: self._clone_selected_asset(selected_value, value),
+        )
+
+    def _open_agent_editor(self, profile_name: str | None = None) -> None:
+        if profile_name is None:
+            self._ensure_workspace_agent_profile(
+                action_label="editing agent settings",
+                on_ready=self._open_agent_editor,
+            )
+            return
+        active_profile = self._engine.get_agent_profile(profile_name)
+        if active_profile is None:
+            return
+        payload = {
+            "llm_profile": active_profile.llm_profile,
+            "extra_prompts": list(active_profile.extra_prompts),
+            "tool_confirmation_default": self._active_profile_default_confirmation(active_profile),
+        }
+        self._open_text_editor(
+            title=f"Edit Agent Config: {profile_name}",
+            help_text="Edit llm_profile, extra_prompts, and tool_confirmation_default as YAML. Ctrl+S saves.",
+            initial_text=_dump_yaml_text(payload),
+            on_submit=lambda text: self._apply_agent_yaml_edit(profile_name, text),
+        )
+
+    def _apply_agent_yaml_edit(self, profile_name: str, text: str) -> None:
+        active_profile = self._engine.get_agent_profile(profile_name)
+        if active_profile is None:
+            raise ValueError(f"Unknown agent profile '{profile_name}'.")
+
+        data = _load_yaml_mapping(text, label="Agent config")
+        allowed_keys = {"llm_profile", "extra_prompts", "tool_confirmation_default"}
+        unexpected = sorted(set(data) - allowed_keys)
+        if unexpected:
+            raise ValueError(f"Unsupported agent config keys: {', '.join(unexpected)}")
+
+        llm_value = data.get("llm_profile", active_profile.llm_profile)
+        llm_profile = str(llm_value).strip() if llm_value not in {None, ""} else None
+
+        prompts_value = data.get("extra_prompts", list(active_profile.extra_prompts))
+        if prompts_value is None:
+            extra_prompts: list[str] = []
+        elif isinstance(prompts_value, list):
+            extra_prompts = [str(item).strip() for item in prompts_value if str(item).strip()]
+        else:
+            raise ValueError("Agent config 'extra_prompts' must be a list.")
+
+        default_value = data.get(
+            "tool_confirmation_default",
+            self._active_profile_default_confirmation(active_profile),
+        )
+        if default_value in {None, "", "inherit", INHERIT_POLICY}:
+            tool_confirmation_default = None
+        else:
+            tool_confirmation_default = str(default_value).strip()
+            if tool_confirmation_default not in {"allow", "confirm", "deny"}:
+                raise ValueError("tool_confirmation_default must be allow, confirm, deny, or null.")
+
+        tools = list(active_profile.tools) if active_profile.tools is not None else None
+        overrides = self._active_profile_policy_overrides(active_profile)
+        self._save_workspace_agent_profile(
+            profile_name,
+            llm_profile=llm_profile,
+            tools=tools,
+            extra_prompts=extra_prompts,
+            tool_confirmation_default=tool_confirmation_default,
+            tool_confirmation_overrides=overrides,
+        )
+        self._write_info(f"Saved workspace agent '{profile_name}'.")
+
+    def _open_llm_profile_editor(self) -> None:
+        profile_name = self._current_llm_profile_name()
+        if not profile_name:
+            self._write_error("No active LLM profile available to edit.")
+            return
+        profile = getattr(self._engine, "get_llm_profile", lambda name=None: None)(profile_name)
+        if profile is None:
+            self._write_error(f"Unknown LLM profile '{profile_name}'.")
+            return
+        if profile.get("source") != "workspace":
+            self._write_error(f"LLM profile '{profile_name}' must be cloned to the workspace before editing.")
+            return
+        self._open_text_editor(
+            title=f"Edit LLM Config: {profile_name}",
+            help_text="Edit provider, model, and parameters as YAML. Ctrl+S saves.",
+            initial_text=_dump_yaml_text(profile.get("config", {})),
+            on_submit=lambda text: self._apply_llm_yaml_edit(profile_name, text),
+        )
+
+    def _apply_llm_yaml_edit(self, profile_name: str, text: str) -> None:
+        if not hasattr(self._engine, "update_llm_profile"):
+            raise ValueError("This runtime does not support editing LLM profiles.")
+        data = _load_yaml_mapping(text, label="LLM config")
+        self._engine.update_llm_profile(profile_name, profile_config=data)
+        self._refresh_suggestions()
+        self._write_info(f"Saved workspace LLM profile '{profile_name}'.")
+
+    def _open_tool_policy_editor(self, profile_name: str | None = None) -> None:
+        if profile_name is None:
+            self._ensure_workspace_agent_profile(
+                action_label="editing tool policies",
+                on_ready=self._open_tool_policy_editor,
+            )
+            return
+        active_profile = self._engine.get_agent_profile(profile_name)
+        if active_profile is None:
+            return
+        overrides = self._active_profile_policy_overrides(active_profile)
+        initial_text = _dump_yaml_text(overrides) if overrides else "{}"
+        self._open_text_editor(
+            title=f"Edit Tool Policies: {profile_name}",
+            help_text="Map tool names to allow, confirm, or deny. Use {} to clear overrides. Ctrl+S saves.",
+            initial_text=initial_text,
+            on_submit=lambda text: self._apply_tool_policy_yaml_edit(profile_name, text),
+        )
+
+    def _apply_tool_policy_yaml_edit(self, profile_name: str, text: str) -> None:
+        active_profile = self._engine.get_agent_profile(profile_name)
+        if active_profile is None:
+            raise ValueError(f"Unknown agent profile '{profile_name}'.")
+
+        data = _load_yaml_mapping(text, label="Tool policy overrides")
+        normalized: dict[str, str] = {}
+        for tool_name, policy in data.items():
+            if not str(tool_name).strip():
+                raise ValueError("Tool policy keys must be non-empty strings.")
+            policy_value = str(policy).strip()
+            if policy_value not in {"allow", "confirm", "deny"}:
+                raise ValueError("Tool policy values must be allow, confirm, or deny.")
+            normalized[str(tool_name)] = policy_value
+
+        tools = list(active_profile.tools) if active_profile.tools is not None else None
+        self._save_workspace_agent_profile(
+            profile_name,
+            llm_profile=active_profile.llm_profile,
+            tools=tools,
+            extra_prompts=list(active_profile.extra_prompts),
+            tool_confirmation_default=self._active_profile_default_confirmation(active_profile),
+            tool_confirmation_overrides=normalized,
+        )
+        self._write_info(f"Saved tool confirmation overrides for '{profile_name}'.")
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         widget_id = event.input.id or ""
         if widget_id == "main-input":
             await self._handle_main_input(event.value)
             return
-        if widget_id == "clone-profile-name":
-            self._clone_active_profile()
-            return
-        if widget_id == "context-value-input":
-            self._add_context_item()
 
     async def _handle_main_input(self, raw_text: str) -> None:
         text = raw_text.strip()
@@ -1541,36 +2628,18 @@ class PocketCodeTextualApp(App[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
-        if button_id == "view-chat-button":
-            self.action_view_chat()
-        elif button_id == "view-control-button":
+        if button_id == "view-control-button":
             self.action_view_control()
-        elif button_id == "view-profiles-button":
-            self.action_view_profiles()
-        elif button_id == "view-context-button":
-            self.action_view_context()
         elif button_id == "view-run-button":
             self.action_view_run()
-        elif button_id == "toggle-header-button":
-            self.action_toggle_header()
+        elif button_id in {"edit-asset-button", "edit-asset-button-secondary"}:
+            self.action_edit_asset()
+        elif button_id in {"clone-asset-button", "clone-asset-button-secondary"}:
+            self.action_clone_asset()
         elif button_id == "reload-button":
             self.action_reload_runtime()
-        elif button_id == "goto-profiles-button":
-            self.action_view_profiles()
-        elif button_id == "goto-run-button":
-            self.action_view_run()
-        elif button_id == "clone-profile-button":
-            self._clone_active_profile()
-        elif button_id == "save-profile-button":
-            self._save_active_profile()
-        elif button_id == "context-add-button":
-            self._add_context_item()
-        elif button_id == "context-remove-button":
-            self._remove_context_item()
-        elif button_id == "context-clear-type-button":
-            self._clear_context(selected_only=True)
-        elif button_id == "context-clear-all-button":
-            self._clear_context(selected_only=False)
+        elif button_id == "goto-chat-button":
+            self.action_view_chat()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if self._syncing_controls:
@@ -1585,68 +2654,15 @@ class PocketCodeTextualApp(App[None]):
             return
         try:
             if widget_id == "workspace-mode-select":
-                self._apply_workspace_mode(value, announce=True)
+                self._apply_workspace_mode_selection(value)
             elif widget_id == "theme-select":
-                self._theme_name = value
-                self._write_info(f"Theme preset: {THEME_OPTIONS.get(value, value)}.")
-            if widget_id == "agent-select":
-                target_agent = None if value == AUTO_AGENT else value
-                if target_agent == self._engine.get_current_agent():
-                    return
-                self._engine.set_agent(target_agent)
-                self._write_info(
-                    f"Selected agent: {self._engine.get_current_agent() or 'auto'}"
-                )
+                self._apply_theme_selection(value)
             elif widget_id == "profile-select":
-                if value == DEFAULT_PROFILE:
-                    current_agent = self._engine.get_current_agent()
-                    if current_agent:
-                        self._engine.set_agent(current_agent)
-                        self._write_info(f"Activated default agent for {current_agent}.")
-                else:
-                    active_profile = self._engine.active_agent_profile
-                    if (
-                        active_profile is not None
-                        and active_profile.agent == self._engine.get_current_agent()
-                        and active_profile.name == value
-                    ):
-                        return
-                    self._engine.set_active_agent_profile(value)
-                    self._write_info(f"Activated agent: {value}")
+                self._apply_profile_selection(value)
             elif widget_id == "llm-select":
-                target_llm = None if value == NO_LLM else value
-                if target_llm == self._engine.global_llm_override:
-                    return
-                self._engine.set_global_llm_override(target_llm)
-                self._write_info(
-                    f"Global LLM override: {self._engine.global_llm_override or 'inherit'}"
-                )
+                self._apply_llm_selection(value)
             elif widget_id == "session-confirm-select":
-                target_default = None if value == INHERIT_POLICY else value
-                current_default = self._engine.session_confirmation_overrides.get("default_policy")
-                if target_default == current_default:
-                    return
-                self._engine.set_session_confirmation_default(target_default)
-                self._write_info(
-                    f"Session confirmation default: "
-                    f"{self._engine.session_confirmation_overrides.get('default_policy') or 'inherit'}"
-                )
-            elif widget_id == "profile-policy-tool-select":
-                target_tool = None if value == NO_TOOL else value
-                if target_tool == self._selected_profile_policy_tool:
-                    return
-                self._selected_profile_policy_tool = target_tool
-                self._sync_profile_policy_controls()
-                return
-            elif widget_id == "profile-tool-policy-select":
-                selected_tool = str(self.query_one("#profile-policy-tool-select", Select).value)
-                if selected_tool != NO_TOOL:
-                    if value == INHERIT_POLICY:
-                        self._draft_profile_tool_overrides.pop(selected_tool, None)
-                    else:
-                        self._draft_profile_tool_overrides[selected_tool] = value
-                    self._sync_profile_policy_controls()
-                return
+                self._apply_session_confirmation_selection(value)
             self._sync_ui_from_engine()
         except Exception as exc:
             self._write_error(str(exc))
@@ -1662,26 +2678,6 @@ class PocketCodeTextualApp(App[None]):
             state = "enabled" if event.value else "disabled"
             self._write_info(f"Auto-confirm tools {state}.")
             self._sync_ui_from_engine()
-        elif switch_id == "profile-all-tools-switch":
-            editable = bool(
-                self._engine.active_agent_profile
-                and self._engine.active_agent_profile.source == "workspace"
-            )
-            selection_list = self.query_one("#profile-tool-list", SelectionList)
-            selection_list.disabled = not editable or bool(event.value)
-
-    def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
-        if event.selection_list.id != "profile-tool-list":
-            return
-        if self._syncing_controls:
-            return
-        option_index = getattr(event, "selection_index", getattr(event, "index", None))
-        if option_index is None:
-            return
-        option = event.selection_list.get_option_at_index(option_index)
-        checked = bool(option.value in event.selection_list.selected)
-        state = "allowed" if checked else "blocked"
-        self._write_info(f"Tool {option.value} marked {state} for the active profile draft.")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id != "profile-list":
@@ -1692,150 +2688,228 @@ class PocketCodeTextualApp(App[None]):
         profile_name = self._profile_list_names[option_index]
         try:
             self._engine.set_active_agent_profile(profile_name)
-            self._write_info(f"Activated agent: {profile_name}")
+            self._write_info(f"Activated agent profile: {profile_name}")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
             self._sync_ui_from_engine()
 
-    def _clone_active_profile(self) -> None:
-        active_profile = self._engine.active_agent_profile
-        if active_profile is None:
-            self._write_error("No active agent to clone.")
+    def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
+        if event.selection_list.id != "skill-list" or event.selection_list.disabled:
             return
-
-        new_name = self.query_one("#clone-profile-name", Input).value.strip()
-        if not new_name:
-            self._write_error("Enter a new workspace profile name before cloning.")
+        option_index = getattr(event, "selection_index", getattr(event, "index", None))
+        if option_index is None:
             return
-
+        option = event.selection_list.get_option_at_index(option_index)
+        value = str(option.value)
+        if value == LOADING_OPTION:
+            return
+        skill_groups = self._skill_group_members(self._engine.list_skills()) if hasattr(self._engine, "list_skills") else {}
         try:
+            if self._is_skill_group_value(value):
+                group_name = value[len(SKILL_GROUP_PREFIX):]
+                member_values = skill_groups.get(group_name, ())
+                if value in event.selection_list.selected:
+                    for member_value in member_values:
+                        self._engine.enable_skill(member_value)
+                    self._write_info(
+                        f"Enabled skill group: {group_name} ({len(member_values)} skills)."
+                    )
+                else:
+                    for member_value in member_values:
+                        self._engine.disable_skill(member_value)
+                    self._write_info(
+                        f"Disabled skill group: {group_name} ({len(member_values)} skills)."
+                    )
+            elif value in event.selection_list.selected:
+                self._engine.enable_skill(value)
+                self._write_info(f"Enabled skill: {value}")
+            else:
+                self._engine.disable_skill(value)
+                self._write_info(f"Disabled skill: {value}")
+        except Exception as exc:
+            self._write_error(str(exc))
+        finally:
+            self._refresh_suggestions()
+            self._sync_ui_from_engine()
+
+    def _clone_selected_asset(self, asset_name: str, new_name: str) -> None:
+        active_profile = self._engine.active_agent_profile
+        if asset_name == "agent":
+            if active_profile is None:
+                self._write_error("No active agent to clone.")
+                return
             cloner = getattr(self._engine, "clone_agent", None) or getattr(self._engine, "clone_agent_profile")
             cloned = cloner(active_profile.name, new_name)
             self._engine.set_active_agent_profile(new_name)
-            self._draft_profile_name = None
-            self.query_one("#clone-profile-name", Input).value = ""
             target_path = getattr(cloned, "source_path", None)
             if target_path:
                 self._write_info(f"Cloned active agent to {target_path}.")
             else:
                 self._write_info(f"Cloned active agent to workspace agent '{new_name}'.")
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._refresh_suggestions()
-            self._sync_ui_from_engine()
-
-    def _save_active_profile(self) -> None:
-        active_profile = self._engine.active_agent_profile
-        if active_profile is None:
-            self._write_error("No active agent selected.")
-            return
-        if active_profile.source != "workspace":
-            self._write_error(f"Agent '{active_profile.name}' must be cloned to the workspace before saving edits.")
-            return
-
-        try:
-            tools = None
-            if not self.query_one("#profile-all-tools-switch", Switch).value:
-                tools = sorted(str(value) for value in self.query_one("#profile-tool-list", SelectionList).selected)
-            prompt_lines = [
-                line.strip()
-                for line in self.query_one("#profile-prompts", TextArea).text.splitlines()
-                if line.strip()
-            ]
-            llm_value = str(self.query_one("#profile-llm-select", Select).value)
-            confirm_value = str(self.query_one("#profile-confirm-select", Select).value)
-            updater = getattr(self._engine, "update_agent", None) or getattr(self._engine, "update_agent_profile")
-            updater(
-                active_profile.name,
-                llm_profile=None if llm_value == NO_LLM else llm_value,
-                tools=tools,
-                extra_prompts=prompt_lines,
-                tool_confirmation_default=None if confirm_value == INHERIT_POLICY else confirm_value,
-                tool_confirmation_overrides=dict(self._draft_profile_tool_overrides),
-            )
-            self._draft_profile_name = None
-            self._write_info(f"Saved workspace agent '{active_profile.name}'.")
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._refresh_suggestions()
-            self._sync_ui_from_engine()
-
-    def _add_context_item(self) -> None:
-        context_type = str(self.query_one("#context-type-select", Select).value)
-        name = self.query_one("#context-name-input", Input).value.strip()
-        value = self.query_one("#context-value-input", Input).value.strip()
-        if not value:
-            self._write_error("Enter a context value before adding.")
-            return
-
-        if context_type == "file":
-            self._cli_context["files"].add(value)
-        elif context_type == "folder":
-            self._cli_context["folders"].add(value)
-        elif context_type == "url":
-            self._cli_context["urls"].add(value)
-        elif context_type == "snippet":
-            if not name:
-                self._write_error("Snippets require a name.")
+        elif asset_name == "llm":
+            profile_name = self._current_llm_profile_name()
+            if not profile_name:
+                self._write_error("No active LLM profile to clone.")
                 return
-            self._cli_context["snippets"][name] = value
+            if not hasattr(self._engine, "clone_llm_profile"):
+                self._write_error("This runtime does not support cloning LLM profiles.")
+                return
+            cloned = self._engine.clone_llm_profile(profile_name, new_name)
+            self._engine.set_global_llm_override(new_name)
+            target_path = cloned.get("source_path") if isinstance(cloned, dict) else getattr(cloned, "source_path", None)
+            if target_path:
+                self._write_info(f"Cloned active LLM profile to {target_path}.")
+            else:
+                self._write_info(f"Cloned active LLM profile to workspace profile '{new_name}'.")
         else:
-            self._write_error(f"Unsupported context type: {context_type}")
+            self._write_error(f"Unsupported clone target: {asset_name}")
             return
 
-        self.query_one("#context-name-input", Input).value = ""
-        self.query_one("#context-value-input", Input).value = ""
-        self._write_info(f"Added {context_type} context.")
-        self._refresh_ui()
+        self._refresh_suggestions()
+        self._sync_ui_from_engine()
 
-    def _remove_context_item(self) -> None:
-        context_type = str(self.query_one("#context-type-select", Select).value)
-        name = self.query_one("#context-name-input", Input).value.strip()
-        value = self.query_one("#context-value-input", Input).value.strip()
-        removed = False
-
-        if context_type == "file" and value:
-            removed = value in self._cli_context["files"]
-            self._cli_context["files"].discard(value)
-        elif context_type == "folder" and value:
-            removed = value in self._cli_context["folders"]
-            self._cli_context["folders"].discard(value)
-        elif context_type == "url" and value:
-            removed = value in self._cli_context["urls"]
-            self._cli_context["urls"].discard(value)
-        elif context_type == "snippet" and name:
-            removed = name in self._cli_context["snippets"]
-            self._cli_context["snippets"].pop(name, None)
-        else:
-            self._write_error("Provide the context name/value to remove.")
+    def _open_tool_selection_picker(self, profile_name: str | None = None) -> None:
+        if profile_name is None:
+            self._ensure_workspace_agent_profile(
+                action_label="editing tools",
+                on_ready=self._open_tool_selection_picker,
+            )
             return
+        active_profile = self._engine.get_agent_profile(profile_name)
+        if active_profile is None:
+            return
+        current_agent = str(getattr(active_profile, "agent", "") or self._engine.get_current_agent() or "")
+        available_tools = tuple(self._engine.list_tools_for_agent(current_agent)) if current_agent else ()
+        if not available_tools:
+            self._write_error("No tools are available for the active agent.")
+            return
+        selected_tools = set(available_tools if active_profile.tools is None else active_profile.tools)
+        tool_groups = self._tool_group_members(available_tools)
+        grouped_values = {
+            self._skill_group_value(group_name): member_values
+            for group_name, member_values in tool_groups.items()
+        }
+        picker_options: list[PickerOption] = []
+        initial_selected_values = set(selected_tools)
+        for group_name, member_values in tool_groups.items():
+            group_value = self._skill_group_value(group_name)
+            if member_values and all(member_value in selected_tools for member_value in member_values):
+                initial_selected_values.add(group_value)
+            picker_options.append(
+                PickerOption(
+                    group_value,
+                    f"Group: {group_name}",
+                    description=f"Toggle all {len(member_values)} tools in this group",
+                    search_text=f"{group_name} group {' '.join(member_values)}",
+                )
+            )
+            picker_options.extend(
+                PickerOption(
+                    tool_name,
+                    f"  {tool_name}",
+                    description=f"Group: {group_name}",
+                    search_text=f"{tool_name} {group_name}",
+                )
+                for tool_name in member_values
+            )
 
-        message = "Removed" if removed else "No matching"
-        self._write_info(f"{message} {context_type} context entry.")
-        self._refresh_ui()
+        def _handle_selection(selected_values: list[str] | None) -> None:
+            if selected_values is None:
+                return
+            selected_set = {
+                value
+                for value in selected_values
+                if not self._is_skill_group_value(value)
+            }
+            tools = None if len(selected_set) >= len(available_tools) else sorted(selected_set)
+            self._save_workspace_agent_profile(
+                profile_name,
+                llm_profile=active_profile.llm_profile,
+                tools=tools,
+                extra_prompts=list(active_profile.extra_prompts),
+                tool_confirmation_default=self._active_profile_default_confirmation(active_profile),
+                tool_confirmation_overrides=self._active_profile_policy_overrides(active_profile),
+            )
+            self._write_info(
+                f"Saved tool allowlist for '{profile_name}': "
+                f"{'all tools' if tools is None else f'{len(selected_values)} selected'}."
+            )
 
-    def _clear_context(self, *, selected_only: bool) -> None:
-        if selected_only:
-            context_type = str(self.query_one("#context-type-select", Select).value)
-            if context_type == "file":
-                self._cli_context["files"].clear()
-            elif context_type == "folder":
-                self._cli_context["folders"].clear()
-            elif context_type == "url":
-                self._cli_context["urls"].clear()
-            elif context_type == "snippet":
-                self._cli_context["snippets"].clear()
-            self._write_info(f"Cleared {context_type} context.")
-        else:
-            self._cli_context["files"].clear()
-            self._cli_context["folders"].clear()
-            self._cli_context["urls"].clear()
-            self._cli_context["snippets"].clear()
-            self._write_info("Cleared all context.")
-        self._refresh_ui()
+        self.push_screen(
+            ToolSelectionScreen(
+                title="Edit Allowed Tools",
+                tools=tuple(picker_options),
+                selected_values=initial_selected_values,
+                grouped_values=grouped_values,
+            ),
+            callback=_handle_selection,
+        )
+
+    def _open_skill_selection_picker(self) -> None:
+        available_skills = tuple(self._engine.list_skills()) if hasattr(self._engine, "list_skills") else ()
+        if not available_skills:
+            self._write_error("No skills are available.")
+            return
+        active_skill_names = self._active_skill_name_set()
+        skill_groups = self._skill_group_members(available_skills)
+        grouped_values = {
+            self._skill_group_value(group_name): member_values
+            for group_name, member_values in skill_groups.items()
+        }
+        picker_options: list[PickerOption] = []
+        selected_values = set(active_skill_names)
+        for group_name, member_values in skill_groups.items():
+            group_value = self._skill_group_value(group_name)
+            if member_values and all(member_value in active_skill_names for member_value in member_values):
+                selected_values.add(group_value)
+            picker_options.append(
+                PickerOption(
+                    group_value,
+                    f"Group: {group_name}",
+                    description=f"Toggle all {len(member_values)} skills in this group",
+                    search_text=f"{group_name} group {' '.join(member_values)}",
+                )
+            )
+            picker_options.extend(
+                PickerOption(
+                    skill_name,
+                    f"  {skill_name}",
+                    description=f"Group: {group_name}",
+                    search_text=f"{skill_name} {group_name}",
+                )
+                for skill_name in member_values
+            )
+
+        def _handle_selection(selected_values: list[str] | None) -> None:
+            if selected_values is None:
+                return
+            selected_set = {
+                value
+                for value in selected_values
+                if not self._is_skill_group_value(value)
+            }
+            for skill_name in available_skills:
+                if skill_name in selected_set and skill_name not in active_skill_names:
+                    self._engine.enable_skill(skill_name)
+                elif skill_name not in selected_set and skill_name in active_skill_names:
+                    self._engine.disable_skill(skill_name)
+            self._refresh_suggestions()
+            self._write_info(f"Active skills: {', '.join(sorted(selected_set)) if selected_set else 'none'}.")
+            self._sync_ui_from_engine()
+
+        self.push_screen(
+            ToolSelectionScreen(
+                title="Select Skills",
+                tools=tuple(picker_options),
+                selected_values=selected_values,
+                help_text="Filter skills, toggle with Space, then choose Apply.",
+                empty_message="No matching skills.",
+                filter_placeholder="Filter skills...",
+                grouped_values=grouped_values,
+            ),
+            callback=_handle_selection,
+        )
 
     def action_view_chat(self) -> None:
         self._current_view = "chat"
@@ -1845,119 +2919,24 @@ class PocketCodeTextualApp(App[None]):
         self._current_view = "control"
         self._refresh_ui()
 
-    def action_view_profiles(self) -> None:
-        self._current_view = "profiles"
-        self._refresh_ui()
-
-    def action_view_context(self) -> None:
-        self._current_view = "context"
-        self._refresh_ui()
-
     def action_view_run(self) -> None:
         self._current_view = "run"
         self._refresh_ui()
 
-    def action_toggle_left_panel(self) -> None:
-        self._show_left_panel = not self._show_left_panel
-        self._workspace_mode = "balanced"
-        self._write_info(f"Navigation panel {'shown' if self._show_left_panel else 'hidden'}.")
-        self._refresh_ui()
+    def action_edit_asset(self) -> None:
+        self._open_edit_asset_picker()
+
+    def action_clone_asset(self) -> None:
+        self._open_clone_asset_picker()
+
+    def action_pick_asset(self) -> None:
+        self._open_asset_picker()
 
     def action_toggle_right_panel(self) -> None:
         self._show_right_panel = not self._show_right_panel
         self._workspace_mode = "balanced"
         self._write_info(f"Inspector panel {'shown' if self._show_right_panel else 'hidden'}.")
         self._refresh_ui()
-
-    def action_toggle_header(self) -> None:
-        self._show_header_details = not self._show_header_details
-        state = "shown" if self._show_header_details else "hidden"
-        self._write_info(f"Second header row {state}.")
-        self._refresh_ui()
-
-    def action_next_workspace_mode(self) -> None:
-        mode_names = list(WORKSPACE_MODES.keys())
-        try:
-            idx = mode_names.index(self._workspace_mode)
-        except ValueError:
-            idx = 0
-        next_mode = mode_names[(idx + 1) % len(mode_names)]
-        self._apply_workspace_mode(next_mode, announce=True)
-        self._sync_ui_from_engine()
-
-    def action_next_profile(self) -> None:
-        profiles = self._profile_cycle()
-        if not profiles:
-            self._write_error("No agent profiles are available.")
-            return
-
-        current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
-        next_profile = _cycle_value(profiles, current_profile_name, 1, missing_index=-1)
-
-        try:
-            self._engine.set_active_agent_profile(next_profile)
-            self._write_info(f"Activated agent profile: {next_profile}")
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._sync_ui_from_engine()
-
-    def action_prev_profile(self) -> None:
-        profiles = self._profile_cycle()
-        if not profiles:
-            self._write_error("No agent profiles are available.")
-            return
-
-        current_profile_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
-        prev_profile = _cycle_value(profiles, current_profile_name, -1, missing_index=0)
-
-        try:
-            self._engine.set_active_agent_profile(prev_profile)
-            self._write_info(f"Activated agent profile: {prev_profile}")
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._sync_ui_from_engine()
-
-    def action_next_llm(self) -> None:
-        try:
-            profiles = self._engine.list_llm_profiles()
-            if not profiles:
-                self._write_error("No LLM profiles are available.")
-                return
-
-            current = self._engine.global_llm_override
-            cycle = [None] + profiles
-            next_value = _cycle_value(cycle, current, 1, missing_index=0)
-
-            self._engine.set_global_llm_override(next_value)
-            self._write_info(
-                f"Global LLM override: {next_value if next_value is not None else 'inherit'}"
-            )
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._sync_ui_from_engine()
-
-    def action_prev_llm(self) -> None:
-        try:
-            profiles = self._engine.list_llm_profiles()
-            if not profiles:
-                self._write_error("No LLM profiles are available.")
-                return
-
-            current = self._engine.global_llm_override
-            cycle = [None] + profiles
-            prev_value = _cycle_value(cycle, current, -1, missing_index=0)
-
-            self._engine.set_global_llm_override(prev_value)
-            self._write_info(
-                f"Global LLM override: {prev_value if prev_value is not None else 'inherit'}"
-            )
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._sync_ui_from_engine()
 
     def action_reload_runtime(self) -> None:
         try:

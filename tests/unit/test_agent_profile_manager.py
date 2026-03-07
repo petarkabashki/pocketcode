@@ -145,6 +145,28 @@ class TestPluginDeclaredProfile:
         assert profile.llm_profile == "gemini_fast"
         assert profile.tools == ["tool.read", "tool.write"]
 
+    def test_plugin_agent_yaml_respects_plugin_ignore_rules(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        plugin_root = tmp_path / "plugins" / "plug"
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".pocketcodeignore").write_text("plug/agents/*.yaml\n!plug/agents/keep.yaml\n", encoding="utf-8")
+        (agents_dir / "drop.yaml").write_text(
+            yaml.safe_dump({"name": "drop", "flow": qname}, sort_keys=False),
+            encoding="utf-8",
+        )
+        (agents_dir / "keep.yaml").write_text(
+            yaml.safe_dump({"name": "keep", "flow": qname}, sort_keys=False),
+            encoding="utf-8",
+        )
+        defn.metadata = {"plugin_root": str(plugin_root)}
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        assert apm.get("drop") is None
+        assert apm.get("keep") is not None
+
 
 # ---------------------------------------------------------------------------
 # TestWorkspaceYamlLoading
@@ -179,6 +201,30 @@ class TestWorkspaceYamlLoading:
         apm.load({qname: defn})
 
         assert apm.get("ws").source == "workspace"
+
+    def test_workspace_ignore_rules_skip_disabled_and_ignored_agent_files(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        (tmp_path / ".pocketcode").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".pocketcode" / ".pocketcodeignore").write_text(
+            "\n".join(
+                [
+                    "agents/*.yaml",
+                    "!agents/keep.yaml",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        ws_profiles = tmp_path / ".pocketcode" / "agents"
+        self._write_ws_profile(ws_profiles, "drop.yaml", {"name": "drop", "flow": qname})
+        self._write_ws_profile(ws_profiles, "keep.yaml", {"name": "keep", "flow": qname})
+        self._write_ws_profile(ws_profiles, "hidden.disabled.yaml", {"name": "hidden", "flow": qname})
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        assert apm.get("drop") is None
+        assert apm.get("keep") is not None
+        assert apm.get("hidden") is None
 
     def test_workspace_beats_synthesised_same_name(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")

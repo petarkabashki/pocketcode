@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from pocketcode.core.engine import PocketCodeEngine
+from pocketcode.core.markdown_profiles import ModeDefinition, SkillDefinition
+from pocketcode.core.namespace_registry import NamespaceRegistry
 from pocketcode.core.runtime_models import AgentProfile
 
 
@@ -46,6 +50,28 @@ class _EditableProfileManagerStub(_ProfileManagerStub):
         self.reload_count += 1
 
 
+class _ModeManagerStub:
+    def __init__(self, modes: dict[str, ModeDefinition]):
+        self._modes = modes
+
+    def get(self, name: str):
+        return self._modes.get(name)
+
+    def list(self):
+        return sorted(self._modes.values(), key=lambda mode: mode.name)
+
+
+class _SkillManagerStub:
+    def __init__(self, skills: dict[str, SkillDefinition]):
+        self._skills = skills
+
+    def get(self, name: str):
+        return self._skills.get(name)
+
+    def list(self):
+        return sorted(self._skills.values(), key=lambda skill: skill.name)
+
+
 class _PluginsWithToolResolution:
     def __init__(self):
         self.agents = {"coder::coder": object()}
@@ -54,6 +80,20 @@ class _PluginsWithToolResolution:
     def resolve_tools_for_agent(self, agent_name: str):
         self.resolve_call_count += 1
         return ["tool.b", "tool.a"]
+
+
+class _PluginsWithQualifiedTools:
+    def __init__(self):
+        self.agents = {
+            "coder::coder": type("Defn", (), {"metadata": {"plugin": "core"}, "default_agent_profile": None})()
+        }
+        self.tools = NamespaceRegistry()
+        self.tools.register("core", "read_file", lambda **kw: {"ok": True})
+        self.resolve_call_count = 0
+
+    def resolve_tools_for_agent(self, agent_name: str):
+        self.resolve_call_count += 1
+        return ["core.read_file"]
 
 
 class TestEngineAgentProfiles:
@@ -84,6 +124,37 @@ class TestEngineAgentProfiles:
             assert "unknown agent" in str(exc).lower()
         else:
             raise AssertionError("Expected ValueError for profile targeting an unknown agent")
+
+    def test_status_exposes_selected_flow_agent_and_llm(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine.current_agent = "coder::coder"
+        engine.active_agent_profile = AgentProfile(
+            name="coder.safe",
+            flow="coder::coder",
+            llm_profile="smart",
+        )
+        engine.active_mode = None
+        engine.enabled_skills = []
+        engine._runtime_config = {"agent_runtime_workflow": "internal-flow"}
+        engine.global_llm_override = "fast"
+        engine.agent_llm_overrides = {}
+        engine.handoff_llm_overrides = {}
+        engine.config_llm_overrides = {}
+        engine.default_llm_profile = "default"
+        engine._tool_confirmation_config = {}
+        engine.last_run_summary = {}
+        engine._copy_session_confirmation_overrides = lambda: {}
+        engine.list_flows = lambda: ["coder::coder"]
+        engine.list_available_agents = lambda: ["coder.safe"]
+        engine.list_modes = lambda: []
+        engine.list_skills = lambda: []
+        engine.list_llm_profiles = lambda: ["default", "fast", "smart"]
+
+        status = engine.status()
+
+        assert status["selected_flow"] == "coder::coder"
+        assert status["selected_agent"] == "coder.safe"
+        assert status["selected_llm_profile"] == "smart"
 
     def test_list_agent_profiles_can_filter_by_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -194,6 +265,8 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._plugins = _PluginsWithToolResolution()
         engine.active_agent_profile = None
+        engine.enabled_skills = []
+        engine._skill_manager = _SkillManagerStub({})
         engine._agent_tools_cache = {}
 
         first = engine.list_tools_for_agent("coder::coder")
@@ -202,3 +275,130 @@ class TestEngineAgentProfiles:
         assert first == ["tool.a", "tool.b"]
         assert second == ["tool.a", "tool.b"]
         assert engine._plugins.resolve_call_count == 1
+
+    def test_set_mode_builds_ephemeral_agent_profile_from_markdown_mode(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        base_profile = AgentProfile(
+            name="coder::coder",
+            flow="coder::coder",
+            description="Base profile",
+            llm_profile="fast",
+            extra_prompts=["prompts/base.md"],
+            tools=["core.read_file"],
+            tool_confirmation={"default": "confirm"},
+        )
+        engine._agent_profile_manager = _ProfileManagerStub({"coder::coder": base_profile})
+        engine._mode_manager = _ModeManagerStub(
+            {
+                "review": ModeDefinition(
+                    name="review",
+                    description="Review mode",
+                    flow="coder::coder",
+                    llm_profile="smart",
+                    inline_prompt="Review code carefully.",
+                    extra_prompts=["prompts/review.md"],
+                )
+            }
+        )
+        engine._plugins = _PluginsWithQualifiedTools()
+        engine._skill_manager = _SkillManagerStub({})
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
+        )()
+        engine._normalize_confirmation_policy = PocketCodeEngine._normalize_confirmation_policy.__get__(
+            engine,
+            PocketCodeEngine,
+        )
+        engine.active_agent_profile = base_profile
+        engine.current_agent = "coder::coder"
+        engine.active_mode = None
+
+        engine.set_mode("review")
+
+        assert engine.active_mode.name == "review"
+        assert engine.current_agent == "coder::coder"
+        assert engine.active_agent_profile is not None
+        assert engine.active_agent_profile.name == "review"
+        assert engine.active_agent_profile.agent == "coder::coder"
+        assert engine.active_agent_profile.llm_profile == "smart"
+        assert engine.active_agent_profile.inline_prompt == "Review code carefully."
+        assert engine.active_agent_profile.extra_prompts == ["prompts/base.md", "prompts/review.md"]
+        assert engine.active_agent_profile.tool_confirmation == {"default": "confirm"}
+
+    def test_enable_skill_registers_provided_tools_and_resolves_existing_tool_refs(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._plugins = _PluginsWithQualifiedTools()
+        engine._skill_manager = _SkillManagerStub(
+            {
+                "python-testing": SkillDefinition(
+                    name="python-testing",
+                    tool_refs=["read_file"],
+                    provided_tools={"skill.python_testing.run_pytest": lambda **kw: {"ok": True}},
+                )
+            }
+        )
+        engine._runtime_config = {}
+        engine._tool_confirmation_config = {"default_policy": None, "tool_policies": {}, "agent_policies": {}}
+        engine._llm_router = object()
+        engine.enabled_skills = []
+        engine.current_agent = "coder::coder"
+        engine.active_agent_profile = None
+
+        engine.enable_skill("python-testing")
+
+        assert engine.enabled_skills == ["python-testing"]
+        assert engine._active_skill_existing_tool_refs() == ["core.read_file"]
+        assert "skill.python_testing.run_pytest" in engine._tool_runtime.tools
+
+    def test_save_system_settings_persists_workspace_config(self, tmp_path):
+        config_path = tmp_path / "pocketcode.yml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "llm": {
+                        "providers": {"gemini": {"api_key": "${GEMINI_API_KEY}"}},
+                        "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
+                        "default_profile": "fast",
+                    },
+                    "runtime": {"default_agent": "coder::coder"},
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {
+            "llm": {
+                "providers": {"gemini": {"api_key": "${GEMINI_API_KEY}"}},
+                "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
+                "default_profile": "fast",
+            },
+            "runtime": {"default_agent": "coder::coder"},
+        }
+        engine._runtime_config = engine._config["runtime"]
+        engine._llm_config = engine._config["llm"]
+        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object(), "asker::asker": object()}})()
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name}), "default_profile_name": "fast"},
+        )()
+        engine._reload_llm_runtime = lambda: None
+
+        saved_path = engine.save_system_settings(
+            theme_name="forest",
+            workspace_mode="review",
+            default_agent="asker::asker",
+            default_llm_profile="fast",
+        )
+
+        saved = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
+        assert saved["runtime"]["default_agent"] == "asker::asker"
+        assert saved["runtime"]["textual"] == {
+            "theme_name": "forest",
+            "workspace_mode": "review",
+        }
+        assert saved["llm"]["default_profile"] == "fast"

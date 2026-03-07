@@ -1,0 +1,3 @@
+name: workspace_builder::plugin_builder
+flow: workspace_builder::plugin_builder
+description: Composite agent for creating and editing workspace plugin resources and workspace-level assets.

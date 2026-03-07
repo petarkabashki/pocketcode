@@ -256,10 +256,12 @@ class AgentRuntime:
 
             # Pre-compute tool definitions for the active agent each turn.
             try:
-                _allowed = self._plugins.resolve_tools_for_agent(agent_name)
-                # T016: intersect with active profile tool allowlist (FR-008).
-                if active_profile is not None and active_profile.tools is not None:
-                    _allowed = [t for t in _allowed if t in active_profile.tools]
+                _allowed = self._resolve_effective_tool_names(
+                    agent_name=agent_name,
+                    active_profile=active_profile,
+                    shared_store=shared_store,
+                )
+                shared_store["active_allowed_tools"] = list(_allowed)
                 shared_store["_agent_tool_definitions"] = self._tool_runtime.describe_tools(_allowed)
             except Exception:
                 shared_store.setdefault("_agent_tool_definitions", [])
@@ -274,7 +276,10 @@ class AgentRuntime:
 
             # T017: inject system prompt with extra_prompts for pocketflow agents.
             _pf_base_prompt = self._build_agent_system_prompt(agent_name=agent_name)
-            _pf_extra = self._resolve_extra_prompts_content(active_profile)
+            _pf_extra = self._resolve_overlay_prompt_content(
+                active_profile=active_profile,
+                shared_store=shared_store,
+            )
             shared_store["_agent_system_prompt"] = (
                 _pf_base_prompt + "\n\n" + _pf_extra if _pf_extra else _pf_base_prompt
             )
@@ -394,11 +399,13 @@ class AgentRuntime:
         agent_definition: AgentDefinition,
         shared_store: Dict[str, Any],
     ) -> str:
-        allowed_tools = self._plugins.resolve_tools_for_agent(agent_name)
         active_profile = self._get_active_profile_for_agent(agent_name, shared_store)
-        # T016: intersect with active profile tool allowlist (FR-008).
-        if active_profile is not None and active_profile.tools is not None:
-            allowed_tools = [t for t in allowed_tools if t in active_profile.tools]
+        allowed_tools = self._resolve_effective_tool_names(
+            agent_name=agent_name,
+            active_profile=active_profile,
+            shared_store=shared_store,
+        )
+        shared_store["active_allowed_tools"] = list(allowed_tools)
         tool_definitions = self._tool_runtime.describe_tools(allowed_tools)
 
         llm_profile = self._resolve_llm_profile(agent_name, agent_definition, shared_store)
@@ -447,8 +454,11 @@ class AgentRuntime:
         }
 
         system_prompt = self._build_agent_system_prompt(agent_name=agent_name)
-        # T017: append extra_prompts from active agent profile.
-        _ep_content = self._resolve_extra_prompts_content(active_profile)
+        # T017: append active mode/agent prompt overlays and enabled skill prompts.
+        _ep_content = self._resolve_overlay_prompt_content(
+            active_profile=active_profile,
+            shared_store=shared_store,
+        )
         if _ep_content:
             system_prompt = system_prompt + "\n\n" + _ep_content
         prompt = "\n\n".join(
@@ -1118,6 +1128,51 @@ class AgentRuntime:
                     exc,
                 )
         return "\n\n".join(parts)
+
+    def _resolve_overlay_prompt_content(
+        self,
+        *,
+        active_profile: Any,
+        shared_store: Dict[str, Any],
+    ) -> str:
+        parts: List[str] = []
+
+        inline_prompt = str(getattr(active_profile, "inline_prompt", "") or "").strip()
+        if inline_prompt:
+            parts.append(inline_prompt)
+
+        extra_prompt_text = self._resolve_extra_prompts_content(active_profile)
+        if extra_prompt_text:
+            parts.append(extra_prompt_text)
+
+        for skill in shared_store.get("active_skills", []) or []:
+            skill_prompt = str(getattr(skill, "inline_prompt", "") or "").strip()
+            if skill_prompt:
+                parts.append(skill_prompt)
+            skill_extra = self._resolve_extra_prompts_content(skill)
+            if skill_extra:
+                parts.append(skill_extra)
+
+        return "\n\n".join(part for part in parts if part)
+
+    def _resolve_effective_tool_names(
+        self,
+        *,
+        agent_name: str,
+        active_profile: Any,
+        shared_store: Dict[str, Any],
+    ) -> List[str]:
+        tool_names = list(self._plugins.resolve_tools_for_agent(agent_name))
+        if active_profile is not None and active_profile.tools is not None:
+            tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
+
+        for tool_name in shared_store.get("active_skill_existing_tool_refs", []) or []:
+            if tool_name not in tool_names:
+                tool_names.append(tool_name)
+        for tool_name in shared_store.get("active_skill_tool_names", []) or []:
+            if tool_name not in tool_names:
+                tool_names.append(tool_name)
+        return tool_names
 
     def _get_active_profile_for_agent(self, agent_name: str, shared_store: Dict[str, Any]) -> Any:
         profile = shared_store.get("active_agent_profile")

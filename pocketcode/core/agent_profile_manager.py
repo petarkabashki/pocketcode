@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from pocketcode.core.discovery_rules import DiscoveryFilter
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,10 +25,19 @@ class CompositeAgentManager:
 
     def __init__(self, workspace_root: Path) -> None:
         self._workspace_root = Path(workspace_root).resolve()
-        self._workspace_agents_dir: Path = self._workspace_root / ".pocketcode" / "agents"
-        self._legacy_workspace_agents_dir: Path = self._workspace_root / ".pocketcode" / "agent-profiles"
+        self._workspace_pocketcode_root: Path = self._workspace_root / ".pocketcode"
+        self._workspace_agents_dir: Path = self._workspace_pocketcode_root / "agents"
+        self._legacy_workspace_agents_dir: Path = self._workspace_pocketcode_root / "agent-profiles"
         self._agents: Dict[str, Any] = {}
         self._flow_definitions: Dict[str, Any] = {}
+        self._workspace_filter = DiscoveryFilter.from_root(
+            self._workspace_pocketcode_root,
+            ignore_dir=self._workspace_pocketcode_root,
+        )
+        self._global_plugin_filter = DiscoveryFilter.from_root(
+            self._workspace_root,
+            ignore_dir=self._workspace_root,
+        )
 
     def load(self, flow_definitions: Dict[str, Any]) -> None:
         """Rebuild the agent registry from flow definitions + workspace files."""
@@ -34,6 +45,14 @@ class CompositeAgentManager:
 
         self._flow_definitions = dict(flow_definitions)
         self._agents = {}
+        self._workspace_filter = DiscoveryFilter.from_root(
+            self._workspace_pocketcode_root,
+            ignore_dir=self._workspace_pocketcode_root,
+        )
+        self._global_plugin_filter = DiscoveryFilter.from_root(
+            self._workspace_root,
+            ignore_dir=self._workspace_root,
+        )
 
         for qname, defn in flow_definitions.items():
             explicit: Optional[Agent] = (
@@ -147,6 +166,8 @@ class CompositeAgentManager:
             if not agents_dir.is_dir():
                 continue
             for yaml_file in sorted(agents_dir.glob("*.yaml")):
+                if self._plugin_agent_file_is_ignored(plugin_root, yaml_file):
+                    continue
                 self._load_agent_file(yaml_file, source="plugin")
 
     def _load_workspace_files(self) -> None:
@@ -157,7 +178,30 @@ class CompositeAgentManager:
             yaml_files.extend(sorted(self._workspace_agents_dir.glob("*.yaml")))
 
         for yaml_file in yaml_files:
+            if self._workspace_filter.ignores(yaml_file, is_dir=False):
+                continue
             self._load_agent_file(yaml_file, source="workspace")
+
+    def _plugin_agent_file_is_ignored(self, plugin_root: Path, yaml_file: Path) -> bool:
+        resolved_plugin_root = plugin_root.resolve()
+        resolved_yaml = yaml_file.resolve()
+        if self._is_under_workspace_pocketcode(resolved_plugin_root):
+            return self._workspace_filter.ignores(resolved_yaml, is_dir=False)
+        try:
+            relative = resolved_yaml.relative_to(resolved_plugin_root)
+        except ValueError:
+            return False
+        return self._global_plugin_filter.ignores_relative(
+            Path(resolved_plugin_root.name) / relative,
+            is_dir=False,
+        )
+
+    def _is_under_workspace_pocketcode(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self._workspace_pocketcode_root.resolve())
+        except ValueError:
+            return False
+        return True
 
     def _load_agent_file(self, yaml_file: Path, *, source: str) -> None:
         from pocketcode.core.runtime_models import Agent  # noqa: PLC0415

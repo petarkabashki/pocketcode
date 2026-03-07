@@ -18,6 +18,7 @@ Every flow automatically gets a *synthesised* default agent on startup. Workspac
 
 Workspace-local customisation also lives under `.pocketcode/`:
 - `.pocketcode/agents/` for workspace agent YAML files
+- `.pocketcode/llm-profiles/` for workspace LLM profile YAML files created by the Textual clone/edit flow
 - `.pocketcode/plugins/` for workspace plugins
 - `.pocketcode/tools/` for shared tools auto-registered under the `workspace` namespace and visible to every flow whose tool scope is unrestricted
 - `.pocketcode/prompts/` for shared prompt files; files are registered under the `workspace` namespace and are also valid fallback prompt sources for plugin agents and agent `extra_prompts`
@@ -87,8 +88,27 @@ Agent command shortcuts: `/ag` and `/ap` → `/agent`
 ### Status Bar Format
 
 ```
-Runtime flow: <runtime> | Flow: <flow> | Agent: <agent> | LLM: <llm_profile> (<model>)
+Runtime flow: <runtime> | Agent: <agent> | LLM: <llm_profile> (<model>)
 ```
+
+### Workspace LLM Profile YAML Schema
+
+Stored in `.pocketcode/llm-profiles/<name>.yaml`:
+
+```yaml
+name: my-fast-clone   # required
+provider: gemini      # required
+model: gemini-2.5-flash
+parameters:           # optional
+  temperature: 0.2
+  max_output_tokens: 3072
+```
+
+Textual UI notes:
+- `F3` opens the popup editor selector for agent config, LLM config, tool selection, and tool policies
+- `F4` opens the popup clone selector for agent and LLM configs
+- `F6` opens `Select` for active agent, runtime LLM override, skills, grouped/individual tool selection, tool policy editing, session confirmation, and system settings
+- `System Settings` applies and saves theme, workspace mode, and default agent/LLM selections to `pocketcode.yml`
 
 ### Workspace Agent YAML Schema
 

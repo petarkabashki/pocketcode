@@ -35,6 +35,8 @@ Pocketcode now uses a small plugin-first core:
 - Flow prompts live in external Markdown files with `{{ include:path.md }}` support.
 - Flows support Python `pre`, `steps`, and `post` handlers alongside LLM and deterministic execution modes.
 - Agents can override LLM selection, tool allowlists, extra prompts, and confirmation policy for a flow.
+- Modes are Markdown-backed session presets that resolve into an ephemeral active agent profile.
+- Skills are Markdown-backed capability packs that can append prompt guidance and contribute extra tools for the current session.
 - Tool definitions and routing payloads are exchanged with LLMs as YAML.
 - CLI now uses a multi-pane Textual workspace for interactive mode.
 - Runtime-driven user interaction now uses a structured protocol that supports free-form text, buttons, radio groups, and checklists from both the basic CLI and the Textual UI.
@@ -47,7 +49,9 @@ Pocketcode now uses a small plugin-first core:
 - The package-owned `core` plugin lives under `pocketcode/plugins/core/`
 - Repo-shipped workspace plugins live under `.pocketcode/plugins/`
 - The default flow is `core::react`
+- `.pocketcode/plugins/workspace_builder/` ships a dedicated authoring agent for creating and editing workspace plugin resources plus workspace-level assets such as tools, prompts, skills, and agents.
 - Shared filesystem tool behavior is implemented once in `pocketcode/plugins/core/tools/filesystem.py`; plugin-local filesystem modules re-export that canonical implementation to avoid drift.
+- Structured file operation tools now also live in `pocketcode/plugins/core/tools/file_ops.py`, covering interactive file/folder selection, line/pattern-based extraction, staged replacements with diff previews, and explicit apply/cancel steps.
 - Git and context elephant store tools now live in separate workspace plugins at `.pocketcode/plugins/workspace_git/` and `.pocketcode/plugins/workspace_context/`; built-in flows reference those workspace plugins explicitly. The remaining public compatibility surface is the `pocketcode.tools` package exports, while `pocketcode.plugins.core.tools.context_elephant_store_tools` remains only as a compatibility shim for context-elephant imports.
 
 ## Workspace Resources
@@ -55,11 +59,49 @@ Pocketcode now uses a small plugin-first core:
 Pocketcode also loads workspace-local resources from the workspace root:
 
 - `.pocketcode/plugins/`: workspace plugin folder discovered through `runtime.plugin_paths`
+- `.pocketcode/plugins/workspace_builder/`: example repo-shipped workspace plugin for authoring `plugin.yaml`, flows, prompts, agents, tools, skills, and other `.pocketcode/` assets
 - `.pocketcode/agents/`: workspace agent YAML files
+- `.pocketcode/modes/`: workspace Markdown mode files
+- `.pocketcode/skills/`: workspace skill folders containing `SKILL.md` plus optional `tools/`, `scripts/`, `references/`, and `assets/`
+- `.pocketcode/skills/pocketcode-workspace-builder/`: umbrella skill pack for the workspace builder, with focused companion skills for PocketFlow graphs, plugin authoring, profiles/prompts, tools/runtime, and workspace assets
 - `.pocketcode/tools/`: shared Python tools auto-registered under the `workspace` namespace
 - `.pocketcode/prompts/`: shared prompt files registered under the `workspace` namespace and usable as fallback prompt files for plugin agents and agent `extra_prompts`
 
 For shared workspace tools, Pocketcode auto-discovers public tool exports from Python files in `.pocketcode/tools/`. A module can expose tools either through a `TOOLS` export or through public top-level callables / `BaseTool` classes.
+The repo now ships `.pocketcode/tools/file_ops.py` as the reference pattern for workspace tool re-exports, making the same file selection and staged editing tools available as `workspace::select_filesystem_entry`, `workspace::extract_text`, `workspace::stage_text_replace`, `workspace::apply_staged_edit`, and `workspace::cancel_staged_edit`.
+
+## Discovery Controls
+
+Pocketcode supports two ways to make discovered resources unavailable without deleting them:
+
+- Rename any discovered file or folder so one path component contains `.disabled`.
+- Add gitignore-style rules to `.pocketcodeignore`.
+
+`.disabled` behavior:
+
+- Works for plugins, workspace agents, modes, skills, prompts, tools, and plugin-local `agents/`, `prompts/`, `tools/`, and flow modules.
+- If any parent folder contains `.disabled`, everything under it is skipped.
+
+`.pocketcodeignore` behavior:
+
+- Workspace-owned resources under `.pocketcode/` use: `<workspace>/.pocketcode/.pocketcodeignore`
+- Built-in `core` and external plugin roots use: `<workspace>/.pocketcodeignore`
+- Supports blank lines, `#` comments, glob patterns, directory rules with trailing `/`, and `!` re-includes.
+
+Examples:
+
+```gitignore
+# .pocketcode/.pocketcodeignore
+tools/*.py
+!tools/keep.py
+skills/old-skill/
+```
+
+```gitignore
+# workspace root .pocketcodeignore
+core/prompts/drafts/
+my_external_plugin/tools/*.py
+```
 
 ## Configuration
 
@@ -129,9 +171,12 @@ Precedence is: CLI flow > config flow > CLI global > dynamic handoff/flow choice
 
 ## CLI Commands
 
-- `/list <flows|agents|llms|tools>`
+- `/list <flows|prompts|modes|skills|agents|llms|tools>`
 - `/set <flow|llm|llm-flow|llm-handoff> ...`
 - `/flow <flow_name|auto> [--agent <agent_name>]`
+- `/mode <list|show|switch|clear> ...`
+- `/skill <list|show|enable|disable> ...`
+- `/prompts`
 - `/agent <list|show|switch|clone|edit|tools|policy> ...`
 - `/stop`, `/cancel`
 - `/reload`, `/status`
@@ -140,33 +185,34 @@ Precedence is: CLI flow > config flow > CLI global > dynamic handoff/flow choice
 
 Compatibility aliases remain available:
 
-- `/flows`, `/agents`, `/llms`, `/tools`
-- `/agent-profile` remains as an alias for `/agent`
-- Short aliases: `/ls`, `/fl`, `/ag`, `/ap`, `/lm`, `/lf`, `/la`, `/lh`, `/st`, `/c`, `/r`, `/q`
+- `/flows`, `/prompts`, `/agents`, `/llms`, `/tools`
+- Short aliases: `/ls`, `/ag`, `/ap`, `/lm`, `/lf`, `/la`, `/lh`, `/st`, `/c`, `/r`, `/q`
+
+Listing behavior:
+
+- `/agent list` and `/list agents` show named agent profiles only; synthesised flow-default profiles are excluded.
+- `/skill list` and `/list skills` show individual skills grouped by their top-level name prefix, such as `azure`, `pocketcode`, or `pocketflow`.
 
 Textual keyboard shortcuts:
 
 - `Tab`: complete current prompt input
 - `F1`, `F2`, `F3`, `F4`, `F5`: switch `Chat`, `Control`, `Edit Agent`, `Context`, and `Run` views
-- `F6`: switch to the next agent
-- `Shift+F6`: switch to the previous agent
-- `F7` or `Ctrl+P`: switch to the next agent profile for the current agent
-- `Shift+F7` or `Ctrl+Shift+P`: switch to the previous agent profile for the current agent
-- `F8`: switch global LLM override (cycles `none` + profiles)
-- `Shift+F8`: switch global LLM override backwards
+- `F6`: open the popup asset picker for active flow, agent profile, LLM override, workspace mode, theme, and session confirmation; use arrow keys plus `Enter` to choose
 - `F9`: toggle the left navigation panel
 - `F10`: toggle the right inspector panel
 - `F11`: toggle the second header row
-- `Ctrl+W`: cycle workspace mode presets (`Balanced`, `Chat Focus`, `Control Desk`, `Minimal`, `Review`)
 - `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`: fallback view switching
 - `Ctrl+Shift+A`: copy full response console output
 - `Ctrl+Y`: copy last assistant response
 - `Ctrl+Q`: quit Textual UI
+- top header `Agent` and `LLM` chips open their respective searchable popup pickers directly
 
 Interactive workspace views:
 
 - `Chat`: conversation and command entry
-- `Control`: runtime/session selectors and toggles for workspace mode, theme, flow, agent, LLM, and session confirmation
+- `Control`: runtime/session selectors and toggles for workspace mode, theme, active flow, active agent profile, LLM, and session confirmation
+- `Control`: includes a popup asset picker for selecting active flow/profile/LLM/theme/mode/session state from searchable lists with arrow-key navigation
+- top header `Agent` and `LLM` chips mirror the current selection and open the matching picker without leaving the current view
 - `Control` selectors apply only to live user selections; placeholder values used during refresh are ignored so flow/agent cycling does not re-enter itself
 - `Edit Agent`: dedicated editor for cloning workspace agents, toggling allowed tools, editing per-tool confirmation overrides, and saving extra prompts/LLM/agent defaults
 - `Context`: add, remove, and clear files, folders, URLs, and snippets without slash commands
@@ -202,6 +248,43 @@ Agent editing in the Textual UI:
 - workspace-backed agents can edit `llm_profile`, tool allowlists, per-tool confirmation overrides, confirmation defaults, and `extra_prompts`
 - tools and prompts can be changed from lists, toggles, policy selectors, and text boxes instead of editing YAML manually
 
+Modes and skills:
+
+- modes live in `.pocketcode/modes/*.md` and use YAML front matter plus Markdown body
+- the mode body becomes inline system-prompt text for an ephemeral active profile
+- front matter can select a `flow` or base `agent`, override `llm_profile`, set `tools`, `extra_prompts`, and `tool_confirmation`
+- skills live in `.pocketcode/skills/<name>/SKILL.md`
+- a skill can add prompt guidance, reference extra prompt files, and contribute extra tool modules from `tools/*.py`
+- skill-provided tools are registered under the `skill.<skill_name>.*` namespace while the skill is enabled
+
+Mode example:
+
+```md
+---
+name: review
+description: Review mode
+flow: core::react
+llm_profile: gemini_default
+tool_confirmation:
+  default: confirm
+---
+Focus on bugs, regressions, and missing tests.
+```
+
+Skill example:
+
+```md
+---
+name: python-testing
+description: Pytest workflow
+tools:
+  - core.read_file
+extra_prompts:
+  - references/style.md
+---
+Reproduce failures first, then patch minimally.
+```
+
 Output box behavior:
 
 - output text is selectable with mouse/keyboard
@@ -227,7 +310,7 @@ Textual copy commands:
 
 Header rows:
 
-- the first row is always visible and shows runtime flow, flow, agent, LLM, and current view
+- the first row is always visible and shows `Runtime flow`, `Flow`, `Agent`, and `LLM`
 - the second row is optional and shows compact runtime stats
 
 Second header row includes:
@@ -317,7 +400,7 @@ tools:
 
 flows:
   my_agent:
-    module: "agents/my_agent.py"
+    module: "flows/my_agent.py"
     entry_fn: "create_flow"
     tools: [my_tool]
 ```

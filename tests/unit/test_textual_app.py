@@ -5,15 +5,23 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pocketcode.cli.textual_app import (
+    AssetPickerScreen,
+    NameInputScreen,
     PocketCodeTextualApp,
+    SystemSettingsScreen,
+    TextEditorScreen,
+    ToolSelectionScreen,
+    _build_header_agent_text,
+    _build_header_llm_text,
+    _build_header_summary_text,
     _build_output_text,
     _build_profile_editor_hint,
     _build_stats_text,
     _build_status_text,
     _build_view_title_text,
-    _cycle_value,
     _trim_output_lines,
 )
+from textual.widgets import Input, SelectionList, Static
 
 
 class TestTopStatsText:
@@ -48,10 +56,11 @@ class TestTopStatsText:
 
 
 class TestUiTextHelpers:
-    def test_status_text_includes_current_view(self):
+    def test_status_text_matches_footer_format(self):
         status = {
             "flow": "coder::coder",
             "agent": "coder.safe",
+            "selected_agent": "coder.safe",
             "active_agent": "coder.safe",
             "active_agent_profile": "coder.safe",
             "global_llm_override": "fast",
@@ -68,20 +77,35 @@ class TestUiTextHelpers:
 
         text = _build_status_text(status, "control")
 
-        assert "Flow: architect::architect" in text
+        assert "Runtime flow: internal-flow" in text
         assert "Agent: coder.safe" in text
         assert "LLM: smart (-)" in text
-        assert "View: Control Center" in text
+        assert "Flow:" not in text
+
+    def test_header_text_splits_summary_agent_and_llm(self):
+        status = {
+            "selected_agent": "coder.safe",
+            "selected_llm_profile": "smart",
+            "runtime_workflow": "internal-flow",
+            "last_run_summary": {
+                "current_llm_profile": "smart",
+                "current_llm_model": "gpt-test",
+            },
+        }
+
+        assert _build_header_summary_text(status) == "Runtime flow: internal-flow"
+        assert _build_header_agent_text(status) == "Agent: coder.safe"
+        assert _build_header_llm_text(status) == "LLM: smart (gpt-test)"
 
     def test_view_title_text_matches_named_view(self):
-        assert _build_view_title_text("run").startswith("Run Inspector | ")
-        assert "live in Edit Agent" in _build_view_title_text("profiles")
+        assert _build_view_title_text("run") == "Run Inspector"
+        assert _build_view_title_text("chat") == ""
 
     def test_profile_editor_hint_tracks_profile_source(self):
         workspace_profile = SimpleNamespace(name="coder.safe", source="workspace")
         plugin_profile = SimpleNamespace(name="coder.default", source="plugin")
 
-        assert _build_profile_editor_hint(None) == "Select a flow or agent to edit agent settings."
+        assert _build_profile_editor_hint(None) == "Select an agent to edit agent settings."
         assert "Editing workspace agent 'coder.safe'" in _build_profile_editor_hint(workspace_profile)
         assert "Clone it to a workspace agent to edit" in _build_profile_editor_hint(plugin_profile)
 
@@ -103,17 +127,6 @@ class TestOutputHistoryHelpers:
         )
 
 
-class TestCycleValue:
-    def test_cycle_value_moves_forward_from_missing_to_first_item(self):
-        assert _cycle_value(["a", "b", "c"], "missing", 1, missing_index=-1) == "a"
-
-    def test_cycle_value_moves_backward_from_missing_to_last_item(self):
-        assert _cycle_value(["a", "b", "c"], "missing", -1, missing_index=0) == "c"
-
-    def test_cycle_value_wraps_llm_cycle_backwards_from_inherit(self):
-        assert _cycle_value([None, "fast", "smart"], None, -1, missing_index=0) == "smart"
-
-
 class _TextualEngineStub:
     def __init__(self) -> None:
         self.current_agent = "a"
@@ -124,7 +137,13 @@ class _TextualEngineStub:
         self.set_agent_calls: list[str | None] = []
         self.set_active_agent_profile_calls: list[str] = []
         self.clone_agent_profile_calls: list[tuple[str, str]] = []
+        self.clone_llm_profile_calls: list[tuple[str, str]] = []
         self.update_agent_profile_calls: list[dict[str, object]] = []
+        self.update_llm_profile_calls: list[dict[str, object]] = []
+        self.save_system_settings_calls: list[dict[str, object]] = []
+        self.active_skills: list[str] = []
+        self.skill_enabled: list[str] = []
+        self.skill_disabled: list[str] = []
         self._profiles = {
             "a": self._profile("a", "a"),
             "a-safe": self._profile("a-safe", "a"),
@@ -153,6 +172,38 @@ class _TextualEngineStub:
     def list_llm_profiles(self):
         return ["fast", "smart"]
 
+    def list_skills(self):
+        return ["python-lint", "python-testing", "azure-prepare"]
+
+    def get_active_skills(self):
+        return [SimpleNamespace(name=name) for name in self.active_skills]
+
+    def enable_skill(self, name):
+        self.skill_enabled.append(name)
+        if name not in self.active_skills:
+            self.active_skills.append(name)
+
+    def disable_skill(self, name):
+        self.skill_disabled.append(name)
+        self.active_skills = [skill for skill in self.active_skills if skill != name]
+
+    def get_llm_profile(self, name=None):
+        target = name or self.global_llm_override or "fast"
+        sources = {
+            "fast": "workspace",
+            "smart": "plugin",
+        }
+        return {
+            "name": target,
+            "source": sources.get(target, "workspace"),
+            "source_path": Path(f"/tmp/{target}.yaml"),
+            "config": {
+                "provider": "gemini",
+                "model": target,
+                "parameters": {"temperature": 0.2},
+            },
+        }
+
     def list_agent_profiles(self, agent_name=None):
         target = agent_name or self.current_agent
         return [
@@ -160,6 +211,11 @@ class _TextualEngineStub:
             for profile in self._profiles.values()
             if profile.agent == target
         ]
+
+    def get_agent_profile(self, name=None):
+        if name is None:
+            return self.active_agent_profile
+        return self._profiles.get(name)
 
     def get_current_agent(self):
         return self.current_agent
@@ -193,6 +249,19 @@ class _TextualEngineStub:
         self._profiles[new_name] = cloned
         return cloned
 
+    def clone_llm_profile(self, src_name, new_name):
+        self.clone_llm_profile_calls.append((src_name, new_name))
+        return {
+            "name": new_name,
+            "source": "workspace",
+            "source_path": Path(f"/tmp/{new_name}.yaml"),
+            "config": {
+                "provider": "gemini",
+                "model": src_name,
+                "parameters": {"temperature": 0.2},
+            },
+        }
+
     def update_agent_profile(
         self,
         name,
@@ -214,6 +283,33 @@ class _TextualEngineStub:
             }
         )
 
+    def update_llm_profile(self, name, *, profile_config):
+        self.update_llm_profile_calls.append(
+            {
+                "name": name,
+                "profile_config": profile_config,
+            }
+        )
+
+    def get_system_settings(self):
+        return {
+            "theme_name": "ocean",
+            "workspace_mode": "balanced",
+            "default_agent": "a",
+            "default_llm_profile": "fast",
+        }
+
+    def save_system_settings(self, *, theme_name, workspace_mode, default_agent, default_llm_profile):
+        self.save_system_settings_calls.append(
+            {
+                "theme_name": theme_name,
+                "workspace_mode": workspace_mode,
+                "default_agent": default_agent,
+                "default_llm_profile": default_llm_profile,
+            }
+        )
+        return Path("/tmp/pocketcode.yml")
+
     def list_tools_for_agent(self, agent_name):
         return ["tool.read", "tool.write"]
 
@@ -225,9 +321,12 @@ class _TextualEngineStub:
             "available_llm_profiles": self.list_llm_profiles(),
             "available_flows": self.list_agents(),
             "available_agents": self.list_agent_profiles(),
+            "available_skills": self.list_skills(),
             "session_tool_confirmation_overrides": self.session_confirmation_overrides,
             "flow": self.current_agent,
             "agent": self.active_agent_profile.name if self.active_agent_profile else None,
+            "selected_agent": self.active_agent_profile.name if self.active_agent_profile else None,
+            "selected_llm_profile": self.global_llm_override or "fast",
             "active_agent": self.active_agent_profile.name if self.active_agent_profile else None,
             "active_agent_profile": self.active_agent_profile.name if self.active_agent_profile else None,
             "runtime_workflow": "internal-flow",
@@ -261,7 +360,7 @@ class _TextualEngineStub:
 
 
 class TestTextualSelectStability:
-    def test_f7_selects_next_agent_profile_across_agents_without_reentering_callbacks(self):
+    def test_asset_picker_supports_arrow_key_selection(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
             app = PocketCodeTextualApp(
@@ -271,80 +370,108 @@ class TestTextualSelectStability:
 
             async with app.run_test() as pilot:
                 await pilot.pause()
-                engine.set_agent_calls.clear()
-                engine.set_active_agent_profile_calls.clear()
 
-                await pilot.press("f7")
-                await pilot.pause(0.05)
-                first_counts = (
-                    len(engine.set_agent_calls),
-                    len(engine.set_active_agent_profile_calls),
-                )
-                await pilot.pause(0.2)
-
-                assert engine.get_current_agent() == "a"
-                assert first_counts == (
-                    len(engine.set_agent_calls),
-                    len(engine.set_active_agent_profile_calls),
-                )
-                assert engine.set_agent_calls == []
-                assert engine.set_active_agent_profile_calls == ["a-safe"]
-
-                await pilot.press("f7")
+                await pilot.press("f6", "down", "enter")
                 await pilot.pause(0.05)
 
-                assert engine.get_current_agent() == "b"
-                assert engine.active_agent_profile.name == "b"
-                assert engine.set_active_agent_profile_calls == ["a-safe", "b"]
+                assert isinstance(app.screen, AssetPickerScreen)
+
+                await pilot.press("down", "down", "enter")
+                await pilot.pause(0.1)
+
+                assert engine.global_llm_override == "smart"
+                assert any("Global LLM override: smart" in line for line in app._output_lines)
+
+        asyncio.run(exercise())
+
+    def test_f6_asset_picker_can_select_global_llm(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("llm")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("smart")
+                await pilot.pause(0.1)
+
+                assert engine.global_llm_override == "smart"
+                assert any("Global LLM override: smart" in line for line in app._output_lines)
+
+        asyncio.run(exercise())
+
+    def test_header_uses_static_agent_and_llm_labels(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert isinstance(app.query_one("#header-agent", Static), Static)
+                assert isinstance(app.query_one("#header-llm", Static), Static)
+                assert app._text_state_cache["header-agent"] == "Agent: a"
+                assert app._text_state_cache["header-llm"] == "LLM: fast (-)"
 
         asyncio.run(exercise())
 
 
-class TestProfileToolSelectionToggle:
-    def test_selection_toggle_uses_selection_index_event_field(self):
-        engine = _TextualEngineStub()
-        app = PocketCodeTextualApp(
-            engine,
-            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+class TestToolSelectionPopup:
+    def test_tool_picker_toggle_uses_selection_index_event_field(self):
+        screen = ToolSelectionScreen(
+            title="Edit Allowed Tools",
+            tools=[SimpleNamespace(value="core.ask_user_input", label="core.ask_user_input", description="", search_text="")],
+            selected_values=[],
         )
-        messages: list[str] = []
-        app._write_info = messages.append
-        app._syncing_controls = False
-
         selection_list = SimpleNamespace(
-            id="profile-tool-list",
+            id="tool-picker-list",
+            disabled=False,
             selected={"core.ask_user_input"},
             get_option_at_index=lambda index: SimpleNamespace(value="core.ask_user_input"),
         )
         event = SimpleNamespace(selection_list=selection_list, selection_index=0)
 
-        app.on_selection_list_selection_toggled(event)
+        screen.on_selection_list_selection_toggled(event)
 
-        assert messages == ["Tool core.ask_user_input marked allowed for the active profile draft."]
+        assert screen._selected_values == {"core.ask_user_input"}
 
+    def test_group_toggle_selects_all_group_members(self):
+        screen = ToolSelectionScreen(
+            title="Select Skills",
+            tools=[
+                SimpleNamespace(value="__skill_group__:python", label="Group: python", description="", search_text=""),
+                SimpleNamespace(value="python-lint", label="  python-lint", description="", search_text=""),
+                SimpleNamespace(value="python-testing", label="  python-testing", description="", search_text=""),
+            ],
+            selected_values=[],
+            grouped_values={"__skill_group__:python": ("python-lint", "python-testing")},
+        )
+        selection_list = SimpleNamespace(
+            id="tool-picker-list",
+            disabled=False,
+            selected={"__skill_group__:python"},
+            get_option_at_index=lambda index: SimpleNamespace(value="__skill_group__:python"),
+        )
+        event = SimpleNamespace(selection_list=selection_list, selection_index=0)
 
-class TestProfileCloneAndSave:
-    def test_clone_active_profile_promotes_workspace_agent(self):
-        async def exercise() -> None:
-            engine = _TextualEngineStub()
-            app = PocketCodeTextualApp(
-                engine,
-                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
-            )
+        screen.on_selection_list_selection_toggled(event)
 
-            async with app.run_test() as pilot:
-                await pilot.pause()
-                app.query_one("#clone-profile-name").value = "a-workspace"
+        assert screen._selected_values == {"__skill_group__:python", "python-lint", "python-testing"}
 
-                app._clone_active_profile()
-                await pilot.pause(0.05)
-
-                assert engine.clone_agent_profile_calls == [("a", "a-workspace")]
-                assert engine.active_agent_profile.name == "a-workspace"
-
-        asyncio.run(exercise())
-
-    def test_save_active_profile_persists_workspace_agent_edits(self):
+    def test_edit_shortcut_can_open_tool_selection_popup(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
             engine.set_active_agent_profile("a-safe")
@@ -355,10 +482,132 @@ class TestProfileCloneAndSave:
 
             async with app.run_test() as pilot:
                 await pilot.pause()
-                app.query_one("#profile-prompts").text = "prompts/review.md\nprompts/safety.md"
-                app._draft_profile_tool_overrides = {"tool.write": "deny"}
 
-                app._save_active_profile()
+                await pilot.press("f3")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("tools")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                assert app.screen.query_one("#tool-picker-filter", Input).placeholder == "Filter tools..."
+
+        asyncio.run(exercise())
+
+    def test_f6_select_can_open_skill_selection_popup(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("skills")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                assert app.screen.query_one("#tool-picker-filter", Input).placeholder == "Filter skills..."
+
+        asyncio.run(exercise())
+
+    def test_f6_select_can_open_tool_selection_popup(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("tools")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                assert any(option.label == "Group: tool" for option in app.screen._tools)
+
+        asyncio.run(exercise())
+
+    def test_f6_select_can_open_system_settings_screen(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("system_settings")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, SystemSettingsScreen)
+
+        asyncio.run(exercise())
+
+
+class TestProfileCloneAndSave:
+    def test_clone_shortcut_promotes_workspace_agent(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("f4")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("agent")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, NameInputScreen)
+                app.screen.dismiss("a-workspace")
+                await pilot.pause(0.05)
+
+                assert engine.clone_agent_profile_calls == [("a", "a-workspace")]
+                assert engine.active_agent_profile.name == "a-workspace"
+
+        asyncio.run(exercise())
+
+    def test_edit_agent_popup_persists_workspace_agent_edits(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._apply_agent_yaml_edit(
+                    "a-safe",
+                    "extra_prompts:\n  - prompts/review.md\n  - prompts/safety.md\n",
+                )
+
                 await pilot.pause(0.05)
 
                 assert engine.update_agent_profile_calls == [
@@ -368,8 +617,226 @@ class TestProfileCloneAndSave:
                         "tools": None,
                         "extra_prompts": ["prompts/review.md", "prompts/safety.md"],
                         "tool_confirmation_default": None,
-                        "tool_confirmation_overrides": {"tool.write": "deny"},
+                        "tool_confirmation_overrides": {},
                     }
                 ]
+
+        asyncio.run(exercise())
+
+    def test_edit_agent_popup_clones_synthesised_agent_before_editing(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("f3")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("agent")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, NameInputScreen)
+                app.screen.dismiss("a-workspace")
+                await pilot.pause(0.1)
+
+                assert engine.clone_agent_profile_calls == [("a", "a-workspace")]
+                assert engine.active_agent_profile.name == "a-workspace"
+                assert isinstance(app.screen, TextEditorScreen)
+
+        asyncio.run(exercise())
+
+    def test_edit_llm_popup_persists_workspace_llm_edits(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._apply_llm_yaml_edit(
+                    "fast",
+                    "provider: gemini\nmodel: gemini-2.5-flash\nparameters:\n  temperature: 0.1\n",
+                )
+                await pilot.pause(0.05)
+
+                assert engine.update_llm_profile_calls == [
+                    {
+                        "name": "fast",
+                        "profile_config": {
+                            "provider": "gemini",
+                            "model": "gemini-2.5-flash",
+                            "parameters": {"temperature": 0.1},
+                        },
+                    }
+                ]
+
+        asyncio.run(exercise())
+
+    def test_tool_policy_popup_persists_workspace_agent_policy_overrides(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._apply_tool_policy_yaml_edit("a-safe", "tool.write: deny\n")
+                await pilot.pause(0.05)
+
+                assert engine.update_agent_profile_calls[-1]["tool_confirmation_overrides"] == {"tool.write": "deny"}
+
+        asyncio.run(exercise())
+
+    def test_tool_selection_popup_saves_selected_tools(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._open_tool_selection_picker()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, ToolSelectionScreen)
+                app.screen.dismiss(["tool.read"])
+                await pilot.pause(0.05)
+
+                assert engine.update_agent_profile_calls[-1]["tools"] == ["tool.read"]
+
+        asyncio.run(exercise())
+
+    def test_system_settings_screen_applies_and_saves_defaults(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._apply_system_settings(
+                    {
+                        "theme_name": "forest",
+                        "workspace_mode": "review",
+                        "default_agent": "b",
+                        "default_llm_profile": "smart",
+                    }
+                )
+                await pilot.pause(0.05)
+
+                assert engine.save_system_settings_calls == [
+                    {
+                        "theme_name": "forest",
+                        "workspace_mode": "review",
+                        "default_agent": "b",
+                        "default_llm_profile": "smart",
+                    }
+                ]
+                assert engine.current_agent == "b"
+
+        asyncio.run(exercise())
+
+
+class TestInspectorToolFiltering:
+    def test_inspector_hides_deselected_tools(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            engine.active_agent_profile.tools = ["tool.read"]
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                text = app.query_one("#inspector-tools").text
+
+                assert "tool.read" in text
+                assert "tool.write" not in text
+
+        asyncio.run(exercise())
+
+    def test_inspector_skill_list_reflects_enabled_skills(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.active_skills = ["python-lint", "python-testing"]
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                skill_list = app.query_one("#skill-list", SelectionList)
+
+                assert "python-testing" in skill_list.selected
+                assert "__skill_group__:python" in skill_list.selected
+
+        asyncio.run(exercise())
+
+    def test_inspector_skill_toggle_enables_selected_skill(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                selection_list = SimpleNamespace(
+                    id="skill-list",
+                    disabled=False,
+                    selected={"python-testing"},
+                    get_option_at_index=lambda index: SimpleNamespace(value="python-testing"),
+                )
+                event = SimpleNamespace(selection_list=selection_list, selection_index=0)
+
+                app.on_selection_list_selection_toggled(event)
+                await pilot.pause(0.05)
+
+                assert engine.skill_enabled == ["python-testing"]
+
+        asyncio.run(exercise())
+
+    def test_inspector_skill_group_toggle_enables_group_members(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                selection_list = SimpleNamespace(
+                    id="skill-list",
+                    disabled=False,
+                    selected={"__skill_group__:python"},
+                    get_option_at_index=lambda index: SimpleNamespace(value="__skill_group__:python"),
+                )
+                event = SimpleNamespace(selection_list=selection_list, selection_index=0)
+
+                app.on_selection_list_selection_toggled(event)
+                await pilot.pause(0.05)
+
+                assert engine.skill_enabled == ["python-lint", "python-testing"]
 
         asyncio.run(exercise())

@@ -116,6 +116,31 @@ tool_confirmation:
   default: confirm
 ```
 
+## Discovery Controls
+
+Plugin discovery and plugin-local resources can be turned off in two ways:
+
+- Rename a plugin file or folder so one path component contains `.disabled`.
+- Add rules to the workspace-level `<workspace>/.pocketcodeignore`.
+
+The workspace-level plugin ignore file uses gitignore-style patterns and applies to built-in and external plugin roots by plugin directory name:
+
+- `tools/`
+- `prompts/`
+- `agents/`
+- flow module files referenced from `plugin.yaml`
+
+Example:
+
+```gitignore
+core/prompts/drafts/
+architect/tools/*.py
+!architect/tools/search.py
+my_external_plugin/agents/experimental.yaml
+```
+
+Whole plugins can also be disabled by renaming the plugin directory itself, for example `my_plugin.disabled/`.
+
 ---
 
 ## Namespace & Qualified Names
@@ -141,6 +166,11 @@ The package-owned `core` plugin ships the default runtime flow plus the shared i
 |----------------|-------------|
 | `core.read_file` | Read a file from the workspace |
 | `core.write_to_file` | Write content to a file |
+| `core.select_filesystem_entry` | Ask the local user to choose files/folders |
+| `core.extract_text` | Extract lines/sections from a file or inline text |
+| `core.stage_text_replace` | Preview and stage a line/pattern-based replacement |
+| `core.apply_staged_edit` | Apply a previously staged file edit |
+| `core.cancel_staged_edit` | Cancel one or more staged file edits |
 | `core.search_code` | Search the codebase |
 | `core.execute_command` | Run a shell command |
 | `core.ask_user_input` | Prompt the user for free-form text |
@@ -157,8 +187,12 @@ Workspace plugin example:
 | `workspace_git.git_diff` | Show a git diff |
 | `workspace_git.git_status` | Show git status |
 | `workspace_context.read_context_elephant_store_file` | Read a context elephant store file |
+| `workspace_builder.plugin_builder` | Author workspace plugin resources, workspace-level assets, and related docs |
+| `workspace.select_filesystem_entry` | Workspace re-export of the interactive filesystem picker |
+| `workspace.stage_text_replace` | Workspace re-export of staged text replacement |
 
 For plugins that share tool behavior, prefer re-export shims over copy-pasted tool modules. The filesystem tools are the reference pattern: `pocketcode/plugins/core/tools/filesystem.py` is canonical, while plugin-local `tools/filesystem.py` modules can re-export those symbols so manifest-local handler paths remain stable without duplicating implementation.
+The same pattern now applies to staged editing helpers in `pocketcode/plugins/core/tools/file_ops.py` and `.pocketcode/tools/file_ops.py`.
 
 ---
 

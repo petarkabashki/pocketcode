@@ -79,14 +79,24 @@ class ToolRuntime:
         auto_confirm: bool = False,
         agent_name: str | None = None,
     ) -> Any:
-        # T019b: deny immediately if tool is not in the active profile's allowlist (FR-008 / FR-009).
-        _ap = self._get_active_profile(shared_store, agent_name)
-        if _ap is not None and _ap.tools is not None:
-            if tool_name not in _ap.tools:
+        # T019b: deny immediately if tool is not in the active per-turn allowlist.
+        active_allowed_tools = shared_store.get("active_allowed_tools")
+        if isinstance(active_allowed_tools, list):
+            if tool_name not in active_allowed_tools:
                 return {
                     "success": False,
-                    "error": f"Tool '{tool_name}' is not in the active agent profile's tool allowlist.",
+                    "error": f"Tool '{tool_name}' is not in the active tool allowlist.",
                 }
+
+        # Fallback for callers that only pass the active profile.
+        if not isinstance(active_allowed_tools, list):
+            _ap = self._get_active_profile(shared_store, agent_name)
+            if _ap is not None and _ap.tools is not None:
+                if tool_name not in _ap.tools:
+                    return {
+                        "success": False,
+                        "error": f"Tool '{tool_name}' is not in the active agent profile's tool allowlist.",
+                    }
 
         policy = self._resolve_confirmation_policy(
             tool_name=tool_name,

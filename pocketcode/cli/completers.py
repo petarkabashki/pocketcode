@@ -18,7 +18,21 @@ class AgentCompleter(Completer):
         except Exception:
             return
         word = document.get_word_before_cursor(WORD=True)
-        for name in profile_names:
+        visible_names = []
+        for name in sorted({str(name) for name in profile_names}):
+            profile = None
+            try:
+                if hasattr(self._engine, "get_agent"):
+                    profile = self._engine.get_agent(name)
+                elif hasattr(self._engine, "get_agent_profile"):
+                    profile = self._engine.get_agent_profile(name)
+            except Exception:
+                profile = None
+            if profile is not None and getattr(profile, "source", None) == "synthesised":
+                continue
+            visible_names.append(name)
+
+        for name in visible_names:
             if name.startswith(word):
                 yield Completion(name, start_position=-len(word))
 

@@ -13,10 +13,19 @@ class _EngineStub:
     def list_prompts(self):
         return []
 
+    def list_modes(self):
+        return []
+
+    def list_skills(self):
+        return []
+
     def list_llm_profiles(self):
         return []
 
     def list_agent_profiles(self, agent_name=None):
+        return []
+
+    def get_active_skills(self):
         return []
 
 
@@ -31,6 +40,31 @@ class _FlowSelectionEngineStub(_EngineStub):
 
     def set_flow(self, flow_name):
         self.set_flow_calls.append(flow_name)
+
+
+class _DuplicateAgentListingEngineStub(_EngineStub):
+    def list_available_agents(self):
+        return ["coder.safe", "coder.safe", "review.safe"]
+
+    def get_agent_profile(self, name=None):
+        if name is None:
+            return SimpleNamespace(name="coder.safe")
+        return SimpleNamespace(name=name)
+
+
+class _AgentListingEngineStub(_EngineStub):
+    def list_available_agents(self):
+        return ["core::react", "coder.safe", "review.safe"]
+
+    def get_agent_profile(self, name=None):
+        profiles = {
+            "core::react": SimpleNamespace(name="core::react", source="synthesised"),
+            "coder.safe": SimpleNamespace(name="coder.safe", source="workspace"),
+            "review.safe": SimpleNamespace(name="review.safe", source="plugin"),
+        }
+        if name is None:
+            return profiles["coder.safe"]
+        return profiles.get(name)
 
 
 class _RunHandleStub:
@@ -94,6 +128,84 @@ class _EditableProfileEngineStub(_EngineStub):
     def clone_agent_profile(self, src_name, new_name):
         self.cloned_calls.append((src_name, new_name))
         return SimpleNamespace(name=new_name, source_path=Path(f"/tmp/{new_name}.yaml"))
+
+
+class _ModeSkillEngineStub(_EngineStub):
+    def __init__(self):
+        self.active_mode = None
+        self.active_skills = []
+        self.mode_switches = []
+        self.skill_enabled = []
+        self.skill_disabled = []
+
+    def list_modes(self):
+        return ["review", "build"]
+
+    def list_skills(self):
+        return ["python-testing", "azure-prepare"]
+
+    def get_mode(self, name=None):
+        modes = {
+            "review": SimpleNamespace(
+                name="review",
+                description="Review mode",
+                flow="core::react",
+                agent=None,
+                llm_profile="smart",
+                tools=["core.read_file"],
+                tools_specified=True,
+                extra_prompts=["prompts/review.md"],
+                tool_confirmation={"default": "confirm"},
+                source_path=Path("/tmp/review.md"),
+            ),
+            "build": SimpleNamespace(
+                name="build",
+                description="Build mode",
+                flow="core::react",
+                agent=None,
+                llm_profile=None,
+                tools=None,
+                tools_specified=False,
+                extra_prompts=[],
+                tool_confirmation={},
+                source_path=Path("/tmp/build.md"),
+            ),
+        }
+        if name is None:
+            return self.active_mode
+        return modes.get(name)
+
+    def set_mode(self, name):
+        self.mode_switches.append(name)
+        self.active_mode = self.get_mode(name) if name is not None else None
+
+    def get_skill(self, name):
+        skills = {
+            "python-testing": SimpleNamespace(
+                name="python-testing",
+                description="Pytest workflow",
+                tool_refs=["core.read_file"],
+                provided_tools={"skill.python_testing.run_pytest": object()},
+                extra_prompts=["references/style.md"],
+                references=["references/style.md"],
+                scripts=["scripts/run_pytest.py"],
+                assets=["assets/template.txt"],
+                source_path=Path("/tmp/python-testing/SKILL.md"),
+            )
+        }
+        return skills.get(name)
+
+    def get_active_skills(self):
+        return [SimpleNamespace(name=name) for name in self.active_skills]
+
+    def enable_skill(self, name):
+        self.skill_enabled.append(name)
+        if name not in self.active_skills:
+            self.active_skills.append(name)
+
+    def disable_skill(self, name):
+        self.skill_disabled.append(name)
+        self.active_skills = [skill for skill in self.active_skills if skill != name]
 
 
 class TestCommandHandlerParsing:
@@ -225,6 +337,35 @@ class TestCommandHandlerParsing:
 
 
 class TestAgentEditingCommands:
+    def test_agent_list_hides_synthesised_flow_defaults(self, capsys):
+        engine = _AgentListingEngineStub()
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command(
+            "/agent list",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "core::react" not in captured.out
+        assert "coder.safe" in captured.out
+        assert "review.safe" in captured.out
+
+    def test_agent_list_deduplicates_profile_names(self, capsys):
+        engine = _DuplicateAgentListingEngineStub()
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command(
+            "/agent list",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert captured.out.count("coder.safe") == 1
+        assert captured.out.count("review.safe") == 1
+
     def test_agent_clone_reports_workspace_path(self, capsys):
         engine = _EditableProfileEngineStub()
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -259,8 +400,72 @@ class TestAgentEditingCommands:
                 "tool_confirmation_overrides": {"tool.write": "deny"},
             }
         ]
+
+
+class TestModeAndSkillCommands:
+    def test_skill_list_groups_skills_by_prefix(self, capsys):
+        engine = _ModeSkillEngineStub()
+        engine.active_skills = ["python-testing"]
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/skill list", engine=engine, cli_context=cli_context)
+
         captured = capsys.readouterr()
-        assert "allowed tools updated" in captured.out
+        assert "Available skills:" in captured.out
+        assert "  azure:" in captured.out
+        assert "  python:" in captured.out
+        assert "    * python-testing" in captured.out
+        assert "      azure-prepare" in captured.out
+
+    def test_list_skills_uses_the_same_grouped_output(self, capsys):
+        engine = _ModeSkillEngineStub()
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/list skills", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "  azure:" in captured.out
+        assert "  python:" in captured.out
+
+    def test_mode_switch_activates_mode(self, capsys):
+        engine = _ModeSkillEngineStub()
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/mode switch review", engine=engine, cli_context=cli_context)
+
+        assert engine.mode_switches == ["review"]
+        captured = capsys.readouterr()
+        assert "Mode activated: review" in captured.out
+
+    def test_mode_show_prints_mode_details(self, capsys):
+        engine = _ModeSkillEngineStub()
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/mode show review", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "Mode: review" in captured.out
+        assert "Flow     : core::react" in captured.out
+
+    def test_skill_enable_updates_session(self, capsys):
+        engine = _ModeSkillEngineStub()
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/skill enable python-testing", engine=engine, cli_context=cli_context)
+
+        assert engine.skill_enabled == ["python-testing"]
+        captured = capsys.readouterr()
+        assert "Skill enabled: python-testing" in captured.out
+
+    def test_skill_show_prints_provided_tools(self, capsys):
+        engine = _ModeSkillEngineStub()
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/skill show python-testing", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "Skill: python-testing" in captured.out
+        assert "skill.python_testing.run_pytest" in captured.out
 
     def test_agent_tools_all_clears_allowlist(self, capsys):
         engine = _EditableProfileEngineStub()

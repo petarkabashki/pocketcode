@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
 from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.config.loader import load_settings
 from pocketflow import Flow
 from pocketcode.tools import GitStatusTool as PublicGitStatusTool
@@ -110,10 +111,28 @@ def test_workspace_plugins_are_loaded_from_dot_pocketcode(monkeypatch):
     assert "workspace_git.git_status" in all_tools
     assert "workspace_context.read_context_elephant_store_file" in all_tools
     assert "core.git_status" not in all_tools
+    assert "workspace_builder.plugin_builder" in plugin_manager.agents.list_all()
+    assert "workspace_builder" in plugin_manager.plugin_roots
 
     resolved_tools = plugin_manager.resolve_tools_for_agent("core::react")
     assert "workspace_git.git_status" in resolved_tools
     assert "workspace_context.check_context_elephant_store_status" in resolved_tools
+
+
+def test_workspace_builder_profile_is_available_from_engine(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "dummy-key")
+
+    workspace_root = Path(__file__).parent.parent.parent.resolve()
+    config = load_settings(workspace_root=workspace_root)
+
+    engine = PocketCodeEngine(config=config, workspace_root=workspace_root)
+
+    assert "workspace_builder::plugin_builder" in engine.list_available_agents()
+    profile = engine.get_agent_profile("workspace_builder::plugin_builder")
+    assert "workspace-level assets" in profile.description
+    flow_def = engine._plugins.agents["workspace_builder::plugin_builder"]
+    assert "Portability rules:" in flow_def.system_prompt
+    assert "pocketcode/plugins/core/prompts/shared/general_rules.md" not in flow_def.system_prompt
 
 
 def test_core_tool_import_paths_are_workspace_shims():

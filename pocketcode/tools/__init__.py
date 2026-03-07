@@ -16,6 +16,18 @@ from .filesystem import (
     list_directory,
     glob_files
 )
+from .file_ops import (
+    SelectFilesystemEntryTool,
+    ExtractTextTool,
+    StageTextReplaceTool,
+    ApplyStagedEditTool,
+    CancelStagedEditTool,
+    select_filesystem_entry,
+    extract_text,
+    stage_text_replace,
+    apply_staged_edit,
+    cancel_staged_edit,
+)
 from .search import search_code_func, is_ripgrep_installed
 from .user_input import (
     ask_user_buttons,
@@ -45,6 +57,16 @@ __all__ = [
     'create_directory',
     'list_directory',
     'glob_files',
+    'SelectFilesystemEntryTool',
+    'ExtractTextTool',
+    'StageTextReplaceTool',
+    'ApplyStagedEditTool',
+    'CancelStagedEditTool',
+    'select_filesystem_entry',
+    'extract_text',
+    'stage_text_replace',
+    'apply_staged_edit',
+    'cancel_staged_edit',
     'GitStatusTool',
     'GitDiffTool',
     'GitAddTool',

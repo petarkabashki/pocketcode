@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import copy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import yaml
+
 from pocketcode.core.agent_manager import AgentManager
+from pocketcode.config.loader import WORKSPACE_SETTINGS_FILENAME
+from pocketcode.core.markdown_profiles import ModeDefinition, ModeManager, SkillDefinition, SkillManager
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
+from pocketcode.core.namespace_registry import RegistryError
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.core.run_handle import RunCancelledError, RunHandle
+from pocketcode.core.runtime_models import AgentProfile
 from pocketcode.core.tool_runtime import ToolRuntime
+from pocketcode.core.workspace_llm_profile_manager import WorkspaceLlmProfileManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +39,18 @@ class PocketCodeEngine:
         # T011: instantiate AgentManager after plugins are loaded.
         self._agent_profile_manager = AgentManager(self._workspace_root)
         self._agent_profile_manager.load(dict(self._plugins.agents))
+        self._mode_manager = ModeManager(self._workspace_root)
+        self._mode_manager.load()
+        self._skill_manager = SkillManager(self._workspace_root)
+        self._skill_manager.load()
+        self._workspace_llm_profile_manager = WorkspaceLlmProfileManager(self._workspace_root)
+        self._workspace_llm_profile_manager.load()
         self.active_agent_profile = None  # type: ignore[assignment]  # AgentProfile | None
+        self.active_mode: ModeDefinition | None = None
+        self.enabled_skills: list[str] = []
 
-        self._llm_router = LlmRouter(config=config, plugin_llm_profiles=self._plugins.llm_profiles)
-        self._tool_runtime = ToolRuntime(
-            tools=self._plugins.tools,
-            require_confirmation=bool(self._runtime_config.get("require_tool_confirmation", True)),
-            auto_approved_tools=list(self._runtime_config.get("auto_approved_tools", [])),
-            confirmation_config=self._tool_confirmation_config,
-        )
+        self._llm_router = LlmRouter(config=config, plugin_llm_profiles=self._merged_llm_profiles())
+        self._tool_runtime = self._build_tool_runtime()
         self._agent_runtime = AgentRuntime(
             plugin_manager=self._plugins,
             llm_router=self._llm_router,
@@ -80,9 +91,21 @@ class PocketCodeEngine:
         self._plugins.load()
         # T014: reload APM after plugins reload.
         self._agent_profile_manager.reload(dict(self._plugins.agents))
+        self._mode_manager.load()
+        self._skill_manager.load()
         # Re-apply active profile by name if it still exists; else fall back to
         # the current agent's default profile.
-        if self.active_agent_profile is not None:
+        if self.active_mode is not None:
+            still_exists = self._mode_manager.get(self.active_mode.name)
+            if still_exists is not None:
+                self.set_mode(still_exists.name)
+            else:
+                self.active_mode = None
+                if self.current_agent:
+                    self._activate_default_profile_for(self.current_agent)
+                else:
+                    self.active_agent_profile = None
+        elif self.active_agent_profile is not None:
             still_exists = self._agent_profile_manager.get(self.active_agent_profile.name)
             if still_exists is not None:
                 self.active_agent_profile = still_exists
@@ -90,15 +113,12 @@ class PocketCodeEngine:
                 self._activate_default_profile_for(self.current_agent)
             else:
                 self.active_agent_profile = None
-        self._llm_router = LlmRouter(config=self._config, plugin_llm_profiles=self._plugins.llm_profiles)
+        self._workspace_llm_profile_manager.load()
+        self._llm_router = LlmRouter(config=self._config, plugin_llm_profiles=self._merged_llm_profiles())
         self.config_llm_overrides = self._build_llm_overrides_config()
         self._tool_confirmation_config = self._build_tool_confirmation_config()
-        self._tool_runtime = ToolRuntime(
-            tools=self._plugins.tools,
-            require_confirmation=bool(self._runtime_config.get("require_tool_confirmation", True)),
-            auto_approved_tools=list(self._runtime_config.get("auto_approved_tools", [])),
-            confirmation_config=self._tool_confirmation_config,
-        )
+        self.enabled_skills = [name for name in self.enabled_skills if self._skill_manager.get(name) is not None]
+        self._tool_runtime = self._build_tool_runtime()
         self._agent_runtime = AgentRuntime(
             plugin_manager=self._plugins,
             llm_router=self._llm_router,
@@ -128,6 +148,15 @@ class PocketCodeEngine:
         for handoff_key in invalid_handoff_overrides:
             self.handoff_llm_overrides.pop(handoff_key, None)
 
+        if self.active_mode is not None and self._mode_manager.get(self.active_mode.name) is None:
+            self.active_mode = None
+
+        self.enabled_skills = [
+            skill_name
+            for skill_name in self.enabled_skills
+            if self._skill_manager.get(skill_name) is not None
+        ]
+
     def list_agents(self) -> List[str]:
         """Backward-compatible alias for registered flow names."""
         return sorted(self._plugins.agents.keys())
@@ -141,12 +170,115 @@ class PocketCodeEngine:
     def list_llm_profiles(self) -> List[str]:
         return self._llm_router.list_profile_names()
 
+    def get_llm_profile(self, name: Optional[str] = None) -> Any:
+        target_name = str(name or self._selected_llm_profile() or "").strip()
+        if not target_name:
+            return None
+
+        workspace_entry = self._workspace_llm_profile_manager.get(target_name)
+        if workspace_entry is not None:
+            return {
+                "name": target_name,
+                "source": "workspace",
+                "source_path": workspace_entry.get("source_path"),
+                "config": copy.deepcopy(workspace_entry.get("config", {})),
+            }
+
+        plugin_profile = self._plugins.llm_profiles.get(target_name)
+        if isinstance(plugin_profile, dict):
+            return {
+                "name": target_name,
+                "source": "plugin",
+                "source_path": None,
+                "config": copy.deepcopy(plugin_profile),
+            }
+
+        configured_profiles = self._llm_config.get("profiles", {})
+        if isinstance(configured_profiles, dict):
+            configured_profile = configured_profiles.get(target_name)
+            if isinstance(configured_profile, dict):
+                return {
+                    "name": target_name,
+                    "source": "config",
+                    "source_path": self._workspace_root / "pocketcode.yml",
+                    "config": copy.deepcopy(configured_profile),
+                }
+
+        resolved = self._llm_router.resolve_profile_config(target_name)
+        return {
+            "name": target_name,
+            "source": "runtime",
+            "source_path": None,
+            "config": resolved,
+        }
+
     def get_current_agent(self):
         """Backward-compatible alias for the current flow name."""
         return self.current_agent
 
     def get_current_flow(self):
         return self.get_current_agent()
+
+    def get_system_settings(self) -> Dict[str, Any]:
+        textual_config = self._runtime_config.get("textual", {})
+        if not isinstance(textual_config, dict):
+            textual_config = {}
+        return {
+            "theme_name": str(textual_config.get("theme_name") or "ocean"),
+            "workspace_mode": str(textual_config.get("workspace_mode") or "balanced"),
+            "default_agent": self._runtime_config.get("default_agent"),
+            "default_llm_profile": self._llm_config.get("default_profile"),
+        }
+
+    def save_system_settings(
+        self,
+        *,
+        theme_name: str,
+        workspace_mode: str,
+        default_agent: Optional[str],
+        default_llm_profile: Optional[str],
+    ) -> Path:
+        if default_agent:
+            if default_agent not in self._plugins.agents:
+                raise KeyError(f"Unknown agent '{default_agent}'.")
+        if default_llm_profile:
+            self._llm_router.resolve_profile_config(default_llm_profile)
+
+        runtime_section = self._config.setdefault("runtime", {})
+        if not isinstance(runtime_section, dict):
+            runtime_section = {}
+            self._config["runtime"] = runtime_section
+        llm_section = self._config.setdefault("llm", {})
+        if not isinstance(llm_section, dict):
+            llm_section = {}
+            self._config["llm"] = llm_section
+
+        if default_agent:
+            runtime_section["default_agent"] = str(default_agent)
+        else:
+            runtime_section.pop("default_agent", None)
+
+        textual_section = runtime_section.get("textual", {})
+        if not isinstance(textual_section, dict):
+            textual_section = {}
+        textual_section["theme_name"] = str(theme_name)
+        textual_section["workspace_mode"] = str(workspace_mode)
+        runtime_section["textual"] = textual_section
+
+        if default_llm_profile:
+            llm_section["default_profile"] = str(default_llm_profile)
+        else:
+            llm_section.pop("default_profile", None)
+
+        self._runtime_config = runtime_section
+        self._llm_config = llm_section
+        config_path = self._workspace_root / WORKSPACE_SETTINGS_FILENAME
+        config_path.write_text(
+            yaml.safe_dump(self._config, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        self._reload_llm_runtime()
+        return config_path
 
     @property
     def active_agent(self):
@@ -161,9 +293,11 @@ class PocketCodeEngine:
         if not agent_name:
             self.current_agent = None
             self.active_agent_profile = None
+            self.active_mode = None
             return
         if agent_name not in self._plugins.agents:
             raise KeyError(f"Unknown agent '{agent_name}'.")
+        self.active_mode = None
         self.current_agent = agent_name
         # T012: auto-activate the agent's default profile.
         self._activate_default_profile_for(agent_name)
@@ -175,6 +309,7 @@ class PocketCodeEngine:
         """Activate a named agent profile, or clear the active profile if name is None."""
         if name is None:
             self.active_agent_profile = None
+            self.active_mode = None
             return
         profile = self._agent_profile_manager.get(name)
         if profile is None:
@@ -187,18 +322,84 @@ class PocketCodeEngine:
             raise ValueError(
                 f"Agent profile '{name}' targets unknown agent '{profile.agent}'."
             )
+        self.active_mode = None
         self.current_agent = profile.agent
         self.active_agent_profile = profile
 
     def set_active_agent(self, name: Optional[str]) -> None:
         self.set_active_agent_profile(name)
 
+    def list_modes(self) -> List[str]:
+        return [mode.name for mode in self._mode_manager.list()]
+
+    def get_mode(self, name: Optional[str] = None) -> Any:
+        if name is None:
+            return self.active_mode
+        return self._mode_manager.get(name)
+
+    def set_mode(self, name: Optional[str]) -> None:
+        if name is None:
+            self.active_mode = None
+            if self.current_agent:
+                self._activate_default_profile_for(self.current_agent)
+            else:
+                self.active_agent_profile = None
+            return
+
+        mode = self._mode_manager.get(name)
+        if mode is None:
+            raise ValueError(f"Unknown mode '{name}'. Available: {self.list_modes()}")
+
+        profile = self._resolve_mode_profile(mode)
+        self.active_mode = mode
+        self.current_agent = profile.agent
+        self.active_agent_profile = profile
+
+    def list_skills(self) -> List[str]:
+        return [skill.name for skill in self._skill_manager.list()]
+
+    def get_skill(self, name: str) -> Any:
+        return self._skill_manager.get(name)
+
+    def get_active_skills(self) -> List[Any]:
+        return [
+            skill
+            for skill_name in self.enabled_skills
+            if (skill := self._skill_manager.get(skill_name)) is not None
+        ]
+
+    def enable_skill(self, name: str) -> None:
+        skill = self._skill_manager.get(name)
+        if skill is None:
+            raise ValueError(f"Unknown skill '{name}'. Available: {self.list_skills()}")
+        if name not in self.enabled_skills:
+            self.enabled_skills.append(name)
+            self._tool_runtime = self._build_tool_runtime()
+            self._agent_runtime = AgentRuntime(
+                plugin_manager=self._plugins,
+                llm_router=self._llm_router,
+                tool_runtime=self._tool_runtime,
+                runtime_config=self._runtime_config,
+            )
+
+    def disable_skill(self, name: str) -> None:
+        if name not in self.enabled_skills:
+            return
+        self.enabled_skills = [skill_name for skill_name in self.enabled_skills if skill_name != name]
+        self._tool_runtime = self._build_tool_runtime()
+        self._agent_runtime = AgentRuntime(
+            plugin_manager=self._plugins,
+            llm_router=self._llm_router,
+            tool_runtime=self._tool_runtime,
+            runtime_config=self._runtime_config,
+        )
+
     def list_agent_profiles(self, agent_name: Optional[str] = None) -> List[str]:
         """Return known agent profile names, optionally filtered by target agent."""
         profiles = self._agent_profile_manager.list()
         if agent_name:
             profiles = [profile for profile in profiles if profile.agent == agent_name]
-        return [p.name for p in profiles]
+        return sorted({p.name for p in profiles})
 
     def list_available_agents(self, flow_name: Optional[str] = None) -> List[str]:
         return self.list_agent_profiles(flow_name)
@@ -218,6 +419,35 @@ class PocketCodeEngine:
 
     def clone_agent(self, src_name: str, new_name: str) -> Any:
         return self.clone_agent_profile(src_name, new_name)
+
+    def clone_llm_profile(self, src_name: str, new_name: str) -> Any:
+        profile = self.get_llm_profile(src_name)
+        if profile is None:
+            raise ValueError(f"Unknown LLM profile '{src_name}'.")
+        cloned = self._workspace_llm_profile_manager.clone(
+            src_name,
+            new_name,
+            profile.get("config", {}),
+        )
+        self._reload_llm_runtime()
+        return {
+            "name": new_name,
+            "source": "workspace",
+            "source_path": cloned.get("source_path"),
+            "config": copy.deepcopy(cloned.get("config", {})),
+        }
+
+    def update_llm_profile(self, name: str, *, profile_config: Dict[str, Any]) -> Any:
+        profile = self.get_llm_profile(name)
+        if profile is None:
+            raise ValueError(f"Unknown LLM profile '{name}'.")
+        if profile.get("source") != "workspace":
+            raise ValueError(
+                f"LLM profile '{name}' is not workspace-backed. Clone it before editing."
+            )
+        self._workspace_llm_profile_manager.save(name, profile_config)
+        self._reload_llm_runtime()
+        return self.get_llm_profile(name)
 
     def update_agent_profile(
         self,
@@ -314,6 +544,12 @@ class PocketCodeEngine:
                 and active_profile.tools is not None
             ):
                 tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
+            for tool_name in self._active_skill_existing_tool_refs():
+                if tool_name not in tool_names:
+                    tool_names.append(tool_name)
+            for tool_name in self._active_skill_provided_tools().keys():
+                if tool_name not in tool_names:
+                    tool_names.append(tool_name)
         sorted_tool_names = sorted(tool_names)
         if not apply_active_profile:
             self._agent_tools_cache[agent_name] = list(sorted_tool_names)
@@ -369,9 +605,13 @@ class PocketCodeEngine:
 
     def _activate_default_profile_for(self, agent_name: str) -> None:
         """Set active_agent_profile to the agent's default profile."""
+        profile = self._get_default_profile_for(agent_name)
+        self.active_agent_profile = profile
+
+    def _get_default_profile_for(self, agent_name: str) -> Any:
         defn = self._plugins.agents.get(agent_name)
         if defn is None:
-            return
+            return None
         explicit = getattr(defn, "default_agent_profile", None)
         if explicit is not None:
             default_name = explicit.name
@@ -384,7 +624,7 @@ class PocketCodeEngine:
                 if p.agent == agent_name:
                     profile = p
                     break
-        self.active_agent_profile = profile
+        return profile
 
     def set_global_llm_override(self, profile_name: Optional[str]) -> None:
         if not profile_name:
@@ -434,6 +674,12 @@ class PocketCodeEngine:
         active_profile = self.active_agent_profile
         if active_profile is not None and active_profile.agent == agent_name and active_profile.tools is not None:
             tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
+        for tool_name in self._active_skill_existing_tool_refs():
+            if tool_name not in tool_names:
+                tool_names.append(tool_name)
+        for tool_name in self._active_skill_provided_tools().keys():
+            if tool_name not in tool_names:
+                tool_names.append(tool_name)
         return self._tool_runtime.describe_tools(tool_names)
 
     def describe_tools_for_flow(self, flow_name: str) -> List[Dict[str, Any]]:
@@ -512,6 +758,10 @@ class PocketCodeEngine:
             "session_tool_confirmation": self._copy_session_confirmation_overrides(),
             # T013: inject active agent profile so AgentRuntime / ToolRuntime can read it.
             "active_agent_profile": self.active_agent_profile,
+            "active_mode": self.active_mode.name if self.active_mode is not None else None,
+            "active_skills": self.get_active_skills(),
+            "active_skill_existing_tool_refs": self._active_skill_existing_tool_refs(),
+            "active_skill_tool_names": list(self._active_skill_provided_tools().keys()),
         }
         if callable(event_handler):
             shared_store["runtime_event_handler"] = event_handler
@@ -538,6 +788,8 @@ class PocketCodeEngine:
         return {
             "agent_path": self._build_agent_path(shared_store),
             "current_agent": shared_store.get("active_agent") or self.current_agent,
+            "active_mode": shared_store.get("active_mode") or (self.active_mode.name if self.active_mode else None),
+            "active_skills": [skill.name for skill in shared_store.get("active_skills", []) or []],
             "current_llm_profile": shared_store.get("last_llm_profile"),
             "current_llm_model": (
                 shared_store.get("last_llm_generation", {}).get("model")
@@ -552,13 +804,20 @@ class PocketCodeEngine:
         }
 
     def status(self) -> Dict[str, Any]:
+        selected_agent = self.active_agent_profile.name if self.active_agent_profile else None
+        selected_llm_profile = self._selected_llm_profile()
         return {
             "flow": self.current_agent,
-            "agent": self.active_agent_profile.name if self.active_agent_profile else None,
+            "agent": selected_agent,
+            "selected_flow": self.current_agent,
+            "selected_agent": selected_agent,
+            "selected_llm_profile": selected_llm_profile,
+            "mode": self.active_mode.name if self.active_mode else None,
+            "skills": list(self.enabled_skills),
             "runtime_workflow": self._runtime_config.get("agent_runtime_workflow"),
             # T013: expose active agent profile name.
-            "active_agent_profile": self.active_agent_profile.name if self.active_agent_profile else None,
-            "active_agent": self.active_agent_profile.name if self.active_agent_profile else None,
+            "active_agent_profile": selected_agent,
+            "active_agent": selected_agent,
             "global_llm_override": self.global_llm_override,
             "agent_llm_overrides": dict(self.agent_llm_overrides),
             "handoff_llm_overrides": dict(self.handoff_llm_overrides),
@@ -568,9 +827,16 @@ class PocketCodeEngine:
             "session_tool_confirmation_overrides": self._copy_session_confirmation_overrides(),
             "available_flows": self.list_flows(),
             "available_agents": self.list_available_agents(),
+            "available_modes": self.list_modes(),
+            "available_skills": self.list_skills(),
             "available_llm_profiles": self.list_llm_profiles(),
             "last_run_summary": dict(self.last_run_summary),
         }
+
+    def _selected_llm_profile(self) -> Optional[str]:
+        if self.active_agent_profile is not None and self.active_agent_profile.llm_profile:
+            return self.active_agent_profile.llm_profile
+        return self.global_llm_override or self.default_llm_profile
 
     def set_session_confirmation_default(self, policy: Optional[str]) -> None:
         self.session_confirmation_overrides["default_policy"] = self._normalize_confirmation_policy(policy)
@@ -606,6 +872,129 @@ class PocketCodeEngine:
             "urls": sorted(list(cli_context.get("urls", set()))),
             "snippets": dict(cli_context.get("snippets", {})),
         }
+
+    def _build_tool_runtime(self) -> ToolRuntime:
+        merged_tools = dict(self._plugins.tools.items())
+        merged_tools.update(self._active_skill_provided_tools())
+        return ToolRuntime(
+            tools=merged_tools,
+            require_confirmation=bool(self._runtime_config.get("require_tool_confirmation", True)),
+            auto_approved_tools=list(self._runtime_config.get("auto_approved_tools", [])),
+            confirmation_config=self._tool_confirmation_config,
+        )
+
+    def _active_skill_provided_tools(self) -> Dict[str, Any]:
+        tools: Dict[str, Any] = {}
+        for skill in self.get_active_skills():
+            tools.update(skill.provided_tools)
+        return tools
+
+    def _active_skill_existing_tool_refs(self) -> List[str]:
+        resolved: list[str] = []
+        for skill in self.get_active_skills():
+            for tool_ref in skill.tool_refs:
+                qualified = self._qualify_tool_reference(
+                    tool_ref,
+                    context_agent=self.current_agent,
+                )
+                if qualified and qualified not in resolved:
+                    resolved.append(qualified)
+        return resolved
+
+    def _resolve_mode_profile(self, mode: ModeDefinition) -> AgentProfile:
+        base_profile: AgentProfile | None = None
+        if mode.agent:
+            base_profile = self._agent_profile_manager.get(mode.agent)
+            if base_profile is None:
+                raise ValueError(f"Mode '{mode.name}' references unknown agent profile '{mode.agent}'.")
+        elif mode.flow:
+            base_profile = self._agent_profile_manager.get(mode.flow) or self._get_default_profile_for(mode.flow)
+        elif self.active_agent_profile is not None:
+            base_profile = self.active_agent_profile
+        elif self.current_agent:
+            base_profile = self._get_default_profile_for(self.current_agent)
+
+        target_flow = mode.flow or (base_profile.agent if base_profile is not None else None) or self.current_agent
+        if not target_flow:
+            raise ValueError(f"Mode '{mode.name}' could not resolve a target flow.")
+        if target_flow not in self._plugins.agents:
+            raise ValueError(f"Mode '{mode.name}' targets unknown flow '{target_flow}'.")
+
+        if mode.llm_profile:
+            self._llm_router.resolve_profile_config(mode.llm_profile)
+
+        context_agent = target_flow
+        if mode.tools_specified:
+            if mode.tools is None:
+                tools = None
+            else:
+                tools = [
+                    qualified
+                    for qualified in (
+                        self._qualify_tool_reference(tool_ref, context_agent=context_agent)
+                        for tool_ref in mode.tools
+                    )
+                    if qualified
+                ]
+        else:
+            tools = list(base_profile.tools) if base_profile is not None and base_profile.tools is not None else None
+
+        base_confirmation = dict(base_profile.tool_confirmation or {}) if base_profile is not None else {}
+        mode_confirmation = dict(mode.tool_confirmation or {})
+        merged_confirmation: Dict[str, Any] = {}
+        merged_default = mode_confirmation.get("default", base_confirmation.get("default"))
+        if merged_default:
+            merged_confirmation["default"] = self._normalize_confirmation_policy(str(merged_default))
+        merged_overrides = dict(base_confirmation.get("overrides", {}))
+        merged_overrides.update(mode_confirmation.get("overrides", {}))
+        normalized_overrides = {
+            str(tool_name): normalized
+            for tool_name, policy in merged_overrides.items()
+            if (normalized := self._normalize_confirmation_policy(str(policy))) is not None
+        }
+        if normalized_overrides:
+            merged_confirmation["overrides"] = normalized_overrides
+
+        inherited_extra_prompts = list(base_profile.extra_prompts) if base_profile is not None else []
+        inline_parts = []
+        if base_profile is not None and base_profile.inline_prompt:
+            inline_parts.append(base_profile.inline_prompt)
+        if mode.inline_prompt:
+            inline_parts.append(mode.inline_prompt)
+
+        return AgentProfile(
+            name=mode.name,
+            flow=target_flow,
+            description=mode.description or (base_profile.description if base_profile is not None else ""),
+            llm_profile=mode.llm_profile or (base_profile.llm_profile if base_profile is not None else None),
+            inline_prompt="\n\n".join(part for part in inline_parts if part),
+            extra_prompts=inherited_extra_prompts + list(mode.extra_prompts),
+            tools=tools,
+            tool_confirmation=merged_confirmation,
+            source="mode",
+            source_path=mode.source_path,
+        )
+
+    def _qualify_tool_reference(
+        self,
+        tool_ref: str,
+        *,
+        context_agent: str | None,
+    ) -> str | None:
+        candidate = str(tool_ref or "").strip()
+        if not candidate:
+            return None
+        if candidate.startswith("skill."):
+            return candidate
+        context_plugin = None
+        if context_agent:
+            agent_definition = self._plugins.agents.get(context_agent)
+            if agent_definition is not None:
+                context_plugin = (agent_definition.metadata or {}).get("plugin")
+        try:
+            return self._plugins.tools.qualify(candidate, context_plugin=context_plugin)
+        except RegistryError as exc:
+            raise ValueError(str(exc)) from exc
 
     def _build_tool_confirmation_config(self) -> Dict[str, Any]:
         section = self._runtime_config.get("tool_confirmation", {})
@@ -714,6 +1103,27 @@ class PocketCodeEngine:
             "agents": agent_map,
             "handoffs": handoff_map,
         }
+
+    def _merged_llm_profiles(self) -> Dict[str, Dict[str, Any]]:
+        merged = dict(self._plugins.llm_profiles)
+        merged.update(self._workspace_llm_profile_manager.list_profiles())
+        return merged
+
+    def _reload_llm_runtime(self) -> None:
+        self._workspace_llm_profile_manager.load()
+        self._llm_router = LlmRouter(config=self._config, plugin_llm_profiles=self._merged_llm_profiles())
+        self.default_llm_profile = (
+            self._llm_config.get("default_profile")
+            or self._llm_router.default_profile_name
+        )
+        self.config_llm_overrides = self._build_llm_overrides_config()
+        self._tool_runtime = self._build_tool_runtime()
+        self._agent_runtime = AgentRuntime(
+            plugin_manager=self._plugins,
+            llm_router=self._llm_router,
+            tool_runtime=self._tool_runtime,
+            runtime_config=self._runtime_config,
+        )
 
     def _format_cli_context(self, cli_context_data: Dict[str, Any]) -> str:
         if not cli_context_data or not any(cli_context_data.values()):

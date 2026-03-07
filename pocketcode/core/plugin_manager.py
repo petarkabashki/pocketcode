@@ -15,6 +15,7 @@ from pocketcode.core.interfaces import BaseTool, Plugin, PluginContext
 from pocketcode.core.manifest_loader import load_manifest
 from pocketcode.core.namespace_registry import NamespaceRegistry, RegistryError, RegistryHolder
 from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
+from pocketcode.core.discovery_rules import DiscoveryFilter
 from pocketcode.core.runtime_models import Agent, FlowDefinition
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class PluginManager:
     def __init__(self, config: Dict[str, Any], workspace_root: str | Path):
         self._config = config
         self._workspace_root = Path(workspace_root).resolve()
+        self._workspace_pocketcode_root = self._workspace_root / ".pocketcode"
 
         self.tools: NamespaceRegistry[Any] = NamespaceRegistry()
         self.flows: NamespaceRegistry[FlowDefinition] = NamespaceRegistry()
@@ -36,6 +38,14 @@ class PluginManager:
         self.plugins: Dict[str, Plugin] = {}
         self._holder: RegistryHolder = RegistryHolder()
         self._dynamic_module_names: set[str] = set()
+        self._workspace_filter = DiscoveryFilter.from_root(
+            self._workspace_pocketcode_root,
+            ignore_dir=self._workspace_pocketcode_root,
+        )
+        self._global_plugin_filter = DiscoveryFilter.from_root(
+            self._workspace_root,
+            ignore_dir=self._workspace_root,
+        )
 
     @property
     def workspace_root(self) -> Path:
@@ -50,6 +60,14 @@ class PluginManager:
         self.llm_profiles.clear()
         self.plugin_roots.clear()
         self.plugins.clear()
+        self._workspace_filter = DiscoveryFilter.from_root(
+            self._workspace_pocketcode_root,
+            ignore_dir=self._workspace_pocketcode_root,
+        )
+        self._global_plugin_filter = DiscoveryFilter.from_root(
+            self._workspace_root,
+            ignore_dir=self._workspace_root,
+        )
 
     def load(self) -> None:
         self.clear()
@@ -232,14 +250,22 @@ class PluginManager:
             # Check if current base_path itself is a plugin (has __init__.py, agent.yaml, or plugin.yaml)
             if (base_path / "__init__.py").is_file() or (base_path / "agent.yaml").is_file() or (base_path / "plugin.yaml").is_file():
                 resolved = base_path.resolve()
-                if resolved not in seen:
+                if resolved not in seen and not self._plugin_root_is_ignored(resolved):
                     seen.add(resolved)
                     yield resolved
                 continue
 
             # Otherwise, iterate through children
             for child in sorted(base_path.iterdir()):
-                if child.is_dir() and ((child / "__init__.py").is_file() or (child / "agent.yaml").is_file() or (child / "plugin.yaml").is_file()):
+                if (
+                    child.is_dir()
+                    and not self._plugin_root_is_ignored(child)
+                    and (
+                        (child / "__init__.py").is_file()
+                        or (child / "agent.yaml").is_file()
+                        or (child / "plugin.yaml").is_file()
+                    )
+                ):
                     resolved = child.resolve()
                     if resolved not in seen:
                         seen.add(resolved)
@@ -275,17 +301,18 @@ class PluginManager:
                     )
 
     def _load_workspace_resources(self) -> None:
-        workspace_pocketcode = self._workspace_root / ".pocketcode"
-        if not workspace_pocketcode.is_dir():
+        if not self._workspace_pocketcode_root.is_dir():
             return
-        self._load_workspace_prompts(workspace_pocketcode / "prompts")
-        self._load_workspace_tools(workspace_pocketcode / "tools")
+        self._load_workspace_prompts(self._workspace_pocketcode_root / "prompts")
+        self._load_workspace_tools(self._workspace_pocketcode_root / "tools")
 
     def _load_workspace_prompts(self, prompts_root: Path) -> None:
         if not prompts_root.is_dir():
             return
 
         for prompt_path in sorted(path for path in prompts_root.rglob("*") if path.is_file()):
+            if self._workspace_filter.ignores(prompt_path, is_dir=False):
+                continue
             prompt_name = self._workspace_resource_name(prompts_root, prompt_path)
             if not prompt_name:
                 continue
@@ -309,6 +336,8 @@ class PluginManager:
 
         for tool_file in sorted(tools_root.rglob("*.py")):
             if tool_file.name == "__init__.py":
+                continue
+            if self._workspace_filter.ignores(tool_file, is_dir=False):
                 continue
             try:
                 module = self._load_module_from_file(tool_file)
@@ -451,6 +480,8 @@ class PluginManager:
                     pass
 
                 try:
+                    if self._reference_is_ignored(tool_ref, plugin_root):
+                        continue
                     loaded_tool = self._load_reference(tool_ref, plugin_root)
                     self.tools.register(agent_name, tool_id, loaded_tool)
                     agent_tools.append(tool_id)
@@ -518,6 +549,8 @@ class PluginManager:
                     prompt_path,
                 )
                 continue
+            if self._plugin_resource_is_ignored(plugin_root, prompt_path):
+                continue
             try:
                 self.prompts.register(plugin_name, str(prompt_name), prompt_path.read_text(encoding="utf-8"))
             except RegistryError as exc:
@@ -549,6 +582,8 @@ class PluginManager:
 
         for tool_name, reference in tools_section.items():
             try:
+                if self._reference_is_ignored(reference, plugin_root):
+                    continue
                 loaded_tool = self._load_reference(reference, plugin_root)
                 self.tools.register(plugin_name, str(tool_name), loaded_tool)
             except RegistryError as exc:
@@ -574,6 +609,8 @@ class PluginManager:
 
         for flow_name, raw_definition in flows_section.items():
             definition = raw_definition if isinstance(raw_definition, dict) else {}
+            if self._flow_definition_is_ignored(definition, plugin_root):
+                continue
             self._register_flow_definition(
                 flow_name=str(flow_name),
                 definition=definition,
@@ -815,6 +852,79 @@ class PluginManager:
         workspace_root = self._workspace_root
         workspace_pocketcode = workspace_root / ".pocketcode"
         return (workspace_root, workspace_pocketcode, workspace_pocketcode / "prompts")
+
+    def _reference_is_ignored(
+        self,
+        reference: Any,
+        plugin_root: Path,
+    ) -> bool:
+        if not isinstance(reference, str):
+            return False
+
+        candidate = reference.strip()
+        if not candidate or ":" not in candidate:
+            return False
+
+        path_part, _ = candidate.split(":", 1)
+        file_path = (plugin_root / path_part).resolve()
+        return self._plugin_resource_is_ignored(plugin_root, file_path)
+
+    def _flow_definition_is_ignored(
+        self,
+        definition: Dict[str, Any],
+        plugin_root: Path,
+    ) -> bool:
+        module_ref = definition.get("module")
+        if isinstance(module_ref, str) and module_ref.strip():
+            module_path = (plugin_root / module_ref).resolve()
+            if self._plugin_resource_is_ignored(plugin_root, module_path):
+                return True
+
+        prompt_file = definition.get("prompt_file") or definition.get("system_prompt_file")
+        if isinstance(prompt_file, str) and prompt_file.strip():
+            prompt_path = (plugin_root / prompt_file).resolve()
+            if self._plugin_resource_is_ignored(plugin_root, prompt_path):
+                return True
+
+        prompt_files = definition.get("prompt_files")
+        if not prompt_files and isinstance(definition.get("prompts"), list):
+            prompt_files = definition.get("prompts")
+        if isinstance(prompt_files, list):
+            for prompt_ref in prompt_files:
+                if not isinstance(prompt_ref, str) or not prompt_ref.strip():
+                    continue
+                prompt_path = (plugin_root / prompt_ref).resolve()
+                if self._plugin_resource_is_ignored(plugin_root, prompt_path):
+                    return True
+
+        return False
+
+    def _plugin_root_is_ignored(self, plugin_root: Path) -> bool:
+        resolved = plugin_root.resolve()
+        if self._is_under_workspace_pocketcode(resolved):
+            return self._workspace_filter.ignores(resolved, is_dir=True)
+        return self._global_plugin_filter.ignores_relative(Path(resolved.name), is_dir=True)
+
+    def _plugin_resource_is_ignored(self, plugin_root: Path, resource_path: Path) -> bool:
+        resolved_plugin_root = plugin_root.resolve()
+        resolved_resource = resource_path.resolve()
+        if self._is_under_workspace_pocketcode(resolved_plugin_root):
+            return self._workspace_filter.ignores(resolved_resource, is_dir=resolved_resource.is_dir())
+        try:
+            relative = resolved_resource.relative_to(resolved_plugin_root)
+        except ValueError:
+            return False
+        return self._global_plugin_filter.ignores_relative(
+            Path(resolved_plugin_root.name) / relative,
+            is_dir=resolved_resource.is_dir(),
+        )
+
+    def _is_under_workspace_pocketcode(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self._workspace_pocketcode_root.resolve())
+        except ValueError:
+            return False
+        return True
 
     def _load_reference(self, reference: Any, plugin_root: Path) -> Any:
         if not isinstance(reference, str):

@@ -24,6 +24,9 @@ class CompositeAgent:
         Human-readable description. Default ``""``.
     llm_profile : str | None
         LLM configuration profile name. ``None`` means inherit from lower tiers.
+    inline_prompt : str
+        Inline system prompt text appended before any ``extra_prompts`` content.
+        Used by Markdown-authored modes and other ephemeral overlays.
     extra_prompts : List[str]
         Ordered list of file paths whose contents are appended to the system
         prompt each turn. Default ``[]``.
@@ -43,6 +46,7 @@ class CompositeAgent:
     flow: str
     description: str = ""
     llm_profile: Optional[str] = None
+    inline_prompt: str = ""
     extra_prompts: List[str] = field(default_factory=list)
     tools: Optional[List[str]] = None
     tool_confirmation: Dict[str, Any] = field(default_factory=dict)

@@ -8,6 +8,11 @@ tools:
   list_files: tools/filesystem.py:ListFilesTool
   create_directory: tools/filesystem.py:CreateDirectoryTool
   glob_files: tools/filesystem.py:GlobFilesTool
+  select_filesystem_entry: tools/file_ops.py:SelectFilesystemEntryTool
+  extract_text: tools/file_ops.py:ExtractTextTool
+  stage_text_replace: tools/file_ops.py:StageTextReplaceTool
+  apply_staged_edit: tools/file_ops.py:ApplyStagedEditTool
+  cancel_staged_edit: tools/file_ops.py:CancelStagedEditTool
   search_code: tools/search.py:SearchCodeTool
   execute_command: tools/system.py:ExecuteCommandTool
   ask_user_input: tools/user_input.py:AskUserInputTool
@@ -30,6 +35,11 @@ flows:
       - list_files
       - create_directory
       - glob_files
+      - select_filesystem_entry
+      - extract_text
+      - stage_text_replace
+      - apply_staged_edit
+      - cancel_staged_edit
       - search_code
       - execute_command
       - ask_user_input

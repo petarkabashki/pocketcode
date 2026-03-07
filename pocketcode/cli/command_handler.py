@@ -15,6 +15,10 @@ BASE_COMMAND_SUGGESTIONS = [
     "/flows",
     "/flow",
     "/prompts",
+    "/modes",
+    "/mode",
+    "/skills",
+    "/skill",
     "/agents",
     "/agent",
     "/llms",
@@ -38,6 +42,14 @@ BASE_COMMAND_SUGGESTIONS = [
     "/agent edit prompts",
     "/agent tools",
     "/agent policy",
+    "/mode list",
+    "/mode show",
+    "/mode switch",
+    "/mode clear",
+    "/skill list",
+    "/skill show",
+    "/skill enable",
+    "/skill disable",
     "/copy",
     "/copy-all",
     "/exit",
@@ -56,18 +68,104 @@ BASE_COMMAND_SUGGESTIONS = [
 ]
 
 
-def list_command_suggestions(engine: PocketCodeEngine) -> list[str]:
-    flow_names = engine.list_flows() if hasattr(engine, "list_flows") else engine.list_agents()
-    agent_names = (
+def _list_flow_names(engine: PocketCodeEngine) -> list[str]:
+    names = engine.list_flows() if hasattr(engine, "list_flows") else engine.list_agents()
+    return sorted({str(name) for name in names})
+
+
+def _list_agent_names(engine: PocketCodeEngine) -> list[str]:
+    names = (
         engine.list_available_agents()
         if hasattr(engine, "list_available_agents")
         else engine.list_agent_profiles()
     )
+    return sorted({str(name) for name in names})
+
+
+def _get_current_flow_name(engine: PocketCodeEngine) -> str | None:
+    getter = None
+    if hasattr(engine, "get_current_flow"):
+        getter = engine.get_current_flow
+    elif hasattr(engine, "get_current_agent"):
+        getter = engine.get_current_agent
+    if getter is None:
+        return None
+    current = getter()
+    return str(current) if current else None
+
+
+def _get_active_agent_profile(engine: PocketCodeEngine) -> Any:
+    if hasattr(engine, "get_agent"):
+        return engine.get_agent()
+    if hasattr(engine, "get_agent_profile"):
+        return engine.get_agent_profile()
+    return None
+
+
+def _get_named_agent_profile(engine: PocketCodeEngine, name: str) -> Any:
+    if hasattr(engine, "get_agent"):
+        return engine.get_agent(name)
+    if hasattr(engine, "get_agent_profile"):
+        return engine.get_agent_profile(name)
+    return None
+
+
+def _list_user_agent_names(engine: PocketCodeEngine) -> list[str]:
+    names = _list_agent_names(engine)
+    visible: list[str] = []
+    for name in names:
+        profile = _get_named_agent_profile(engine, name)
+        if profile is not None and getattr(profile, "source", None) == "synthesised":
+            continue
+        visible.append(name)
+    return visible
+
+
+def _skill_group_name(skill_name: str) -> str:
+    cleaned = str(skill_name).strip()
+    if not cleaned:
+        return "other"
+    if "::" in cleaned:
+        return cleaned.split("::", 1)[0]
+    if "-" in cleaned:
+        return cleaned.split("-", 1)[0]
+    if "." in cleaned:
+        return cleaned.split(".", 1)[0]
+    return "other"
+
+
+def _print_grouped_skills(engine: PocketCodeEngine) -> None:
+    skills = engine.list_skills() if hasattr(engine, "list_skills") else []
+    active_skills = {
+        skill.name if hasattr(skill, "name") else str(skill)
+        for skill in (engine.get_active_skills() if hasattr(engine, "get_active_skills") else [])
+    }
+    print("Available skills:")
+    if not skills:
+        print("  (none)")
+        return
+
+    grouped: dict[str, list[str]] = {}
+    for name in sorted({str(skill_name) for skill_name in skills}):
+        grouped.setdefault(_skill_group_name(name), []).append(name)
+
+    for group_name in sorted(grouped):
+        print(f"  {group_name}:")
+        for skill_name in grouped[group_name]:
+            marker = "*" if skill_name in active_skills else " "
+            print(f"    {marker} {skill_name}")
+
+
+def list_command_suggestions(engine: PocketCodeEngine) -> list[str]:
+    flow_names = _list_flow_names(engine)
+    agent_names = _list_agent_names(engine)
     return sorted(
         set(
             BASE_COMMAND_SUGGESTIONS
             + flow_names
             + agent_names
+            + (engine.list_modes() if hasattr(engine, "list_modes") else [])
+            + (engine.list_skills() if hasattr(engine, "list_skills") else [])
             + engine.list_llm_profiles()
         )
     )
@@ -110,6 +208,8 @@ def handle_command(
         print("Runtime status:")
         print(f"  Flow: {status.get('flow')}")
         print(f"  Agent: {status.get('agent')}")
+        print(f"  Mode: {status.get('mode')}")
+        print(f"  Skills: {status.get('skills')}")
         print(f"  Global LLM Override: {status['global_llm_override']}")
         print(f"  Agent LLM Overrides: {status['agent_llm_overrides']}")
         print(f"  Handoff LLM Overrides: {status.get('handoff_llm_overrides', {})}")
@@ -119,7 +219,7 @@ def handle_command(
         print(f"  Tool Confirmation (session overrides): {status.get('session_tool_confirmation_overrides', {})}")
         return None
 
-    if command in {"/flows", "/agents", "/prompts", "/llms", "/tools", "/list"}:
+    if command in {"/flows", "/agents", "/prompts", "/modes", "/skills", "/llms", "/tools", "/list"}:
         return _handle_list_command(command=command, args=args, engine=engine)
 
     if command in {
@@ -140,6 +240,12 @@ def handle_command(
 
     if command == "/agent":
         return _handle_agent_command(args, engine)
+
+    if command == "/mode":
+        return _handle_mode_command(args, engine)
+
+    if command == "/skill":
+        return _handle_skill_command(args, engine)
 
     print(f"Unknown command: {command}")
     print_help()
@@ -170,20 +276,24 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         scope = "prompts"
     elif command == "/agents":
         scope = "agents"
+    elif command == "/modes":
+        scope = "modes"
+    elif command == "/skills":
+        scope = "skills"
     elif command == "/llms":
         scope = "llms"
     elif command == "/tools":
         scope = "tools"
     else:
         if not args:
-            print("Usage: /list <flows|prompts|agents|llms|tools> [flow]")
+            print("Usage: /list <flows|prompts|modes|skills|agents|llms|tools> [flow]")
             return None
         scope = args[0].lower()
         args = args[1:]
 
     if scope == "flows":
-        flows = engine.list_flows() if hasattr(engine, "list_flows") else engine.list_agents()
-        current_flow = engine.get_current_flow() if hasattr(engine, "get_current_flow") else engine.get_current_agent()
+        flows = _list_flow_names(engine)
+        current_flow = _get_current_flow_name(engine)
         print("Available flows:")
         for flow in flows:
             marker = "*" if flow == current_flow else " "
@@ -191,17 +301,30 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         return None
 
     if scope == "agents":
-        agents = (
-            engine.list_available_agents()
-            if hasattr(engine, "list_available_agents")
-            else engine.list_agent_profiles()
-        )
-        active_agent = engine.get_agent() if hasattr(engine, "get_agent") else engine.get_agent_profile()
+        agents = _list_user_agent_names(engine)
+        active_agent = _get_active_agent_profile(engine)
         active_name = active_agent.name if active_agent else None
         print("Available agents:")
         for agent in agents:
             marker = "*" if agent == active_name else " "
             print(f"  {marker} {agent}")
+        if not agents:
+            print("  (none)")
+        return None
+
+    if scope == "modes":
+        modes = engine.list_modes() if hasattr(engine, "list_modes") else []
+        active_mode = engine.get_mode() if hasattr(engine, "get_mode") else None
+        print("Available modes:")
+        for mode in modes:
+            marker = "*" if active_mode and active_mode.name == mode else " "
+            print(f"  {marker} {mode}")
+        if not modes:
+            print("  (none)")
+        return None
+
+    if scope == "skills":
+        _print_grouped_skills(engine)
         return None
 
     if scope == "prompts":
@@ -223,9 +346,7 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         return None
 
     if scope == "tools":
-        target_flow = args[0] if args else (
-            engine.get_current_flow() if hasattr(engine, "get_current_flow") else engine.get_current_agent()
-        )
+        target_flow = args[0] if args else _get_current_flow_name(engine)
         if not target_flow:
             print("No active flow selected. Use /flow <name> or /tools <flow_name>.")
             return None
@@ -263,8 +384,8 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
 
     if command == "/flow":
         if not args:
-            current_flow = engine.get_current_flow() if hasattr(engine, "get_current_flow") else engine.get_current_agent()
-            current_agent = engine.get_agent() if hasattr(engine, "get_agent") else engine.get_agent_profile()
+            current_flow = _get_current_flow_name(engine)
+            current_agent = _get_active_agent_profile(engine)
             print(f"Current flow: {current_flow or 'auto'}")
             if current_agent:
                 print(f"Current agent: {current_agent.name}")
@@ -509,19 +630,152 @@ def _handle_stop_command(active_run: Any) -> Optional[str]:
     return None
 
 
+def _handle_mode_command(
+    args: list[str],
+    engine: PocketCodeEngine,
+) -> Optional[str]:
+    if not args:
+        print_mode_help()
+        return None
+
+    subcommand = args[0].lower()
+    sub_args = args[1:]
+
+    if subcommand == "help":
+        print_mode_help()
+        return None
+
+    if subcommand == "list":
+        modes = engine.list_modes() if hasattr(engine, "list_modes") else []
+        active_mode = engine.get_mode() if hasattr(engine, "get_mode") else None
+        print("Available modes:")
+        for name in modes:
+            marker = "*" if active_mode and active_mode.name == name else " "
+            print(f"  {marker} {name}")
+        if not modes:
+            print("  (none)")
+        return None
+
+    if subcommand == "show":
+        mode = None
+        if sub_args and hasattr(engine, "get_mode"):
+            mode = engine.get_mode(sub_args[0])
+        elif hasattr(engine, "get_mode"):
+            mode = engine.get_mode()
+        if mode is None:
+            print("No mode is currently active." if not sub_args else f"Mode not found: {sub_args[0]}")
+            return None
+        print(f"Mode: {mode.name}")
+        print(f"  Desc     : {mode.description or '-'}")
+        print(f"  Flow     : {mode.flow or '(inherit)'}")
+        print(f"  Agent    : {mode.agent or '(inherit)'}")
+        print(f"  LLM      : {mode.llm_profile or '(inherit)'}")
+        print(f"  Tools    : {mode.tools if mode.tools_specified else '(inherit)'}")
+        print(f"  Extra    : {mode.extra_prompts or []}")
+        print(f"  Confirm  : {mode.tool_confirmation or {}}")
+        if getattr(mode, "source_path", None):
+            print(f"  Path     : {mode.source_path}")
+        return None
+
+    if subcommand == "switch":
+        if not sub_args:
+            print("Usage: /mode switch <mode_name>")
+            return None
+        try:
+            engine.set_mode(sub_args[0])
+            print(f"Mode activated: {sub_args[0]}")
+        except ValueError as exc:
+            print(f"Error: {exc}")
+        return None
+
+    if subcommand in {"clear", "reset", "off"}:
+        engine.set_mode(None)
+        print("Mode cleared.")
+        return None
+
+    print(f"Unknown /mode subcommand: {subcommand}")
+    print_mode_help()
+    return None
+
+
+def _handle_skill_command(
+    args: list[str],
+    engine: PocketCodeEngine,
+) -> Optional[str]:
+    if not args:
+        print_skill_help()
+        return None
+
+    subcommand = args[0].lower()
+    sub_args = args[1:]
+
+    if subcommand == "help":
+        print_skill_help()
+        return None
+
+    if subcommand == "list":
+        _print_grouped_skills(engine)
+        return None
+
+    if subcommand == "show":
+        if not sub_args:
+            print("Usage: /skill show <skill_name>")
+            return None
+        skill = engine.get_skill(sub_args[0]) if hasattr(engine, "get_skill") else None
+        if skill is None:
+            print(f"Skill not found: {sub_args[0]}")
+            return None
+        print(f"Skill: {skill.name}")
+        print(f"  Desc     : {skill.description or '-'}")
+        print(f"  Tools    : {skill.tool_refs or []}")
+        print(f"  Provided : {sorted(skill.provided_tools.keys())}")
+        print(f"  Extra    : {skill.extra_prompts or []}")
+        print(f"  Refs     : {skill.references or []}")
+        print(f"  Scripts  : {skill.scripts or []}")
+        print(f"  Assets   : {skill.assets or []}")
+        if getattr(skill, "source_path", None):
+            print(f"  Path     : {skill.source_path}")
+        return None
+
+    if subcommand == "enable":
+        if not sub_args:
+            print("Usage: /skill enable <skill_name>")
+            return None
+        try:
+            engine.enable_skill(sub_args[0])
+            print(f"Skill enabled: {sub_args[0]}")
+        except ValueError as exc:
+            print(f"Error: {exc}")
+        return None
+
+    if subcommand == "disable":
+        if not sub_args:
+            print("Usage: /skill disable <skill_name>")
+            return None
+        engine.disable_skill(sub_args[0])
+        print(f"Skill disabled: {sub_args[0]}")
+        return None
+
+    print(f"Unknown /skill subcommand: {subcommand}")
+    print_skill_help()
+    return None
+
+
 def print_help() -> None:
     help_text = """
 Pocketcode Commands:
   /help                          Show this help message.
   /list <scope> [opts]           List entities by scope.
-                                                                 Scopes: flows|prompts|agents|llms|tools [flow for tools]
+                                 Scopes: flows|prompts|modes|skills|agents|llms|tools [flow for tools]
   /set <target> <args...>        Set runtime selection/override.
                                  Targets: flow|llm|llm-flow|llm-handoff
   /flow <flow_name|auto>         Select the active flow.
                                  Optional: --agent <agent_name>
-    /prompts                       List registered prompts.
+  /prompts                       List registered prompts.
+  /mode <cmd> [opts]             Manage runtime modes. Run '/mode help'.
+  /skill <cmd> [opts]            Manage runtime skills. Run '/skill help'.
   /reload                        Reload plugins and runtime catalogs.
-    /stop, /cancel                 Request cancellation of the active run.
+  /stop, /cancel                 Request cancellation of the active run.
   /status                        Show runtime status.
   /context <cmd> [opts]          Manage context. Run '/context help'.
   /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
@@ -531,7 +785,9 @@ Pocketcode Commands:
 
 Compatibility aliases:
   /flows     -> /list flows
-    /prompts   -> /list prompts
+  /prompts   -> /list prompts
+  /modes     -> /list modes
+  /skills    -> /list skills
   /agents    -> /list agents
   /llms      -> /list llms
   /tools     -> /list tools
@@ -542,19 +798,12 @@ Compatibility aliases:
 
 Keyboard shortcuts (Textual UI):
   Tab                           Complete current prompt input.
-        F1 / F2 / F3 / F4 / F5        Switch Chat / Control / Edit Agent / Context / Run views.
-    F6                            Select next agent.
-    Shift+F6                      Select previous agent.
-    F7 or Ctrl+P                  Select next agent profile for the current agent.
-    Shift+F7 or Ctrl+Shift+P      Select previous agent profile for the current agent.
-  F8                            Select next global LLM override.
-  Shift+F8                      Select previous global LLM override.
-  F9                            Toggle the left navigation panel.
+  F1 / F2 / F5                  Switch Chat / Control / Run views.
+  F3                            Open the popup editor selector (agent, LLM, tools, tool policies).
+  F4                            Open the popup clone selector (agent, LLM).
+  F6                            Open Select (agent, LLM, skills, tools, tool policies, confirm, system settings).
   F10                           Toggle the right inspector panel.
-  F11                           Toggle the second header row.
-  Ctrl+W                        Cycle workspace mode presets.
-        Alt+1 / Alt+2 / Alt+3         Switch Chat / Control / Edit Agent views.
-  Alt+4 / Alt+5                 Switch Context / Run views.
+  Alt+1 / Alt+2 / Alt+5         Switch Chat / Control / Run views.
   Ctrl+Shift+A                  Copy full response console output.
   Ctrl+Y                        Copy last assistant response.
   Ctrl+Q                        Quit Textual UI.
@@ -736,11 +985,11 @@ def _handle_agent_command(
         return None
 
     if subcommand == "list":
-        agents = engine.list_available_agents() if hasattr(engine, "list_available_agents") else engine.list_agent_profiles()
+        agents = _list_user_agent_names(engine)
         if not agents:
             print("No agents available.")
             return None
-        active = engine.get_agent() if hasattr(engine, "get_agent") else engine.get_agent_profile()
+        active = _get_active_agent_profile(engine)
         print("Available agents:")
         for name in agents:
             marker = "*" if (active and active.name == name) else " "
@@ -1050,7 +1299,7 @@ def _get_profile_confirmation_overrides(profile: Any) -> dict[str, str]:
 def print_agent_help() -> None:
     text = """
 /agent Commands:
-  /agent list                                 List all available agents.
+  /agent list                                 List all named agents (excludes synthesised flow defaults).
   /agent show [agent_name]                    Show details of an agent (default: active).
   /agent switch <agent_name>                  Activate an agent.
   /agent clone <source> <new_name>            Clone an agent to a new workspace agent.
@@ -1072,6 +1321,30 @@ Usage with /flow:
 
 Compatibility:
     Agent shortcuts only: /ag and /ap map to /agent.
+"""
+    print(text)
+
+
+def print_mode_help() -> None:
+    text = """
+/mode Commands:
+  /mode list                                 List all available modes.
+  /mode show [mode_name]                     Show details of a mode (default: active).
+  /mode switch <mode_name>                   Activate a mode.
+  /mode clear                                Clear the active mode.
+  /mode help                                 Show this help message.
+"""
+    print(text)
+
+
+def print_skill_help() -> None:
+    text = """
+/skill Commands:
+  /skill list                                List all available skills grouped by top-level name prefix.
+  /skill show <skill_name>                   Show details of a skill.
+  /skill enable <skill_name>                 Enable a skill for the current session.
+  /skill disable <skill_name>                Disable a skill for the current session.
+  /skill help                                Show this help message.
 """
     print(text)
 
