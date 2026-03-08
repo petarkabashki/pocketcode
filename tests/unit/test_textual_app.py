@@ -271,8 +271,12 @@ class _TextualEngineStub:
         self.update_mode_calls: list[dict[str, object]] = []
         self.save_system_settings_calls: list[dict[str, object]] = []
         self.set_last_used_skill_calls: list[list[str]] = []
+        self.set_last_used_profile_skill_calls: list[tuple[str, list[str]]] = []
         self.reset_last_used_skill_calls = 0
+        self.reset_last_used_profile_skill_calls: list[str] = []
         self.save_default_skills_calls: list[list[str]] = []
+        self.save_agent_profile_skill_calls: list[tuple[str, list[str]]] = []
+        self.save_agent_profile_tool_calls: list[tuple[str, list[str] | None]] = []
         self.set_last_used_profile_tools_calls: list[tuple[str, list[str] | None]] = []
         self.reset_last_used_profile_tools_calls: list[str] = []
         self.set_last_used_profile_tool_policy_calls: list[tuple[str, dict[str, str]]] = []
@@ -285,6 +289,7 @@ class _TextualEngineStub:
         self.deleted_sessions: list[str] = []
         self.cleared_sessions = 0
         self.active_skills: list[str] = []
+        self.profile_skill_overrides: dict[str, list[str]] = {}
         self.skill_enabled: list[str] = []
         self.skill_disabled: list[str] = []
         self._saved_sessions = [
@@ -330,6 +335,7 @@ class _TextualEngineStub:
             source="workspace" if name.endswith("-safe") else "synthesised",
             description="",
             llm_profile=None,
+            skills=None,
             tools=None,
             tool_confirmation={},
             extra_prompts=[],
@@ -413,6 +419,9 @@ class _TextualEngineStub:
         self.active_agent_profile = self._profiles.get(name, self._profile(name, self.current_agent))
         self.current_agent = self.active_agent_profile.agent
         self.active_mode = None
+        self.active_skills = list(
+            self.profile_skill_overrides.get(name, self.active_agent_profile.skills or [])
+        )
 
     def set_last_used_active_profile(self, name):
         self.set_last_used_active_profile_calls.append(name)
@@ -450,6 +459,7 @@ class _TextualEngineStub:
             source="workspace",
             description="",
             llm_profile=None,
+            skills=None,
             tools=None,
             tool_confirmation={},
             extra_prompts=[],
@@ -534,14 +544,41 @@ class _TextualEngineStub:
         self.active_skills = normalized
         return Path("/tmp/pocketcode.yml")
 
+    def set_last_used_profile_skills(self, profile_name, skill_names):
+        normalized = list(skill_names)
+        self.set_last_used_profile_skill_calls.append((profile_name, normalized))
+        self.profile_skill_overrides[profile_name] = normalized
+        if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+            self.active_skills = normalized
+        return Path("/tmp/pocketcode.yml")
+
     def reset_last_used_skills(self):
         self.reset_last_used_skill_calls += 1
         self.active_skills = []
         return Path("/tmp/pocketcode.yml")
 
+    def reset_last_used_profile_skills(self, profile_name):
+        self.reset_last_used_profile_skill_calls.append(profile_name)
+        self.profile_skill_overrides.pop(profile_name, None)
+        if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+            self.active_skills = []
+        return Path("/tmp/pocketcode.yml")
+
     def save_default_skills(self, skill_names):
         self.save_default_skills_calls.append(list(skill_names))
         return Path("/tmp/pocketcode.yml")
+
+    def save_agent_profile_skills(self, profile_name, skill_names):
+        normalized = list(skill_names)
+        self.save_agent_profile_skill_calls.append((profile_name, normalized))
+        profile = self._profiles.get(profile_name)
+        if profile is not None:
+            profile.skills = normalized
+            self.profile_skill_overrides.pop(profile_name, None)
+            if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+                self.active_agent_profile.skills = normalized
+                self.active_skills = normalized
+        return profile
 
     def list_textual_selection_presets(self):
         return sorted(self._selection_presets)
@@ -585,6 +622,16 @@ class _TextualEngineStub:
             if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
                 self.active_agent_profile.tools = None
         return Path("/tmp/pocketcode.yml")
+
+    def save_agent_profile_tools(self, profile_name, tools):
+        normalized = None if tools is None else list(tools)
+        self.save_agent_profile_tool_calls.append((profile_name, normalized))
+        profile = self._profiles.get(profile_name)
+        if profile is not None:
+            profile.tools = normalized
+            if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+                self.active_agent_profile.tools = normalized
+        return profile
 
     def set_last_used_profile_tool_policies(self, profile_name, overrides):
         normalized = dict(overrides)
@@ -1606,7 +1653,7 @@ class TestProfileCloneAndSave:
 
 
 class TestInspectorToolFiltering:
-    def test_inspector_hides_deselected_tools(self):
+    def test_inspector_tool_list_reflects_effective_selection(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
             engine.set_active_agent_profile("a-safe")
@@ -1618,10 +1665,32 @@ class TestInspectorToolFiltering:
 
             async with app.run_test() as pilot:
                 await pilot.pause()
-                text = app.query_one("#inspector-tools").text
+                tool_list = app.query_one("#inspector-tools", SelectionList)
 
-                assert "tool.read" in text
-                assert "tool.write" not in text
+                assert "tool.read" in tool_list.selected
+                assert "tool.write" not in tool_list.selected
+                assert "__skill_group__:tool" not in tool_list.selected
+                assert "__skill_group__:tool/filesystem" not in tool_list.selected
+
+        asyncio.run(exercise())
+
+    def test_inspector_tool_group_list_reflects_unrestricted_selection(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                tool_list = app.query_one("#inspector-tools", SelectionList)
+
+                assert "tool.read" in tool_list.selected
+                assert "tool.write" in tool_list.selected
+                assert "__skill_group__:tool" in tool_list.selected
+                assert "__skill_group__:tool/filesystem" in tool_list.selected
 
         asyncio.run(exercise())
 
@@ -1665,7 +1734,7 @@ class TestInspectorToolFiltering:
                 await pilot.pause(0.05)
 
                 assert engine.skill_enabled == ["python-testing"]
-                assert engine.set_last_used_skill_calls[-1] == ["python-testing"]
+                assert engine.set_last_used_profile_skill_calls[-1] == ("a", ["python-testing"])
 
         asyncio.run(exercise())
 
@@ -1691,6 +1760,107 @@ class TestInspectorToolFiltering:
                 await pilot.pause(0.05)
 
                 assert engine.skill_enabled == ["python-lint", "python-testing"]
-                assert engine.set_last_used_skill_calls[-1] == ["python-lint", "python-testing"]
+                assert engine.set_last_used_profile_skill_calls[-1] == (
+                    "a",
+                    ["python-lint", "python-testing"],
+                )
+
+        asyncio.run(exercise())
+
+    def test_inspector_tool_toggle_updates_profile_allowlist(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                selection_list = SimpleNamespace(
+                    id="inspector-tools",
+                    disabled=False,
+                    selected={"tool.write"},
+                    get_option_at_index=lambda index: SimpleNamespace(value="tool.read"),
+                )
+                event = SimpleNamespace(selection_list=selection_list, selection_index=0)
+
+                app.on_selection_list_selection_toggled(event)
+                await pilot.pause(0.05)
+
+                assert engine.set_last_used_profile_tools_calls[-1] == ("a-safe", ["tool.write"])
+
+        asyncio.run(exercise())
+
+    def test_inspector_skill_save_button_persists_to_agent_yaml(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            engine.active_skills = ["python-lint", "python-testing"]
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                event = SimpleNamespace(button=SimpleNamespace(id="inspector-skill-save-button"))
+
+                app.on_button_pressed(event)
+                await pilot.pause(0.05)
+
+                assert engine.save_agent_profile_skill_calls[-1] == (
+                    "a-safe",
+                    ["python-lint", "python-testing"],
+                )
+
+        asyncio.run(exercise())
+
+    def test_inspector_tool_save_button_persists_to_agent_yaml(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            engine.active_agent_profile.tools = ["tool.read"]
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                event = SimpleNamespace(button=SimpleNamespace(id="inspector-tool-save-button"))
+
+                app.on_button_pressed(event)
+                await pilot.pause(0.05)
+
+                assert engine.save_agent_profile_tool_calls[-1] == ("a-safe", ["tool.read"])
+
+        asyncio.run(exercise())
+
+    def test_inspector_tool_group_toggle_updates_nested_group_members(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.set_active_agent_profile("a-safe")
+            engine.active_agent_profile.tools = ["tool.read"]
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                selection_list = SimpleNamespace(
+                    id="inspector-tools",
+                    disabled=False,
+                    selected={"__skill_group__:tool/filesystem"},
+                    get_option_at_index=lambda index: SimpleNamespace(value="__skill_group__:tool/filesystem"),
+                )
+                event = SimpleNamespace(selection_list=selection_list, selection_index=0)
+
+                app.on_selection_list_selection_toggled(event)
+                await pilot.pause(0.05)
+
+                assert engine.set_last_used_profile_tools_calls[-1] == ("a-safe", None)
 
         asyncio.run(exercise())

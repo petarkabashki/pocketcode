@@ -59,6 +59,7 @@ Important fields:
 - `llm_profile`
 - `inline_prompt`
 - `extra_prompts`
+- `skills`
 - `tools`
 - `tool_confirmation`
 - `source`, `source_path`
@@ -197,6 +198,15 @@ Current effective prompt composition is:
 5. enabled skill resolved `extra_prompts`
 
 Prompt file includes are expanded before the flow `system_prompt` is stored.
+
+### Enabled skill resolution
+
+Current enabled-skill resolution order is:
+
+1. Textual per-profile last-used override
+2. active profile YAML `skills`
+3. Textual global last-used skills
+4. Textual global `default_skills`
 
 ### Tool availability
 

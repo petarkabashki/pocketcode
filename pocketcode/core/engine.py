@@ -23,6 +23,7 @@ from pocketcode.core.tool_runtime import ToolRuntime
 from pocketcode.core.workspace_llm_profile_manager import WorkspaceLlmProfileManager
 
 logger = logging.getLogger(__name__)
+_UNSET = object()
 
 
 class PocketCodeEngine:
@@ -320,6 +321,8 @@ class PocketCodeEngine:
             self.current_agent = None
             self.active_agent_profile = None
             self.active_mode = None
+            self.enabled_skills = self._configured_enabled_skills()
+            self._maybe_refresh_runtime_components()
             return
         if normalized_agent_name not in self._plugins.agents:
             raise KeyError(f"Unknown agent '{agent_name}'.")
@@ -351,6 +354,8 @@ class PocketCodeEngine:
         self.active_mode = None
         self.current_agent = self._normalize_agent_name(profile.agent)
         self.active_agent_profile = self._apply_textual_profile_overrides(profile)
+        self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
+        self._maybe_refresh_runtime_components()
 
     def set_active_agent(self, name: Optional[str]) -> None:
         self.set_active_agent_profile(name)
@@ -380,6 +385,8 @@ class PocketCodeEngine:
         self.active_mode = mode
         self.current_agent = self._normalize_agent_name(profile.agent)
         self.active_agent_profile = self._apply_textual_profile_overrides(profile)
+        self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
+        self._maybe_refresh_runtime_components()
 
     def _normalize_agent_name(self, agent_name: Any) -> Optional[str]:
         cleaned = str(agent_name or "").strip()
@@ -451,6 +458,30 @@ class PocketCodeEngine:
         self._cleanup_textual_last_used_config()
         self.enabled_skills = self._configured_enabled_skills()
         self._refresh_runtime_components()
+        return self._write_workspace_config()
+
+    def set_last_used_profile_skills(self, profile_name: str, skill_names: List[str]) -> Path:
+        profile = self._base_agent_profile(profile_name)
+        if profile is None and (self.active_agent_profile is None or self.active_agent_profile.name != profile_name):
+            raise ValueError(f"Unknown agent profile '{profile_name}'.")
+        normalized = self._normalize_skill_names(skill_names, strict=True)
+        base_skills = self._base_skill_selection_for_profile(profile_name)
+        if normalized == base_skills:
+            return self.reset_last_used_profile_skills(profile_name)
+        profile_state = self._textual_profile_state(profile_name, create=True)
+        profile_state["skills"] = normalized
+        if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+            self.enabled_skills = list(normalized)
+            self._maybe_refresh_runtime_components()
+        return self._write_workspace_config()
+
+    def reset_last_used_profile_skills(self, profile_name: str) -> Path:
+        profile_state = self._textual_profile_state(profile_name, create=True)
+        profile_state.pop("skills", None)
+        self._cleanup_textual_profile_state(profile_name)
+        if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
+            self.enabled_skills = self._configured_enabled_skills(profile_name)
+            self._maybe_refresh_runtime_components()
         return self._write_workspace_config()
 
     def save_default_skills(self, skill_names: List[str]) -> Path:
@@ -687,6 +718,7 @@ class PocketCodeEngine:
         extra_prompts: List[str],
         tool_confirmation_default: Optional[str],
         tool_confirmation_overrides: Optional[Dict[str, Optional[str]]] = None,
+        skills: Any = _UNSET,
     ) -> Any:
         """Persist updates to a workspace-backed agent profile and refresh runtime state."""
         profile = self._base_agent_profile(name)
@@ -722,6 +754,11 @@ class PocketCodeEngine:
         updated = dataclasses.replace(
             profile,
             llm_profile=llm_profile or None,
+            skills=(
+                self._normalize_skill_names(skills, strict=True)
+                if skills is not _UNSET
+                else (list(profile.skills) if profile.skills is not None else None)
+            ),
             tools=list(tools) if tools is not None else None,
             extra_prompts=list(extra_prompts),
             tool_confirmation=confirmation,
@@ -731,6 +768,58 @@ class PocketCodeEngine:
         refreshed = self._agent_profile_manager.get(name)
         if refreshed is not None and self.active_agent_profile and self.active_agent_profile.name == name:
             self.active_agent_profile = self._apply_textual_profile_overrides(refreshed)
+        return refreshed
+
+    def save_agent_profile_skills(self, profile_name: str, skill_names: List[str]) -> Any:
+        profile = self._base_agent_profile(profile_name)
+        if profile is None:
+            raise ValueError(f"Unknown agent profile '{profile_name}'.")
+        normalized = self._normalize_skill_names(skill_names, strict=True)
+        refreshed = self.update_agent_profile(
+            profile_name,
+            llm_profile=profile.llm_profile,
+            tools=list(profile.tools) if profile.tools is not None else None,
+            extra_prompts=list(profile.extra_prompts),
+            tool_confirmation_default=(
+                str(profile.tool_confirmation.get("default"))
+                if isinstance(profile.tool_confirmation, dict) and profile.tool_confirmation.get("default")
+                else None
+            ),
+            tool_confirmation_overrides=(
+                self._normalized_confirmation_overrides(profile.tool_confirmation.get("overrides", {}))
+                if isinstance(profile.tool_confirmation, dict)
+                else {}
+            ),
+            skills=normalized,
+        )
+        self._clear_textual_profile_skills_override(profile_name, normalized)
+        self._refresh_active_profile(profile_name)
+        return refreshed
+
+    def save_agent_profile_tools(self, profile_name: str, tools: Optional[List[str]]) -> Any:
+        profile = self._base_agent_profile(profile_name)
+        if profile is None:
+            raise ValueError(f"Unknown agent profile '{profile_name}'.")
+        normalized_tools = self._normalize_tool_list(tools)
+        refreshed = self.update_agent_profile(
+            profile_name,
+            llm_profile=profile.llm_profile,
+            tools=normalized_tools,
+            extra_prompts=list(profile.extra_prompts),
+            tool_confirmation_default=(
+                str(profile.tool_confirmation.get("default"))
+                if isinstance(profile.tool_confirmation, dict) and profile.tool_confirmation.get("default")
+                else None
+            ),
+            tool_confirmation_overrides=(
+                self._normalized_confirmation_overrides(profile.tool_confirmation.get("overrides", {}))
+                if isinstance(profile.tool_confirmation, dict)
+                else {}
+            ),
+            skills=list(profile.skills) if profile.skills is not None else None,
+        )
+        self._clear_textual_profile_tools_override(profile_name, normalized_tools)
+        self._refresh_active_profile(profile_name)
         return refreshed
 
     def set_last_used_profile_tools(self, profile_name: str, tools: Optional[List[str]]) -> Path:
@@ -786,6 +875,7 @@ class PocketCodeEngine:
         extra_prompts: List[str],
         tool_confirmation_default: Optional[str],
         tool_confirmation_overrides: Optional[Dict[str, Optional[str]]] = None,
+        skills: Any = _UNSET,
     ) -> Any:
         return self.update_agent_profile(
             name,
@@ -794,6 +884,7 @@ class PocketCodeEngine:
             extra_prompts=extra_prompts,
             tool_confirmation_default=tool_confirmation_default,
             tool_confirmation_overrides=tool_confirmation_overrides,
+            skills=skills,
         )
 
     def list_tools_for_agent(
@@ -1774,6 +1865,14 @@ class PocketCodeEngine:
             "snippet_chars": snippet_chars,
         }
 
+    def _maybe_refresh_runtime_components(self) -> None:
+        if not hasattr(self, "_plugins") or not hasattr(self._plugins, "tools"):
+            return
+        required_attrs = ("_runtime_config", "_tool_confirmation_config", "_llm_router")
+        if not all(hasattr(self, attr_name) for attr_name in required_attrs):
+            return
+        self._refresh_runtime_components()
+
     def _refresh_runtime_components(self) -> None:
         self._tool_runtime = self._build_tool_runtime()
         self._agent_runtime = AgentRuntime(
@@ -1903,6 +2002,8 @@ class PocketCodeEngine:
                 if "tools" in state:
                     tools = state.get("tools")
                     cleaned_state["tools"] = self._normalize_tool_list(tools) if isinstance(tools, list) else None
+                if "skills" in state and isinstance(state.get("skills"), list):
+                    cleaned_state["skills"] = self._normalize_skill_names(list(state.get("skills", [])), strict=False)
                 if "tool_confirmation_overrides" in state:
                     cleaned_state["tool_confirmation_overrides"] = self._normalized_confirmation_overrides(
                         state.get("tool_confirmation_overrides", {})
@@ -2005,13 +2106,43 @@ class PocketCodeEngine:
         if isinstance(last_used, dict) and not last_used:
             textual.pop("last_used", None)
 
-    def _configured_enabled_skills(self) -> List[str]:
+    def _configured_global_skills(self) -> List[str]:
+        if not hasattr(self, "_skill_manager"):
+            return []
         textual = self._textual_config(create=False)
         last_used = textual.get("last_used", {}) if isinstance(textual, dict) else {}
         if isinstance(last_used, dict) and isinstance(last_used.get("skills"), list):
             return self._normalize_skill_names(last_used.get("skills", []), strict=False)
         default_skills = textual.get("default_skills", []) if isinstance(textual, dict) else []
         return self._normalize_skill_names(default_skills, strict=False)
+
+    def _base_skill_selection_for_profile(self, profile_name: str | None = None) -> List[str]:
+        target_profile = str(
+            profile_name
+            or getattr(getattr(self, "active_agent_profile", None), "name", "")
+            or ""
+        ).strip()
+        if target_profile:
+            profile = self._base_agent_profile(target_profile)
+            if profile is not None and getattr(profile, "skills", None) is not None:
+                return self._normalize_skill_names(getattr(profile, "skills", []), strict=False)
+        return self._configured_global_skills()
+
+    def _configured_enabled_skills(self, profile_name: str | None = None) -> List[str]:
+        textual = self._textual_config(create=False)
+        last_used = textual.get("last_used", {}) if isinstance(textual, dict) else {}
+        target_profile = str(
+            profile_name
+            or getattr(getattr(self, "active_agent_profile", None), "name", "")
+            or ""
+        ).strip()
+        if target_profile and isinstance(last_used, dict):
+            agent_profiles = last_used.get("agent_profiles", {})
+            if isinstance(agent_profiles, dict):
+                profile_state = agent_profiles.get(target_profile, {})
+                if isinstance(profile_state, dict) and isinstance(profile_state.get("skills"), list):
+                    return self._normalize_skill_names(profile_state.get("skills", []), strict=False)
+        return self._base_skill_selection_for_profile(target_profile)
 
     def _normalize_skill_names(self, skill_names: List[str], *, strict: bool) -> List[str]:
         normalized: list[str] = []
@@ -2087,6 +2218,30 @@ class PocketCodeEngine:
         if raw_profile is None:
             return
         self.active_agent_profile = self._apply_textual_profile_overrides(raw_profile)
+        self.enabled_skills = self._configured_enabled_skills(profile_name)
+        self._maybe_refresh_runtime_components()
+
+    def _clear_textual_profile_skills_override(self, profile_name: str, skill_names: List[str]) -> None:
+        profile_state = self._textual_profile_state(profile_name, create=False)
+        if not profile_state:
+            return
+        if self._normalize_skill_names(profile_state.get("skills", []), strict=False) != list(skill_names):
+            return
+        profile_state.pop("skills", None)
+        self._cleanup_textual_profile_state(profile_name)
+        self._write_workspace_config()
+
+    def _clear_textual_profile_tools_override(self, profile_name: str, tools: Optional[List[str]]) -> None:
+        profile_state = self._textual_profile_state(profile_name, create=False)
+        if not profile_state or "tools" not in profile_state:
+            return
+        raw_tools = profile_state.get("tools")
+        profile_tools = self._normalize_tool_list(raw_tools) if isinstance(raw_tools, list) else None
+        if profile_tools != self._normalize_tool_list(tools):
+            return
+        profile_state.pop("tools", None)
+        self._cleanup_textual_profile_state(profile_name)
+        self._write_workspace_config()
 
     def _build_agent_path(self, shared_store: Dict[str, Any]) -> List[str]:
         trace = shared_store.get("agent_trace", [])

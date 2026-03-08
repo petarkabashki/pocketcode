@@ -11,7 +11,7 @@ def test_workspace_builder_skill_pack_is_discoverable():
 
     expected = {
         "pocketcode-workspace-builder",
-        "pocketflow-graph-authoring",
+        "pocketcode-graph-authoring",
         "pocketcode-plugin-authoring",
         "pocketcode-profiles-prompts",
         "pocketcode-tools-runtime",

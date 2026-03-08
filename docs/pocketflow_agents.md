@@ -76,6 +76,7 @@ Profiles can change:
 - `llm_profile`
 - `inline_prompt`
 - `extra_prompts`
+- `skills`
 - `tools`
 - `tool_confirmation`
 
@@ -116,6 +117,8 @@ name: my-review-profile
 flow: core.react
 description: Review-focused profile
 llm_profile: fast-review
+skills:
+  - python-testing
 tools:
   - core.read_file
   - core.search_code
@@ -130,6 +133,7 @@ tool_confirmation:
 Notes:
 
 - `flow` is required.
+- `skills` omitted means fall back to the global Textual skill defaults for that session.
 - `tools` omitted means inherit the flow tool surface.
 - `tools: []` means allow no base tools.
 

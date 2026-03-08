@@ -123,7 +123,28 @@ Common keys include:
 - session confirmation default
 - `auto_confirm_tools`
 - per-profile tool allowlists
+- per-profile skill selections
 - per-profile tool confirmation overrides
+
+Current skill persistence order inside `runtime.textual` is:
+
+1. `last_used.agent_profiles.<profile>.skills`
+2. `.pocketcode/agents/<profile>.yaml -> skills`
+3. `last_used.skills`
+4. `default_skills`
+
+Profile-scoped skill selections are stored alongside other per-profile Textual overrides, for example:
+
+```yaml
+runtime:
+  textual:
+    last_used:
+      agent_profiles:
+        my-agent:
+          skills:
+            - python-testing
+            - azure-prepare
+```
 
 ## Workspace Resource Layout
 
@@ -175,6 +196,8 @@ name: my-review-profile
 flow: core.react
 description: Restrictive review profile
 llm_profile: fast-review
+skills:
+  - python-testing
 tools:
   - core.read_file
   - core.search_code
@@ -189,6 +212,7 @@ tool_confirmation:
 Notes:
 
 - `flow` is required.
+- `skills` is optional. When omitted, the profile falls back to the global Textual skill selection order.
 - `tools` is optional. When omitted, the profile inherits the flow tool set.
 - `extra_prompts` are resolved relative to the profile file first, then against plugin and workspace fallback roots.
 

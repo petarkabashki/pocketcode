@@ -44,7 +44,7 @@ class CompositeAgentManager:
         from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
 
         self._flow_definitions = {
-            str(name).replace("::", "."): definition
+            str(name): definition
             for name, definition in flow_definitions.items()
         }
         self._agents = {}
@@ -57,7 +57,7 @@ class CompositeAgentManager:
             ignore_dir=self._workspace_root,
         )
 
-        for qname, defn in self._flow_definitions.items():
+        for qname, defn in flow_definitions.items():
             explicit: Optional[Agent] = (
                 getattr(defn, "default_agent", None)
                 or getattr(defn, "default_agent_profile", None)
@@ -72,6 +72,7 @@ class CompositeAgentManager:
                 description=f"Synthesised default agent for {qname}.",
                 llm_profile=getattr(defn, "llm_profile", None),
                 extra_prompts=[],
+                skills=None,
                 tools=list(getattr(defn, "tools", None) or []) or None,
                 tool_confirmation={},
                 source="synthesised",
@@ -245,8 +246,11 @@ class CompositeAgentManager:
                 )
                 return
 
-            flow_name = str(flow_name).replace("::", ".")
-            flow_def = self._flow_definitions.get(flow_name)
+            normalized_flow_name = str(flow_name).replace("::", ".")
+            flow_def = (
+                self._flow_definitions.get(str(flow_name))
+                or self._flow_definitions.get(normalized_flow_name)
+            )
 
             tool_confirmation_raw = raw.get("tool_confirmation", {})
             if not isinstance(tool_confirmation_raw, dict):
@@ -256,12 +260,16 @@ class CompositeAgentManager:
             tools_raw = raw.get("tools") if has_tools_key else None
             if tools_raw is not None and not isinstance(tools_raw, list):
                 tools_raw = None
+            has_skills_key = "skills" in raw
+            skills_raw = raw.get("skills") if has_skills_key else None
+            if skills_raw is not None and not isinstance(skills_raw, list):
+                skills_raw = None
 
             inherited_tools = list(getattr(flow_def, "tools", None) or []) or None
 
             agent = Agent(
                 name=str(name),
-                flow=flow_name,
+                flow=normalized_flow_name,
                 description=str(raw.get("description", "")),
                 llm_profile=(
                     str(raw["llm_profile"])
@@ -269,6 +277,11 @@ class CompositeAgentManager:
                     else getattr(flow_def, "llm_profile", None)
                 ),
                 extra_prompts=[str(p) for p in raw.get("extra_prompts", []) if isinstance(p, str)],
+                skills=(
+                    [str(skill) for skill in skills_raw if isinstance(skill, str)]
+                    if has_skills_key and skills_raw is not None
+                    else None
+                ),
                 tools=(
                     [str(t) for t in tools_raw if isinstance(t, str)]
                     if has_tools_key and tools_raw is not None
@@ -312,6 +325,8 @@ class CompositeAgentManager:
             data["description"] = agent.description
         if agent.llm_profile:
             data["llm_profile"] = agent.llm_profile
+        if agent.skills is not None:
+            data["skills"] = list(agent.skills)
         if agent.tools is not None:
             data["tools"] = list(agent.tools)
         if agent.extra_prompts:

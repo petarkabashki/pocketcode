@@ -35,6 +35,17 @@ from .shared import (
 
 
 class TextualAppRenderingMixin:
+    def _selection_list_options_from_picker_options(
+        self,
+        picker_options: Iterable[PickerOption],
+        *,
+        selected_values: set[str],
+    ) -> tuple[tuple[str, str, bool], ...]:
+        return tuple(
+            (option.label, option.value, option.value in selected_values)
+            for option in picker_options
+        )
+
     def _render_profile_policy_summary(self, overrides: dict[str, str]) -> str:
         if not overrides:
             return "No per-tool confirmation overrides. Tools inherit the agent default."
@@ -42,22 +53,6 @@ class TextualAppRenderingMixin:
         for tool_name in sorted(overrides):
             lines.append(f"- {tool_name}: {overrides[tool_name]}")
         return "\n".join(lines)
-
-    def _render_profile_tools_summary(
-        self,
-        available_tools: tuple[str, ...],
-        *,
-        allow_all: bool,
-        selected_tools: set[str],
-    ) -> str:
-        if not available_tools:
-            return "No tools available for this agent."
-        if allow_all:
-            return "All agent tools are allowed."
-        visible_tools = [tool_name for tool_name in available_tools if tool_name in selected_tools]
-        if not visible_tools:
-            return "No tools selected."
-        return "\n".join(f"- {tool_name}" for tool_name in visible_tools)
 
     def _current_llm_profile_name(self) -> str | None:
         status = self._engine.status()
@@ -68,12 +63,71 @@ class TextualAppRenderingMixin:
         )
         return str(current) if current else None
 
+    def _build_skill_picker_options(
+        self,
+        skill_names: Iterable[str],
+        *,
+        selected_skills: set[str],
+    ) -> tuple[list[PickerOption], dict[str, tuple[str, ...]], set[str]]:
+        skill_groups = self._skill_group_members(skill_names)
+        grouped_values = {
+            self._skill_group_value(group_name): member_values
+            for group_name, member_values in skill_groups.items()
+        }
+        picker_options: list[PickerOption] = []
+        initial_selected_values = set(selected_skills)
+        for group_name, member_values in skill_groups.items():
+            group_value = self._skill_group_value(group_name)
+            if member_values and all(member_value in selected_skills for member_value in member_values):
+                initial_selected_values.add(group_value)
+            picker_options.append(
+                PickerOption(
+                    group_value,
+                    f"Group: {group_name}",
+                    description=f"Toggle all {len(member_values)} skills in this group",
+                    search_text=f"{group_name} group {' '.join(member_values)}",
+                )
+            )
+            picker_options.extend(
+                PickerOption(
+                    skill_name,
+                    f"  {skill_name}",
+                    description=f"Group: {group_name}",
+                    search_text=f"{skill_name} {group_name}",
+                )
+                for skill_name in member_values
+            )
+        return picker_options, grouped_values, initial_selected_values
+
+    def _build_tool_picker_model(
+        self,
+        *,
+        agent_name: str | None,
+        active_profile: Any,
+    ) -> tuple[tuple[str, ...], list[PickerOption], dict[str, tuple[str, ...]], set[str]]:
+        if not agent_name or active_profile is None:
+            return (), [], {}, set()
+        available_tools = tuple(self._engine.list_tools_for_agent(agent_name))
+        if not available_tools:
+            return (), [], {}, set()
+        selected_tools = set(available_tools if active_profile.tools is None else active_profile.tools)
+        tool_details = (
+            {tool_name: self._engine.describe_tool(tool_name) for tool_name in available_tools}
+            if hasattr(self._engine, "describe_tool")
+            else {}
+        )
+        picker_options, grouped_values, initial_selected_values = self._build_nested_tool_picker_options(
+            available_tools,
+            selected_tools=selected_tools,
+            tool_details=tool_details,
+        )
+        return available_tools, picker_options, grouped_values, initial_selected_values
+
     def _build_ui_state(self) -> TextualUIState:
         status = self._engine.status()
         current_agent = self._engine.get_current_agent()
         active_profile = self._engine.active_agent_profile
         all_profile_names = tuple(dict.fromkeys(self._profile_cycle()))
-        current_agent_tools = tuple(self._engine.list_tools_for_agent(current_agent)) if current_agent else ()
         prompt_sources = tuple(self._engine.get_agent_prompt_sources(current_agent)) if current_agent else ()
         active_profile_name = active_profile.name if active_profile else None
         active_skill_names = tuple(
@@ -82,6 +136,27 @@ class TextualAppRenderingMixin:
                 self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else []
             )
         )
+        skill_picker_options, _, selected_skill_values = self._build_skill_picker_options(
+            status.get("available_skills", []) or [],
+            selected_skills=set(active_skill_names),
+        )
+        tool_picker_options: list[PickerOption] = []
+        selected_tool_values: set[str] = set()
+        if active_profile is None:
+            tool_list_options = (("No active agent profile selected", LOADING_OPTION, False),)
+        else:
+            _, tool_picker_options, _, selected_tool_values = self._build_tool_picker_model(
+                agent_name=current_agent,
+                active_profile=active_profile,
+            )
+            tool_list_options = (
+                self._selection_list_options_from_picker_options(
+                    tool_picker_options,
+                    selected_values=selected_tool_values,
+                )
+                if tool_picker_options
+                else (("No tools available for this agent", LOADING_OPTION, False),)
+            )
 
         llm_profile_names = tuple(str(name) for name in status.get("available_llm_profiles", []))
         session_default = status.get("session_tool_confirmation_overrides", {}).get("default_policy") or INHERIT_POLICY
@@ -159,8 +234,13 @@ class TextualAppRenderingMixin:
             inspector_summary_text="\n".join(summary_lines),
             inspector_context_text=self._render_context_summary(status),
             inspector_sessions_text=self._render_saved_sessions_summary(status),
-            skill_list_options=self._render_skill_options(status),
-            inspector_tools_text=self._render_tool_summary(current_agent, active_profile, list(current_agent_tools)),
+            skill_list_options=self._selection_list_options_from_picker_options(
+                skill_picker_options,
+                selected_values=selected_skill_values,
+            )
+            if skill_picker_options
+            else (("No skills available", LOADING_OPTION, False),),
+            tool_list_options=tool_list_options,
             inspector_prompts_text=self._render_prompt_summary({"prompt_sources": list(prompt_sources)}, active_profile),
             profile_list_names=all_profile_names,
             profile_list_labels=profile_list_labels,
@@ -228,10 +308,10 @@ class TextualAppRenderingMixin:
         self._profile_list_names = list(state.profile_list_names)
         self._set_option_list_labels(self.query_one("#profile-list", OptionList), state.profile_list_labels)
         self._set_selection_list_options(self.query_one("#skill-list", SelectionList), state.skill_list_options)
+        self._set_selection_list_options(self.query_one("#inspector-tools", SelectionList), state.tool_list_options)
         self._set_static_text(self.query_one("#inspector-summary", Static), state.inspector_summary_text)
         self._set_text_area_text(self.query_one("#inspector-context", TextArea), state.inspector_context_text)
         self._set_text_area_text(self.query_one("#inspector-sessions", TextArea), state.inspector_sessions_text)
-        self._set_text_area_text(self.query_one("#inspector-tools", TextArea), state.inspector_tools_text)
         self._set_text_area_text(self.query_one("#inspector-prompts", TextArea), state.inspector_prompts_text)
         self._set_text_area_text(self.query_one("#run-preview", TextArea), state.run_preview_text)
 
@@ -350,33 +430,6 @@ class TextualAppRenderingMixin:
             lines.append(f"... {len(sessions) - 8} more")
         return "\n".join(lines)
 
-    def _render_tool_summary(
-        self,
-        agent_name: str | None,
-        active_profile: Any,
-        tool_names: list[str] | None = None,
-    ) -> str:
-        if not agent_name:
-            return "No agent selected."
-        if tool_names is None:
-            tool_names = self._engine.list_tools_for_agent(agent_name)
-        if not tool_names:
-            return "No tools available."
-        allowed = set(active_profile.tools) if active_profile and active_profile.tools is not None else None
-        lines: list[str] = []
-        if allowed is None:
-            lines.append("Tool scope: unrestricted")
-            visible_tools = tool_names
-        else:
-            lines.append("Tool scope: profile allowlist")
-            visible_tools = [tool_name for tool_name in tool_names if tool_name in allowed]
-        if not visible_tools:
-            lines.append("(no tools selected)")
-            return "\n".join(lines)
-        for tool_name in visible_tools:
-            lines.append(f"[x] {tool_name}")
-        return "\n".join(lines)
-
     def _render_prompt_summary(self, agent_meta: Dict[str, Any], active_profile: Any) -> str:
         agent_prompts = agent_meta.get("prompt_sources", []) if isinstance(agent_meta, dict) else []
         extra_prompts = list(active_profile.extra_prompts) if active_profile else []
@@ -401,12 +454,6 @@ class TextualAppRenderingMixin:
         grouped: dict[str, list[str]] = {}
         for skill_name in sorted({str(name) for name in skill_names}):
             grouped.setdefault(_skill_group_name(skill_name), []).append(skill_name)
-        return {group_name: tuple(grouped[group_name]) for group_name in sorted(grouped)}
-
-    def _tool_group_members(self, tool_names: Iterable[str]) -> dict[str, tuple[str, ...]]:
-        grouped: dict[str, list[str]] = {}
-        for tool_name in sorted({str(name) for name in tool_names}):
-            grouped.setdefault(_tool_group_name(tool_name), []).append(tool_name)
         return {group_name: tuple(grouped[group_name]) for group_name in sorted(grouped)}
 
     def _tool_group_path(self, tool_name: str, tool_detail: Dict[str, Any] | None = None) -> tuple[str, ...]:
@@ -482,27 +529,6 @@ class TextualAppRenderingMixin:
             str(getattr(skill, "name", skill))
             for skill in (self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else [])
         }
-
-    def _render_skill_options(self, status: Dict[str, Any]) -> tuple[tuple[str, str, bool], ...]:
-        available_skills = tuple(str(name) for name in status.get("available_skills", []) or [])
-        active_skill_names = self._active_skill_name_set()
-        if not available_skills:
-            return (("No skills available", LOADING_OPTION, False),)
-        grouped_skills = self._skill_group_members(available_skills)
-        options: list[tuple[str, str, bool]] = []
-        for group_name, member_values in grouped_skills.items():
-            options.append(
-                (
-                    f"Group: {group_name} ({len(member_values)})",
-                    self._skill_group_value(group_name),
-                    bool(member_values) and all(member_value in active_skill_names for member_value in member_values),
-                )
-            )
-            options.extend(
-                (f"  {skill_name}", skill_name, skill_name in active_skill_names)
-                for skill_name in member_values
-            )
-        return tuple(options)
 
     def _set_select_options(self, widget: Select, options: Iterable[tuple[str, str]], value: str) -> None:
         option_list = [(str(label), str(option_value)) for label, option_value in options]

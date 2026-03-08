@@ -22,7 +22,7 @@ Execution approach:
 - Inspect the target plugin or workspace asset layout before editing.
 - Use the local workspace-builder skill pack under `.pocketcode/skills/` when the task needs deeper guidance:
   - `pocketcode-workspace-builder`
-  - `pocketflow-graph-authoring`
+  - `pocketcode-graph-authoring`
   - `pocketcode-plugin-authoring`
   - `pocketcode-profiles-prompts`
   - `pocketcode-tools-runtime`

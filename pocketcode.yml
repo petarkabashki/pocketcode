@@ -61,7 +61,7 @@ runtime:
       - pocketcode-tools-runtime
       - pocketcode-workspace-assets
       - pocketcode-workspace-builder
-      - pocketflow-graph-authoring
+      - pocketcode-graph-authoring
     theme_name: forest
     workspace_mode: control_desk
     default_skills:
@@ -70,4 +70,4 @@ runtime:
     - pocketcode-tools-runtime
     - pocketcode-workspace-assets
     - pocketcode-workspace-builder
-    - pocketflow-graph-authoring
+    - pocketcode-graph-authoring

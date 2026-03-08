@@ -7,6 +7,54 @@ from .shared import PickerOption
 
 
 class TextualAppAssetManagementMixin:
+    def _save_inspector_skill_selection(self) -> None:
+        active_profile = self._engine.active_agent_profile
+        if active_profile is None:
+            self._write_error("No active agent selected.")
+            return
+        selected_skills = sorted(self._active_skill_name_set())
+
+        def _persist(profile_name: str) -> None:
+            if not hasattr(self._engine, "save_agent_profile_skills"):
+                self._write_error("This runtime does not support saving agent skills.")
+                return
+            self._engine.save_agent_profile_skills(profile_name, selected_skills)
+            self._refresh_suggestions()
+            self._sync_ui_from_engine()
+            self._write_info(
+                f"Saved inspector skills to workspace agent '{profile_name}': "
+                f"{', '.join(selected_skills) if selected_skills else 'none'}."
+            )
+
+        self._ensure_workspace_agent_profile(
+            action_label="saving inspector skills",
+            on_ready=_persist,
+        )
+
+    def _save_inspector_tool_selection(self) -> None:
+        active_profile = self._engine.active_agent_profile
+        if active_profile is None:
+            self._write_error("No active agent selected.")
+            return
+        selected_tools = None if active_profile.tools is None else sorted(active_profile.tools)
+
+        def _persist(profile_name: str) -> None:
+            if not hasattr(self._engine, "save_agent_profile_tools"):
+                self._write_error("This runtime does not support saving agent tools.")
+                return
+            self._engine.save_agent_profile_tools(profile_name, selected_tools)
+            self._refresh_suggestions()
+            self._sync_ui_from_engine()
+            self._write_info(
+                f"Saved inspector tools to workspace agent '{profile_name}': "
+                f"{', '.join(selected_tools) if selected_tools else 'all'}."
+            )
+
+        self._ensure_workspace_agent_profile(
+            action_label="saving inspector tools",
+            on_ready=_persist,
+        )
+
     def _clone_selected_asset(self, asset_name: str, new_name: str) -> None:
         active_profile = self._engine.active_agent_profile
         if asset_name == "agent":
@@ -191,21 +239,13 @@ class TextualAppAssetManagementMixin:
         if active_profile is None:
             return
         current_agent = str(getattr(active_profile, "agent", "") or self._engine.get_current_agent() or "")
-        available_tools = tuple(self._engine.list_tools_for_agent(current_agent)) if current_agent else ()
+        available_tools, picker_options, grouped_values, initial_selected_values = self._build_tool_picker_model(
+            agent_name=current_agent,
+            active_profile=active_profile,
+        )
         if not available_tools:
             self._write_error("No tools are available for the active agent.")
             return
-        selected_tools = set(available_tools if active_profile.tools is None else active_profile.tools)
-        tool_details = (
-            {tool_name: self._engine.describe_tool(tool_name) for tool_name in available_tools}
-            if hasattr(self._engine, "describe_tool")
-            else {}
-        )
-        picker_options, grouped_values, initial_selected_values = self._build_nested_tool_picker_options(
-            available_tools,
-            selected_tools=selected_tools,
-            tool_details=tool_details,
-        )
 
         def _handle_selection(payload: dict[str, Any] | None) -> None:
             if payload is None:
@@ -248,35 +288,12 @@ class TextualAppAssetManagementMixin:
         if not available_skills:
             self._write_error("No skills are available.")
             return
-        active_skill_names = self._active_skill_name_set()
-        skill_groups = self._skill_group_members(available_skills)
-        grouped_values = {
-            self._skill_group_value(group_name): member_values
-            for group_name, member_values in skill_groups.items()
-        }
-        picker_options: list[PickerOption] = []
-        selected_values = set(active_skill_names)
-        for group_name, member_values in skill_groups.items():
-            group_value = self._skill_group_value(group_name)
-            if member_values and all(member_value in active_skill_names for member_value in member_values):
-                selected_values.add(group_value)
-            picker_options.append(
-                PickerOption(
-                    group_value,
-                    f"Group: {group_name}",
-                    description=f"Toggle all {len(member_values)} skills in this group",
-                    search_text=f"{group_name} group {' '.join(member_values)}",
-                )
-            )
-            picker_options.extend(
-                PickerOption(
-                    skill_name,
-                    f"  {skill_name}",
-                    description=f"Group: {group_name}",
-                    search_text=f"{skill_name} {group_name}",
-                )
-                for skill_name in member_values
-            )
+        active_profile = self._engine.active_agent_profile
+        profile_name = active_profile.name if active_profile is not None else None
+        picker_options, grouped_values, selected_values = self._build_skill_picker_options(
+            available_skills,
+            selected_skills=self._active_skill_name_set(),
+        )
 
         def _handle_selection(payload: dict[str, Any] | None) -> None:
             if payload is None:
@@ -286,16 +303,33 @@ class TextualAppAssetManagementMixin:
             selected_set = {value for value in selected_values if not self._is_skill_group_value(value)}
             selected_skill_names = sorted(selected_set)
             if action == "apply":
-                self._engine.set_last_used_skills(selected_skill_names)
-                self._write_info(
-                    f"Saved last-used skills: {', '.join(selected_skill_names) if selected_skill_names else 'none'}."
-                )
+                if profile_name and hasattr(self._engine, "set_last_used_profile_skills"):
+                    self._engine.set_last_used_profile_skills(profile_name, selected_skill_names)
+                    self._write_info(
+                        f"Saved skills for '{profile_name}': {', '.join(selected_skill_names) if selected_skill_names else 'none'}."
+                    )
+                else:
+                    self._engine.set_last_used_skills(selected_skill_names)
+                    self._write_info(
+                        f"Saved last-used skills: {', '.join(selected_skill_names) if selected_skill_names else 'none'}."
+                    )
             elif action == "reset":
-                self._engine.reset_last_used_skills()
+                if profile_name and hasattr(self._engine, "reset_last_used_profile_skills"):
+                    self._engine.reset_last_used_profile_skills(profile_name)
+                else:
+                    self._engine.reset_last_used_skills()
                 active_skills = sorted(self._active_skill_name_set())
-                self._write_info(f"Reset skills to defaults: {', '.join(active_skills) if active_skills else 'none'}.")
+                if profile_name:
+                    self._write_info(
+                        f"Reset skills for '{profile_name}': {', '.join(active_skills) if active_skills else 'none'}."
+                    )
+                else:
+                    self._write_info(f"Reset skills to defaults: {', '.join(active_skills) if active_skills else 'none'}.")
             elif action == "save_default":
-                self._engine.set_last_used_skills(selected_skill_names)
+                if profile_name and hasattr(self._engine, "set_last_used_profile_skills"):
+                    self._engine.set_last_used_profile_skills(profile_name, selected_skill_names)
+                else:
+                    self._engine.set_last_used_skills(selected_skill_names)
                 self._engine.save_default_skills(selected_skill_names)
                 self._write_info(
                     f"Saved default skills: {', '.join(selected_skill_names) if selected_skill_names else 'none'}."
@@ -309,7 +343,8 @@ class TextualAppAssetManagementMixin:
                 tools=tuple(picker_options),
                 selected_values=selected_values,
                 help_text=(
-                    "Apply saves last-used skills. Reset restores default skills. "
+                    "Apply saves skills for the active profile when one is selected. "
+                    "Reset restores that profile's fallback skills. "
                     "Save as Default writes the default skill set to pocketcode.yml."
                 ),
                 empty_message="No matching skills.",

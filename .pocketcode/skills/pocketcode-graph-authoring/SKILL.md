@@ -1,5 +1,5 @@
 ---
-name: pocketflow-graph-authoring
+name: pocketcode-graph-authoring
 description: Use when creating or editing PocketFlow nodes and flows for PocketCoder. Covers Node, Flow, Batch, Async, retries, shared-store patterns, and how PocketFlow factories are used by PocketCoder plugin flows.
 tools:
   - core.read_file

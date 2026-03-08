@@ -217,6 +217,21 @@ class TestWorkspaceYamlLoading:
 
         assert apm.get("custom") is not None
 
+    def test_workspace_yaml_loads_profile_skills(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        ws_profiles = tmp_path / ".pocketcode" / "agents"
+        self._write_ws_profile(
+            ws_profiles,
+            "custom.yaml",
+            {"name": "custom", "flow": qname, "skills": ["python-lint", "python-testing"]},
+        )
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        profile = apm.get("custom")
+        assert profile is not None
+        assert profile.skills == ["python-lint", "python-testing"]
+
     def test_workspace_profile_source_is_workspace(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
         ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
@@ -341,6 +356,21 @@ class TestClone:
         apm.clone(qname, "cloned")
         yaml_file = tmp_path / ".pocketcode" / "agents" / "cloned.yaml"
         assert yaml_file.exists()
+
+    def test_save_writes_profile_skills(self, tmp_path):
+        profile = AgentProfile(
+            name="cloned",
+            flow="p::a",
+            skills=["python-testing"],
+            source="workspace",
+            source_path=tmp_path / ".pocketcode" / "agents" / "cloned.yaml",
+        )
+        apm = AgentProfileManager(tmp_path)
+
+        apm.save(profile)
+
+        saved = yaml.safe_load(profile.source_path.read_text(encoding="utf-8"))
+        assert saved["skills"] == ["python-testing"]
 
     def test_clone_missing_source_raises(self, tmp_path):
         apm = AgentProfileManager(tmp_path)

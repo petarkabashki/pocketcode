@@ -30,6 +30,9 @@ class CompositeAgent:
     extra_prompts : List[str]
         Ordered list of file paths whose contents are appended to the system
         prompt each turn. Default ``[]``.
+    skills : List[str] | None
+        Default enabled skill names for this profile. ``None`` means fall back
+        to global Textual skill defaults.
     tools : List[str] | None
         Explicit tool allowlist (qualified names). ``None`` means inherit all.
     tool_confirmation : Dict[str, Any]
@@ -48,6 +51,7 @@ class CompositeAgent:
     llm_profile: Optional[str] = None
     inline_prompt: str = ""
     extra_prompts: List[str] = field(default_factory=list)
+    skills: Optional[List[str]] = None
     tools: Optional[List[str]] = None
     tool_confirmation: Dict[str, Any] = field(default_factory=dict)
     source: str = "synthesised"

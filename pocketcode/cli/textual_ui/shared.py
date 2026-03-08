@@ -112,7 +112,7 @@ def _build_profile_editor_hint(active_profile: Any) -> str:
     if active_profile is None:
         return "Select an agent to edit agent settings."
     if active_profile.source == "workspace":
-        return f"Editing workspace agent '{active_profile.name}'. Save persists tools, prompts, and LLM."
+        return f"Editing workspace agent '{active_profile.name}'. Save persists tools, skills, prompts, and LLM."
     return f"Agent '{active_profile.name}' is plugin/synthesised. Clone it to a workspace agent to edit."
 
 
@@ -171,7 +171,7 @@ class TextualUIState:
     inspector_context_text: str
     inspector_sessions_text: str
     skill_list_options: tuple[tuple[str, str, bool], ...]
-    inspector_tools_text: str
+    tool_list_options: tuple[tuple[str, str, bool], ...]
     inspector_prompts_text: str
     profile_list_names: tuple[str, ...]
     profile_list_labels: tuple[str, ...]

@@ -124,6 +124,10 @@ class TextualAppInteractionMixin:
             self.action_reload_runtime()
         elif button_id == "goto-chat-button":
             self.action_view_chat()
+        elif button_id == "inspector-skill-save-button":
+            self._save_inspector_skill_selection()
+        elif button_id == "inspector-tool-save-button":
+            self._save_inspector_tool_selection()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if self._syncing_controls:
@@ -196,7 +200,8 @@ class TextualAppInteractionMixin:
             self._sync_ui_from_engine()
 
     def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
-        if event.selection_list.id != "skill-list" or event.selection_list.disabled:
+        list_id = event.selection_list.id or ""
+        if list_id not in {"skill-list", "inspector-tools"} or event.selection_list.disabled:
             return
         option_index = getattr(event, "selection_index", getattr(event, "index", None))
         if option_index is None:
@@ -204,6 +209,9 @@ class TextualAppInteractionMixin:
         option = event.selection_list.get_option_at_index(option_index)
         value = str(option.value)
         if value == LOADING_OPTION:
+            return
+        if list_id == "inspector-tools":
+            self._handle_inspector_tool_toggle(event, value)
             return
         skill_groups = self._skill_group_members(self._engine.list_skills()) if hasattr(self._engine, "list_skills") else {}
         try:
@@ -224,8 +232,53 @@ class TextualAppInteractionMixin:
             else:
                 self._engine.disable_skill(value)
                 self._write_info(f"Disabled skill: {value}")
-            if hasattr(self._engine, "set_last_used_skills"):
-                self._engine.set_last_used_skills(sorted(self._active_skill_name_set()))
+            active_profile = self._engine.active_agent_profile
+            selected_skills = sorted(self._active_skill_name_set())
+            if active_profile is not None and hasattr(self._engine, "set_last_used_profile_skills"):
+                self._engine.set_last_used_profile_skills(active_profile.name, selected_skills)
+            elif hasattr(self._engine, "set_last_used_skills"):
+                self._engine.set_last_used_skills(selected_skills)
+        except Exception as exc:
+            self._write_error(str(exc))
+        finally:
+            self._refresh_suggestions()
+            self._sync_ui_from_engine()
+
+    def _handle_inspector_tool_toggle(self, event: SelectionList.SelectionToggled, value: str) -> None:
+        active_profile = self._engine.active_agent_profile
+        if active_profile is None:
+            self._write_error("No active agent profile selected.")
+            self._sync_ui_from_engine()
+            return
+        current_agent = str(getattr(active_profile, "agent", "") or self._engine.get_current_agent() or "")
+        available_tools, _, grouped_values, _ = self._build_tool_picker_model(
+            agent_name=current_agent,
+            active_profile=active_profile,
+        )
+        if not available_tools:
+            self._write_error("No tools are available for the active agent.")
+            self._sync_ui_from_engine()
+            return
+
+        selected_tools = set(available_tools if active_profile.tools is None else active_profile.tools)
+        try:
+            if self._is_skill_group_value(value):
+                group_name = value[len(SKILL_GROUP_PREFIX):]
+                member_values = grouped_values.get(value, ())
+                if value in event.selection_list.selected:
+                    selected_tools.update(member_values)
+                    self._write_info(f"Enabled tool group: {group_name} ({len(member_values)} tools).")
+                else:
+                    selected_tools.difference_update(member_values)
+                    self._write_info(f"Disabled tool group: {group_name} ({len(member_values)} tools).")
+            elif value in event.selection_list.selected:
+                selected_tools.add(value)
+                self._write_info(f"Enabled tool: {value}")
+            else:
+                selected_tools.discard(value)
+                self._write_info(f"Disabled tool: {value}")
+            tools = None if len(selected_tools) >= len(available_tools) else sorted(selected_tools)
+            self._engine.set_last_used_profile_tools(active_profile.name, tools)
         except Exception as exc:
             self._write_error(str(exc))
         finally:

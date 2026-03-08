@@ -2,6 +2,12 @@ name: my-react
 flow: core.react
 description: Synthesised default agent for core.react.
 llm_profile: gemini-3-flash-preview
+skills:
+- pocketcode-plugin-authoring
+- pocketcode-profiles-prompts
+- pocketcode-tools-runtime
+- pocketcode-workspace-assets
+- pocketcode-workspace-builder
 tools:
 - core.apply_staged_edit
 - core.ask_user_buttons
@@ -11,6 +17,7 @@ tools:
 - core.cancel_staged_edit
 - core.confirm_user_input
 - core.create_directory
+- core.execute_command
 - core.extract_text
 - core.glob_files
 - core.list_files

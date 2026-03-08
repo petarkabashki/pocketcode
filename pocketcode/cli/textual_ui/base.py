@@ -208,9 +208,9 @@ class TextualAppBase(App[None]):
     }
 
     #right-panel {
-        width: 34;
-        min-width: 30;
-        max-width: 38;
+        width: 46;
+        min-width: 40;
+        max-width: 52;
     }
 
     #view-tabs {
@@ -269,6 +269,21 @@ class TextualAppBase(App[None]):
         text-style: bold;
     }
 
+    .section-header {
+        height: auto;
+        align: left middle;
+        margin: 0;
+    }
+
+    .section-header .section-title {
+        width: 1fr;
+    }
+
+    .section-save-button {
+        min-width: 8;
+        width: 8;
+    }
+
     .field-label {
         margin-top: 0;
         color: #cbd5e1;
@@ -298,8 +313,9 @@ class TextualAppBase(App[None]):
     }
 
     #profile-list,
-    #skill-list {
-        height: 10;
+    #skill-list,
+    #inspector-tools {
+        height: 12;
         margin-bottom: 0;
         border: round #334155;
         background: #020617;
@@ -320,7 +336,6 @@ class TextualAppBase(App[None]):
 
     #run-preview,
     #inspector-context,
-    #inspector-tools,
     #inspector-prompts {
         height: 10;
         border: round #334155;
@@ -330,7 +345,6 @@ class TextualAppBase(App[None]):
 
     #run-preview,
     #inspector-context,
-    #inspector-tools,
     #inspector-prompts {
         height: 10;
     }
@@ -436,10 +450,14 @@ class TextualAppBase(App[None]):
                 yield TextArea("", id="inspector-sessions", read_only=True)
                 yield Static("Available Agent Profiles", classes="section-title")
                 yield OptionList(id="profile-list")
-                yield Static("Skills", classes="section-title")
+                with Horizontal(classes="section-header"):
+                    yield Static("Skills", classes="section-title")
+                    yield Button("Save", id="inspector-skill-save-button", classes="section-save-button")
                 yield SelectionList(id="skill-list")
-                yield Static("Active Tools", classes="section-title")
-                yield TextArea("", id="inspector-tools", read_only=True)
+                with Horizontal(classes="section-header"):
+                    yield Static("Allowed Tools", classes="section-title")
+                    yield Button("Save", id="inspector-tool-save-button", classes="section-save-button")
+                yield SelectionList(id="inspector-tools")
                 yield Static("Prompt Sources", classes="section-title")
                 yield TextArea("", id="inspector-prompts", read_only=True)
         yield Footer()

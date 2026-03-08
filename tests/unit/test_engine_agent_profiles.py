@@ -216,6 +216,7 @@ class TestEngineAgentProfiles:
 
         assert manager.saved_profile is not None
         assert manager.saved_profile.llm_profile == "gemini_fast"
+        assert manager.saved_profile.skills is None
         assert manager.saved_profile.tools == ["filesystem::read_file", "search::web_search"]
         assert manager.saved_profile.extra_prompts == ["prompts/base.md", "prompts/review.md"]
         assert manager.saved_profile.tool_confirmation == {
@@ -272,6 +273,113 @@ class TestEngineAgentProfiles:
                 "search::web_search": "deny",
             },
         }
+
+    def test_save_agent_profile_skills_persists_workspace_profile_and_clears_matching_override(self, tmp_path):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        profile = AgentProfile(
+            name="coder.safe",
+            flow="coder::coder",
+            skills=["python-lint"],
+            tools=["filesystem::read_file"],
+            source="workspace",
+            source_path=tmp_path / ".pocketcode" / "agents" / "coder.safe.yaml",
+        )
+        manager = _EditableProfileManagerStub({"coder.safe": profile})
+        engine._agent_profile_manager = manager
+        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
+        )()
+        engine._skill_manager = _SkillManagerStub(
+            {
+                "python-lint": SkillDefinition(name="python-lint"),
+                "python-testing": SkillDefinition(name="python-testing"),
+            }
+        )
+        engine._config = {
+            "runtime": {
+                "textual": {
+                    "last_used": {
+                        "agent_profiles": {
+                            "coder.safe": {
+                                "skills": ["python-testing"],
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        engine._workspace_root = tmp_path
+        engine.active_agent_profile = profile
+        engine.enabled_skills = ["python-testing"]
+        engine._normalize_confirmation_policy = PocketCodeEngine._normalize_confirmation_policy.__get__(
+            engine,
+            PocketCodeEngine,
+        )
+        engine._refresh_runtime_components = lambda: None
+        engine._runtime_config = {}
+        engine._tool_confirmation_config = {}
+        engine._maybe_refresh_runtime_components = lambda: None
+
+        refreshed = engine.save_agent_profile_skills("coder.safe", ["python-testing"])
+
+        assert refreshed is manager.saved_profile
+        assert manager.saved_profile is not None
+        assert manager.saved_profile.skills == ["python-testing"]
+        textual = engine._config["runtime"]["textual"]
+        assert "last_used" not in textual or "agent_profiles" not in textual.get("last_used", {})
+
+    def test_save_agent_profile_tools_persists_workspace_profile_and_clears_matching_override(self, tmp_path):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        profile = AgentProfile(
+            name="coder.safe",
+            flow="coder::coder",
+            tools=None,
+            source="workspace",
+            source_path=tmp_path / ".pocketcode" / "agents" / "coder.safe.yaml",
+        )
+        manager = _EditableProfileManagerStub({"coder.safe": profile})
+        engine._agent_profile_manager = manager
+        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
+        )()
+        engine._skill_manager = _SkillManagerStub({})
+        engine._config = {
+            "runtime": {
+                "textual": {
+                    "last_used": {
+                        "agent_profiles": {
+                            "coder.safe": {
+                                "tools": ["filesystem::read_file"],
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        engine._workspace_root = tmp_path
+        engine.active_agent_profile = profile
+        engine._normalize_confirmation_policy = PocketCodeEngine._normalize_confirmation_policy.__get__(
+            engine,
+            PocketCodeEngine,
+        )
+        engine._refresh_runtime_components = lambda: None
+        engine._runtime_config = {}
+        engine._tool_confirmation_config = {}
+        engine._maybe_refresh_runtime_components = lambda: None
+
+        refreshed = engine.save_agent_profile_tools("coder.safe", ["filesystem::read_file"])
+
+        assert refreshed is manager.saved_profile
+        assert manager.saved_profile is not None
+        assert manager.saved_profile.tools == ["filesystem::read_file"]
+        textual = engine._config["runtime"]["textual"]
+        assert "last_used" not in textual or "agent_profiles" not in textual.get("last_used", {})
 
     def test_list_tools_for_agent_caches_unfiltered_results(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -497,6 +605,28 @@ class TestEngineAgentProfiles:
         assert engine.active_agent_profile is not None
         assert engine.active_agent_profile.tools == ["tool.write"]
 
+    def test_set_last_used_profile_skills_persists_textual_override(self, tmp_path):
+        profile = AgentProfile(name="coder.safe", flow="coder::coder", tools=["tool.read"])
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {"runtime": {"textual": {"default_skills": ["python-lint"]}}}
+        engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
+        engine._skill_manager = _SkillManagerStub(
+            {
+                "python-lint": SkillDefinition(name="python-lint"),
+                "python-testing": SkillDefinition(name="python-testing"),
+            }
+        )
+        engine.active_agent_profile = profile
+        engine.enabled_skills = ["python-lint"]
+        engine._refresh_runtime_components = lambda: None
+
+        engine.set_last_used_profile_skills("coder.safe", ["python-testing"])
+
+        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
+        assert saved["runtime"]["textual"]["last_used"]["agent_profiles"]["coder.safe"]["skills"] == ["python-testing"]
+        assert engine.enabled_skills == ["python-testing"]
+
     def test_reset_last_used_skills_restores_default_skill_config(self, tmp_path):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._workspace_root = tmp_path
@@ -523,6 +653,62 @@ class TestEngineAgentProfiles:
         assert engine.enabled_skills == ["python-lint"]
         assert saved["runtime"]["textual"]["default_skills"] == ["python-lint"]
         assert "last_used" not in saved["runtime"]["textual"]
+
+    def test_configured_enabled_skills_prefers_active_profile_skill_override(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._config = {
+            "runtime": {
+                "textual": {
+                    "default_skills": ["python-lint"],
+                    "last_used": {
+                        "skills": ["python-testing"],
+                        "agent_profiles": {
+                            "coder.safe": {
+                                "skills": ["azure-prepare", "missing-skill"],
+                            }
+                        },
+                    },
+                }
+            }
+        }
+        engine.active_agent_profile = AgentProfile(name="coder.safe", flow="coder::coder")
+        engine._skill_manager = _SkillManagerStub(
+            {
+                "python-lint": SkillDefinition(name="python-lint"),
+                "python-testing": SkillDefinition(name="python-testing"),
+                "azure-prepare": SkillDefinition(name="azure-prepare"),
+            }
+        )
+
+        assert engine._configured_enabled_skills() == ["azure-prepare"]
+
+    def test_configured_enabled_skills_uses_profile_yaml_before_global_defaults(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._config = {
+            "runtime": {
+                "textual": {
+                    "default_skills": ["python-lint"],
+                    "last_used": {
+                        "skills": ["python-testing"],
+                    },
+                }
+            }
+        }
+        engine.active_agent_profile = AgentProfile(
+            name="coder.safe",
+            flow="coder::coder",
+            skills=["azure-prepare", "missing-skill"],
+        )
+        engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": engine.active_agent_profile})
+        engine._skill_manager = _SkillManagerStub(
+            {
+                "python-lint": SkillDefinition(name="python-lint"),
+                "python-testing": SkillDefinition(name="python-testing"),
+                "azure-prepare": SkillDefinition(name="azure-prepare"),
+            }
+        )
+
+        assert engine._configured_enabled_skills() == ["azure-prepare"]
 
     def test_set_last_used_global_llm_profile_persists_textual_selection(self, tmp_path):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)

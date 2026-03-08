@@ -98,6 +98,8 @@ Behavior:
 - `pocketcode/cli/textual_app.py::run_textual_cli()` remains the stable entrypoint and forwards to the split Textual UI implementation under `pocketcode/cli/textual_ui/`
 - the app owns the screen state, input routing, picker dialogs, editing dialogs, and live run monitor
 - slash commands still route through `handle_command()` so the command layer remains shared with the basic CLI
+- skill toggles in the inspector persist against the active agent profile when one is selected; otherwise they persist as the global Textual last-used skill selection
+- the inspector `Save` buttons write the current skill or tool selection into the active workspace agent YAML
 
 ## Shared CLI Context
 
@@ -506,9 +508,18 @@ The right inspector panel shows:
 - current session context
 - saved session history
 - available agent profiles
-- skills
-- active tools
+- skills as an inline grouped selector
+- allowed tools as an inline grouped and nested selector
 - prompt sources
+
+Inspector selector behavior:
+
+- the `Skills` list persists the last-used skill selection immediately when toggled
+- the `Allowed Tools` list persists the active profile's last-used tool allowlist immediately when toggled
+- the `Skills` header `Save` button writes the current selection into the active workspace agent's `skills` field
+- the `Allowed Tools` header `Save` button writes the current effective tool scope into the active workspace agent's `tools` field
+- tool groups and subgroups are derived from tool metadata, preferring the tool source path under `tools/`
+- when every tool is selected, the effective tool scope is unrestricted for that profile
 
 The F6 Control Center includes a `Sessions` category that can start a fresh session, resume saved history, delete a saved non-active session, or clear all previous sessions while keeping the active session.
 
@@ -595,7 +606,7 @@ Current capabilities implemented across `pocketcode/cli/textual_ui/` include:
 - selecting a global LLM override
 - selecting a workspace mode
 - toggling skills, including grouped skill toggles
-- editing allowed tools for a profile
+- editing allowed tools for a profile, including selectable groups and subgroups
 - editing per-tool confirmation policy
 - cloning the current agent, mode, or LLM profile
 - deleting workspace-backed agent, mode, or LLM assets
@@ -620,6 +631,7 @@ Persisted settings currently include:
 - `last_used.skills`
 - `last_used.session_confirmation_default`
 - `last_used.auto_confirm_tools`
+- `last_used.agent_profiles.<profile>.skills`
 - `last_used.agent_profiles.<profile>.tools`
 - `last_used.agent_profiles.<profile>.tool_confirmation_overrides`
 

@@ -188,8 +188,12 @@ The Textual UI currently supports:
 - switching the active mode
 - enabling and disabling skills
 - persisting last-used skill selections
+- persisting per-profile skill selections for the active agent profile
+- saving the current inspector skill selection into the active workspace agent YAML
 - saving default skill selections to config
 - saving full runtime selection presets that include mode and skills
+
+When an active agent profile is selected, inspector toggles and the Control Center skill picker save the selected skills under that profile's Textual state. The inspector `Save` button writes the current selection into that profile's YAML `skills` field. If no profile-specific override exists, the runtime falls back to the profile YAML `skills`, then the global last-used skill list, and finally `default_skills`.
 
 The primary controls are exposed through:
 
@@ -216,7 +220,7 @@ More precisely:
 This repository currently ships workspace skills under `.pocketcode/skills/`, including:
 
 - `pocketcode-workspace-builder`
-- `pocketflow-graph-authoring`
+- `pocketcode-graph-authoring`
 - `pocketcode-plugin-authoring`
 - `pocketcode-profiles-prompts`
 - `pocketcode-tools-runtime`

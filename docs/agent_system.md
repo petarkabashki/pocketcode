@@ -36,6 +36,7 @@ Current fields:
 | `llm_profile` | `str \| None` | `None` | LLM profile override |
 | `inline_prompt` | `str` | `""` | Inline prompt text appended after the flow prompt |
 | `extra_prompts` | `List[str]` | `[]` | Additional prompt file references |
+| `skills` | `List[str] \| None` | `None` | Default enabled skills; `None` means use global skill defaults |
 | `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` means inherit flow tool surface |
 | `tool_confirmation` | `dict` | `{}` | Confirmation defaults and per-tool overrides |
 | `source` | `str` | `"synthesised"` | One of `synthesised`, `plugin`, or `workspace` |
@@ -118,6 +119,8 @@ name: my-agent
 flow: core.react
 description: Optional description
 llm_profile: fast-review
+skills:
+  - python-testing
 tools:
   - core.read_file
   - core.search_code
@@ -132,6 +135,7 @@ tool_confirmation:
 Notes:
 
 - `flow` is required.
+- `skills` omitted means fall back to the global Textual skill selection order.
 - `tools` omitted means inherit the target flow tool surface.
 - `extra_prompts` are resolved relative to the profile file first, then through plugin and workspace fallback roots.
 
@@ -150,6 +154,8 @@ flows:
       name: myflow-safe
       description: Safe mode agent
       llm_profile: fast-review
+      skills:
+        - python-testing
       tools:
         - core.read_file
       tool_confirmation:
@@ -200,11 +206,23 @@ Current Textual agent-system controls include:
 - `F3` opens the editor picker for agent config, mode config, LLM config, tool selection, and tool policies
 - `F4` opens the clone picker for agent, mode, and LLM configs
 - `F6` opens the Control Center for active profile selection, mode selection, LLM override, skills, tool selection, tool policy editing, selection presets, session confirmation, and system settings
+- the inspector exposes inline `Skills` and `Allowed Tools` selection lists, each with a `Save` button that writes the current selection into the active workspace agent YAML
+- tool entries are grouped hierarchically and can be toggled at either the group or leaf level
 - searchable selection popups support `Ctrl+Down`, `Ctrl+Up`, and `Space`
 - tool groups are derived from the tool source path under `tools/`
 - last-used mode, profile, LLM, skill, tool, and tool-policy choices are persisted
+- active-profile skill selections are persisted under `runtime.textual.last_used.agent_profiles.<profile>.skills`
+- saving inspector skills writes `skills` in `.pocketcode/agents/<profile>.yaml` and then clears a matching per-profile Textual skill override
+- saving inspector tools writes `tools` in `.pocketcode/agents/<profile>.yaml` and then clears a matching per-profile Textual tool override
 - `Reset` clears the last-used override and `Save as Default` writes the current selection into config
 - editing a plugin or synthesised profile from the Textual UI requires cloning it to a workspace-backed profile first
+
+Current skill fallback order is:
+
+1. active profile skill override
+2. active profile YAML `skills`
+3. global Textual last-used skills
+4. global Textual default skills
 
 ## Status Display
 

@@ -750,6 +750,7 @@ class PluginManager:
             qualified_name = f"{plugin_name}::{flow_name}"
             dap_name = raw_dap.get("name") or qualified_name
             dap_tools_raw = raw_dap.get("tools")
+            dap_skills_raw = raw_dap.get("skills")
             dap_tc_raw = raw_dap.get("tool_confirmation") or {}
             if not isinstance(dap_tc_raw, dict):
                 dap_tc_raw = {}
@@ -763,6 +764,11 @@ class PluginManager:
                     for p in raw_dap.get("extra_prompts", [])
                     if isinstance(p, str)
                 ],
+                skills=(
+                    [str(skill) for skill in dap_skills_raw if isinstance(skill, str)]
+                    if isinstance(dap_skills_raw, list)
+                    else None
+                ),
                 tools=(
                     [str(t) for t in dap_tools_raw if isinstance(t, str)]
                     if isinstance(dap_tools_raw, list)
