@@ -11,6 +11,7 @@ UNSET_OPTION = "__unset__"
 INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
 MAX_OUTPUT_LINES = 400
+DEFAULT_MAIN_INPUT_PLACEHOLDER = "Type a request or /command. F3 edit F4 clone F5 views F6 control"
 SKILL_GROUP_PREFIX = "__skill_group__:"
 TEXTUAL_VIEWS = {
     "chat": {
@@ -171,6 +172,7 @@ class TextualUIState:
     theme_name: str
     current_view: str
     right_panel_visible: bool
+    main_input_placeholder: str
     status_text: str
     header_agent_text: str
     header_llm_text: str

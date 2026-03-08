@@ -88,10 +88,7 @@ class TextualAppConfigEditingMixin:
         action_label: str,
         on_ready: Callable[[str], None],
     ) -> None:
-        cloner = getattr(self._engine, "clone_agent", None) or getattr(self._engine, "clone_agent_profile")
-        cloned = cloner(source_name, new_name)
-        self._engine.set_active_agent_profile(new_name)
-        self._refresh_suggestions()
+        cloned = self._clone_agent_for_edit_effect(source_name, new_name)
         target_path = getattr(cloned, "source_path", None)
         if target_path:
             self._write_info(f"Cloned agent '{source_name}' to {target_path} for {action_label}.")
@@ -107,12 +104,7 @@ class TextualAppConfigEditingMixin:
         action_label: str,
         on_ready: Callable[[str], None],
     ) -> None:
-        if not hasattr(self._engine, "clone_llm_profile"):
-            self._write_error("This runtime does not support cloning LLM profiles.")
-            return
-        cloned = self._engine.clone_llm_profile(source_name, new_name)
-        self._engine.set_global_llm_override(new_name)
-        self._refresh_suggestions()
+        cloned = self._clone_llm_for_edit_effect(source_name, new_name)
         target_path = cloned.get("source_path") if isinstance(cloned, dict) else getattr(cloned, "source_path", None)
         if target_path:
             self._write_info(f"Cloned LLM profile '{source_name}' to {target_path} for {action_label}.")
@@ -130,8 +122,7 @@ class TextualAppConfigEditingMixin:
         tool_confirmation_default: str | None,
         tool_confirmation_overrides: dict[str, str],
     ) -> None:
-        updater = getattr(self._engine, "update_agent", None) or getattr(self._engine, "update_agent_profile")
-        updater(
+        self._save_workspace_agent_profile_effect(
             profile_name,
             llm_profile=llm_profile,
             tools=tools,
@@ -139,8 +130,7 @@ class TextualAppConfigEditingMixin:
             tool_confirmation_default=tool_confirmation_default,
             tool_confirmation_overrides=tool_confirmation_overrides,
         )
-        self._refresh_suggestions()
-        self._sync_ui_from_engine()
+        self._commit_engine_ui_update()
 
     def _edit_category_options(self) -> tuple[PickerOption, ...]:
         active_profile = self._engine.active_agent_profile
@@ -230,19 +220,11 @@ class TextualAppConfigEditingMixin:
         help_text: str,
         on_submit: Callable[[str], None],
     ) -> None:
-        def _handle_submit(value: str | None) -> None:
-            if value is None:
-                return
-            try:
-                on_submit(value)
-            except Exception as exc:
-                self._write_error(str(exc))
-            finally:
-                self._sync_ui_from_engine()
-
-        self.push_screen(
-            NameInputScreen(title=title, placeholder=placeholder, help_text=help_text),
-            callback=_handle_submit,
+        self._present_name_input_modal(
+            title=title,
+            placeholder=placeholder,
+            help_text=help_text,
+            on_submit=on_submit,
         )
 
     def _open_text_editor(
@@ -253,19 +235,11 @@ class TextualAppConfigEditingMixin:
         initial_text: str,
         on_submit: Callable[[str], None],
     ) -> None:
-        def _handle_submit(text: str | None) -> None:
-            if text is None:
-                return
-            try:
-                on_submit(text)
-            except Exception as exc:
-                self._write_error(str(exc))
-            finally:
-                self._sync_ui_from_engine()
-
-        self.push_screen(
-            TextEditorScreen(title=title, help_text=help_text, initial_text=initial_text),
-            callback=_handle_submit,
+        self._present_text_editor_modal(
+            title=title,
+            help_text=help_text,
+            initial_text=initial_text,
+            on_submit=on_submit,
         )
 
     def _handle_edit_asset_selection(self, selected_value: str) -> None:
@@ -381,10 +355,7 @@ class TextualAppConfigEditingMixin:
         )
 
     def _apply_mode_edit(self, mode_name: str, text: str) -> None:
-        if not hasattr(self._engine, "update_mode"):
-            raise ValueError("This runtime does not support editing modes.")
-        target_path = self._engine.update_mode(mode_name, markdown_text=text)
-        self._refresh_suggestions()
+        target_path = self._update_mode_effect(mode_name, text)
         self._write_info(f"Saved mode '{mode_name}' to {target_path}.")
 
     def _open_llm_profile_editor(self) -> None:
@@ -406,11 +377,8 @@ class TextualAppConfigEditingMixin:
         )
 
     def _apply_llm_yaml_edit(self, profile_name: str, text: str) -> None:
-        if not hasattr(self._engine, "update_llm_profile"):
-            raise ValueError("This runtime does not support editing LLM profiles.")
         data = _load_yaml_mapping(text, label="LLM config")
-        self._engine.update_llm_profile(profile_name, profile_config=data)
-        self._refresh_suggestions()
+        self._update_llm_profile_effect(profile_name, data)
         self._write_info(f"Saved workspace LLM profile '{profile_name}'.")
 
     def _open_tool_policy_editor(self, profile_name: str | None = None) -> None:
@@ -434,10 +402,10 @@ class TextualAppConfigEditingMixin:
             try:
                 if action == "apply":
                     overrides = self._parse_tool_policy_yaml(text)
-                    self._engine.set_last_used_profile_tool_policies(profile_name, overrides)
+                    self._set_profile_tool_policies_effect(profile_name, overrides)
                     self._write_info(f"Saved last-used tool confirmation overrides for '{profile_name}'.")
                 elif action == "reset":
-                    self._engine.reset_last_used_profile_tool_policies(profile_name)
+                    self._reset_profile_tool_policies_effect(profile_name)
                     self._write_info(f"Reset tool confirmation overrides for '{profile_name}' to defaults.")
                 elif action == "save_default":
                     self._ensure_workspace_agent_profile(
@@ -447,15 +415,13 @@ class TextualAppConfigEditingMixin:
             except Exception as exc:
                 self._write_error(str(exc))
             finally:
-                self._sync_ui_from_engine()
+                self._commit_engine_ui_update()
 
-        self.push_screen(
-            ToolPolicyEditorScreen(
-                title=f"Edit Tool Policies: {profile_name}",
-                help_text="Apply saves last-used overrides. Reset clears them. Save as Default writes the workspace agent YAML.",
-                initial_text=initial_text,
-            ),
-            callback=_handle_submit,
+        self._present_tool_policy_editor_modal(
+            title=f"Edit Tool Policies: {profile_name}",
+            help_text="Apply saves last-used overrides. Reset clears them. Save as Default writes the workspace agent YAML.",
+            initial_text=initial_text,
+            on_submit=_handle_submit,
         )
 
     def _parse_tool_policy_yaml(self, text: str) -> dict[str, str]:
@@ -485,8 +451,7 @@ class TextualAppConfigEditingMixin:
             tool_confirmation_default=self._active_profile_default_confirmation(active_profile),
             tool_confirmation_overrides=normalized,
         )
-        if hasattr(self._engine, "reset_last_used_profile_tool_policies"):
-            self._engine.reset_last_used_profile_tool_policies(profile_name)
+        self._reset_profile_tool_policy_defaults_effect(profile_name)
         self._write_info(f"Saved tool confirmation overrides for '{profile_name}'.")
 
     def _save_tool_selection_default(self, profile_name: str, tools: list[str] | None) -> None:
@@ -501,8 +466,7 @@ class TextualAppConfigEditingMixin:
             tool_confirmation_default=self._active_profile_default_confirmation(active_profile),
             tool_confirmation_overrides=self._active_profile_policy_overrides(active_profile),
         )
-        if hasattr(self._engine, "reset_last_used_profile_tools"):
-            self._engine.reset_last_used_profile_tools(profile_name)
+        self._reset_profile_tool_defaults_effect(profile_name)
         self._write_info(
             f"Saved default tool allowlist for '{profile_name}': "
             f"{'all tools' if tools is None else f'{len(tools)} selected'}."

@@ -97,6 +97,17 @@ Behavior:
 - the runtime sets `cli_context["interface"] = "textual"`
 - `pocketcode/cli/textual_app.py::run_textual_cli()` remains the stable entrypoint and forwards to the split Textual UI implementation under `pocketcode/cli/textual_ui/`
 - the app owns the screen state, input routing, picker dialogs, editing dialogs, and live run monitor
+- the Textual implementation now keeps two reducer-backed state slices: `TextualCliState` for layout, theme, active view, and engine snapshot, and `TextualRuntimeState` for run status, pending input prompts, console history, the main input placeholder, and the currently presented modal kind/title
+- runtime-derived console text, inspector summary text, modal labels, context/session summaries, prompt summaries, and run preview text are now computed through selector helpers in `pocketcode/cli/textual_ui/selectors.py` so the rendering mixin mostly binds derived values into widgets instead of formatting those runtime strings inline
+- shared skill/tool picker grouping, nested tool tree construction, and selection-list option shaping now live in `pocketcode/cli/textual_ui/picker_model_mixin.py` so rendering, interaction, and asset-management flows reuse one picker-model layer
+- `TextualUIState` construction now lives in `pocketcode/cli/textual_ui/ui_state_mixin.py`, which assembles the view model from reducer state, selector outputs, and picker-model helpers before the rendering mixin applies it to widgets
+- cached widget updates, view switching, and `TextualUIState` application now live in `pocketcode/cli/textual_ui/widget_sync_mixin.py` so the rendering mixin focuses on runtime output flow and live event handling
+- render commits now flow through a single helper in `pocketcode/cli/textual_ui/rendering_mixin.py`, which can optionally refresh input suggestions, hydrate reducer-backed engine snapshots, and then apply the rebuilt `TextualUIState`; that layer also supports batched commits plus engine-mutation transactions so multi-step updates can merge into one reducer-and-render pass
+- slash-command execution and run-event consumption update runtime UI state before the renderer reapplies derived widget values
+- Textual side effects are now funneled through dedicated helpers for command execution, request startup, pending-input resolution, and active-run draining so widget event handlers remain thin orchestration code
+- picker-driven mutations such as profile, mode, and LLM selection, system-settings persistence, selection presets, clone/delete flows, and saved-session operations are also routed through dedicated selection-effect helpers instead of calling engine mutation APIs inline from UI handlers
+- edit-screen flows now route workspace-agent saves, LLM-profile updates, mode updates, clone-before-edit flows, and tool-policy/tool-allowlist default persistence through dedicated config-effect helpers instead of mixing those engine writes into the YAML-editing UI code
+- modal and picker presentation is now centralized behind a modal coordinator helper so `push_screen`, callback wrapping, error handling, reducer-backed modal open/close dispatch, and post-close UI resync happen in one place instead of being duplicated across view mixins; modal dismissal now participates in the same batched render-commit path as follow-up result handlers
 - slash commands still route through `handle_command()` so the command layer remains shared with the basic CLI
 - skill toggles in the inspector persist against the active agent profile when one is selected; otherwise they persist as the global Textual last-used skill selection
 - the inspector `Save` buttons write the current skill or tool selection into the active workspace agent YAML
@@ -465,7 +476,10 @@ Current module layout:
 - `pocketcode/cli/textual_app.py`: compatibility facade that re-exports the Textual UI surface
 - `pocketcode/cli/textual_ui/app.py`: final `PocketCodeTextualApp` composition and `run_textual_cli()`
 - `pocketcode/cli/textual_ui/base.py`: app shell, bindings, CSS, and layout composition
-- `pocketcode/cli/textual_ui/rendering_mixin.py`: UI state derivation, render caching, and run-event updates
+- `pocketcode/cli/textual_ui/picker_model_mixin.py`: shared skill/tool picker models and grouping helpers used across rendering and interaction flows
+- `pocketcode/cli/textual_ui/ui_state_mixin.py`: `TextualUIState` assembly from reducer state, selector outputs, and picker models
+- `pocketcode/cli/textual_ui/widget_sync_mixin.py`: cached widget updates, view switching, and `TextualUIState` application
+- `pocketcode/cli/textual_ui/rendering_mixin.py`: runtime output flow and run-event updates
 - `pocketcode/cli/textual_ui/selection_mixin.py`: profile, mode, LLM, confirmation, and system-settings selection flows
 - `pocketcode/cli/textual_ui/control_center_mixin.py`: F6 control-center category and action routing
 - `pocketcode/cli/textual_ui/config_editing_mixin.py`: agent, mode, LLM, and tool-policy editing helpers
@@ -483,6 +497,19 @@ Core state owned by the app includes:
 - active run handle
 - pending interaction request
 - live run status and recent run events
+
+### UI Pipeline
+
+The current Textual UI pipeline is intentionally layered:
+
+1. reducer-backed state in `store.py` owns structural UI state and transient runtime state, and now includes pure helpers for reducing ordered action batches instead of only one action at a time
+2. selector helpers in `selectors.py` derive runtime-facing text blocks and summaries from that state
+3. picker-model helpers in `picker_model_mixin.py` derive grouped skill and tool selection models shared across multiple flows
+4. `ui_state_mixin.py` assembles `TextualUIState` from reducer state, selector output, picker models, and engine-backed choices
+5. `widget_sync_mixin.py` applies `TextualUIState` to Textual widgets using cached updates to avoid redundant work
+6. `rendering_mixin.py` handles runtime output flow, live event consumption, and the centralized render-commit helper that can refresh suggestions, hydrate engine snapshots, and re-render in one step or batch related updates into a single render pass
+7. engine-mutating UI flows now use a dedicated transaction helper that always hydrates engine-backed state at commit time, so handlers choose intent once instead of repeating `hydrate_engine=True` at every call site
+8. effect mixins and the modal coordinator mutate engine state or present screens, then trigger the render-commit path as needed; modal result handlers now batch modal close plus any follow-up commits into a single render transaction
 - rendered output buffer and trimmed line count
 - suggestion list for input completion
 - cached UI state snapshots to avoid unnecessary redraws

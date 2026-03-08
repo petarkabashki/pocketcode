@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # pyright: reportAttributeAccessIssue=false
 
+from dataclasses import replace
 from typing import Any, Dict
 
 from textual.app import App, ComposeResult
@@ -16,16 +17,31 @@ from pocketcode.core.run_handle import RunHandle
 
 from .shared import INHERIT_POLICY, LOADING_OPTION, THEME_OPTIONS, TextualUIState, WORKSPACE_VIEWS
 from .store import (
+    AppendConsoleLineAction,
+    CloseModalAction,
+    ClearConsoleAction,
     HydrateEngineAction,
+    OpenModalAction,
+    RememberRunEventAction,
+    SetBusyAction,
     SetCurrentViewAction,
+    SetMainInputPlaceholderAction,
+    SetPendingInputRequestAction,
     SetRightPanelVisibleAction,
+    SetRunStatusAction,
     SetThemeAction,
     SetWorkspaceViewAction,
     TextualCliAction,
     TextualCliState,
+    TextualRuntimeAction,
+    TextualRuntimeState,
     capture_engine_snapshot,
     make_initial_cli_state,
+    make_initial_runtime_state,
+    reduce_textual_cli_actions,
     reduce_textual_cli_state,
+    reduce_textual_runtime_actions,
+    reduce_textual_runtime_state,
 )
 
 
@@ -376,14 +392,8 @@ class TextualAppBase(App[None]):
                 "default_llm_profile": None,
             }
         )
-        self._busy = False
         self._active_run: RunHandle | None = None
-        self._pending_input_request: dict[str, Any] | None = None
-        self._live_run_status = "idle"
-        self._live_run_events: list[str] = []
-        self._output_lines: list[str] = []
-        self._trimmed_output_line_count = 0
-        self._last_assistant_response: str = ""
+        self._runtime_state: TextualRuntimeState = make_initial_runtime_state()
         self._suggestions: list[str] = []
         self._queued_textual_actions: list[tuple[Any, ...]] = []
         self._profile_list_names: list[str] = []
@@ -392,6 +402,10 @@ class TextualAppBase(App[None]):
         self._text_state_cache: dict[str, str] = {}
         self._option_list_state_cache: dict[str, tuple[str, ...]] = {}
         self._selection_list_state_cache: dict[str, tuple[tuple[str, str, bool], ...]] = {}
+        self._ui_commit_batch_depth = 0
+        self._ui_commit_requested = False
+        self._ui_commit_hydrate_engine = False
+        self._ui_commit_refresh_suggestions = False
         self._ui_state: TextualUIState | None = None
         self._cli_state: TextualCliState = make_initial_cli_state(
             theme_name=str(system_settings.get("theme_name") or "ocean"),
@@ -479,8 +493,7 @@ class TextualAppBase(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._refresh_suggestions()
-        self._refresh_ui()
+        self._commit_ui_update(refresh_suggestions=True)
         self.set_interval(0.1, self._drain_run_events)
         self.query_one("#main-input", Input).focus()
 
@@ -507,7 +520,16 @@ class TextualAppBase(App[None]):
         self.query_one("#main-input", Input).suggester = SuggestFromList(words, case_sensitive=False)
 
     def _dispatch_cli_action(self, action: TextualCliAction) -> None:
-        self._cli_state = reduce_textual_cli_state(self._cli_state, action)
+        self._dispatch_cli_actions(action)
+
+    def _dispatch_cli_actions(self, *actions: TextualCliAction) -> None:
+        self._cli_state = reduce_textual_cli_actions(self._cli_state, actions)
+
+    def _dispatch_runtime_action(self, action: TextualRuntimeAction) -> None:
+        self._dispatch_runtime_actions(action)
+
+    def _dispatch_runtime_actions(self, *actions: TextualRuntimeAction) -> None:
+        self._runtime_state = reduce_textual_runtime_actions(self._runtime_state, actions)
 
     def _hydrate_cli_state_from_engine(self) -> None:
         self._dispatch_cli_action(HydrateEngineAction(snapshot=capture_engine_snapshot(self._engine)))
@@ -524,6 +546,37 @@ class TextualAppBase(App[None]):
     def _set_cli_right_panel_visible(self, visible: bool) -> None:
         self._dispatch_cli_action(SetRightPanelVisibleAction(visible=bool(visible)))
 
+    def _set_runtime_busy(self, busy: bool) -> None:
+        self._dispatch_runtime_action(SetBusyAction(busy=bool(busy)))
+
+    def _set_runtime_status(self, run_status: str) -> None:
+        self._dispatch_runtime_action(SetRunStatusAction(run_status=str(run_status)))
+
+    def _open_runtime_modal(self, modal_kind: str, *, modal_title: str | None = None) -> None:
+        self._dispatch_runtime_action(
+            OpenModalAction(modal_kind=str(modal_kind), modal_title=modal_title)
+        )
+
+    def _close_runtime_modal(self) -> None:
+        self._dispatch_runtime_action(CloseModalAction())
+
+    def _set_pending_input_request(self, request: dict[str, Any] | None) -> None:
+        self._dispatch_runtime_action(SetPendingInputRequestAction(pending_input_request=request))
+
+    def _remember_runtime_event(self, text: str) -> None:
+        self._dispatch_runtime_action(RememberRunEventAction(text=str(text)))
+
+    def _append_console_line(self, line: str, *, assistant_response: str | None = None) -> None:
+        self._dispatch_runtime_action(
+            AppendConsoleLineAction(line=str(line), assistant_response=assistant_response)
+        )
+
+    def _clear_console_state(self) -> None:
+        self._dispatch_runtime_action(ClearConsoleAction())
+
+    def _set_runtime_input_placeholder(self, prompt: str | None = None) -> None:
+        self._dispatch_runtime_action(SetMainInputPlaceholderAction(placeholder=prompt or ""))
+
     @property
     def _current_view(self) -> str:
         return self._cli_state.current_view
@@ -539,3 +592,73 @@ class TextualAppBase(App[None]):
     @property
     def _show_right_panel(self) -> bool:
         return self._cli_state.right_panel_visible
+
+    @property
+    def _is_busy(self) -> bool:
+        return self._runtime_state.busy
+
+    @property
+    def _busy(self) -> bool:
+        return self._runtime_state.busy
+
+    @_busy.setter
+    def _busy(self, busy: bool) -> None:
+        self._runtime_state = replace(self._runtime_state, busy=bool(busy))
+
+    @property
+    def _pending_input_request(self) -> dict[str, Any] | None:
+        request = self._runtime_state.pending_input_request
+        return dict(request) if isinstance(request, dict) else None
+
+    @_pending_input_request.setter
+    def _pending_input_request(self, request: dict[str, Any] | None) -> None:
+        self._runtime_state = replace(
+            self._runtime_state,
+            pending_input_request=dict(request) if isinstance(request, dict) else None,
+        )
+
+    @property
+    def _live_run_status(self) -> str:
+        return self._runtime_state.run_status
+
+    @_live_run_status.setter
+    def _live_run_status(self, run_status: str) -> None:
+        self._runtime_state = replace(self._runtime_state, run_status=str(run_status))
+
+    @property
+    def _live_run_events(self) -> list[str]:
+        return list(self._runtime_state.live_run_events)
+
+    @_live_run_events.setter
+    def _live_run_events(self, events: list[str]) -> None:
+        self._runtime_state = replace(
+            self._runtime_state,
+            live_run_events=tuple(str(item) for item in events),
+        )
+
+    @property
+    def _output_lines(self) -> list[str]:
+        return list(self._runtime_state.output_lines)
+
+    @_output_lines.setter
+    def _output_lines(self, lines: list[str]) -> None:
+        self._runtime_state = replace(
+            self._runtime_state,
+            output_lines=tuple(str(line) for line in lines),
+        )
+
+    @property
+    def _trimmed_output_line_count(self) -> int:
+        return self._runtime_state.trimmed_output_line_count
+
+    @_trimmed_output_line_count.setter
+    def _trimmed_output_line_count(self, count: int) -> None:
+        self._runtime_state = replace(self._runtime_state, trimmed_output_line_count=int(count))
+
+    @property
+    def _last_assistant_response(self) -> str:
+        return self._runtime_state.last_assistant_response
+
+    @_last_assistant_response.setter
+    def _last_assistant_response(self, text: str) -> None:
+        self._runtime_state = replace(self._runtime_state, last_assistant_response=str(text))

@@ -21,6 +21,25 @@ from pocketcode.cli.textual_app import (
     _build_view_title_text,
     _trim_output_lines,
 )
+from pocketcode.cli.textual_ui.selectors import (
+    select_context_summary,
+    select_inspector_summary_text,
+    select_modal_label,
+    select_output_text,
+    select_prompt_summary,
+    select_run_preview_text,
+    select_saved_sessions_summary,
+)
+from pocketcode.cli.textual_ui.store import (
+    CloseModalAction,
+    OpenModalAction,
+    SetCurrentViewAction,
+    SetThemeAction,
+    make_initial_runtime_state,
+    reduce_textual_cli_actions,
+    reduce_textual_runtime_actions,
+    reduce_textual_runtime_state,
+)
 from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
 from textual.widgets import Input, Select, SelectionList, Static, TextArea
 
@@ -137,6 +156,264 @@ class TestOutputHistoryHelpers:
         )
 
 
+class TestTextualRuntimeStateReducer:
+    def test_modal_actions_open_and_close_runtime_modal_state(self):
+        initial = make_initial_runtime_state()
+
+        opened = reduce_textual_runtime_state(
+            initial,
+            OpenModalAction(modal_kind="asset_picker", modal_title="Select View"),
+        )
+
+        assert opened.active_modal_kind == "asset_picker"
+        assert opened.active_modal_title == "Select View"
+        assert opened.run_status == initial.run_status
+        assert opened.output_lines == initial.output_lines
+
+        closed = reduce_textual_runtime_state(opened, CloseModalAction())
+
+        assert closed.active_modal_kind is None
+        assert closed.active_modal_title is None
+        assert closed.run_status == opened.run_status
+        assert closed.output_lines == opened.output_lines
+
+    def test_runtime_action_batches_apply_in_order(self):
+        state = reduce_textual_runtime_actions(
+            make_initial_runtime_state(),
+            [
+                OpenModalAction(modal_kind="asset_picker", modal_title="Select View"),
+                CloseModalAction(),
+            ],
+        )
+
+        assert state.active_modal_kind is None
+        assert state.active_modal_title is None
+
+
+class TestTextualCliStateReducer:
+    def test_cli_action_batches_apply_in_order(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+        initial = app._cli_state
+
+        state = reduce_textual_cli_actions(
+            initial,
+            [
+                SetThemeAction(theme_name="forest"),
+                SetCurrentViewAction(current_view="run"),
+            ],
+        )
+
+        assert state.theme_name == "forest"
+        assert state.current_view == "run"
+
+
+class TestTextualRuntimeSelectors:
+    def test_modal_label_prefers_title_when_present(self):
+        state = reduce_textual_runtime_state(
+            make_initial_runtime_state(),
+            OpenModalAction(modal_kind="asset_picker", modal_title="Select View"),
+        )
+
+        assert select_modal_label(state) == "Select View"
+
+    def test_output_text_selector_renders_trim_notice(self):
+        state = make_initial_runtime_state()
+        state = reduce_textual_runtime_state(state, OpenModalAction(modal_kind="asset_picker", modal_title=None))
+        state = state.__class__(
+            busy=state.busy,
+            run_status=state.run_status,
+            active_modal_kind=state.active_modal_kind,
+            active_modal_title=state.active_modal_title,
+            pending_input_request=state.pending_input_request,
+            live_run_events=state.live_run_events,
+            output_lines=("info> ready", "assistant> ok"),
+            trimmed_output_line_count=3,
+            last_assistant_response=state.last_assistant_response,
+            main_input_placeholder=state.main_input_placeholder,
+        )
+
+        assert select_output_text(state) == (
+            "info> [output history trimmed: showing last 2 lines]\n"
+            "info> ready\n"
+            "assistant> ok"
+        )
+
+    def test_runtime_summary_and_preview_selectors_include_modal_state(self):
+        state = reduce_textual_runtime_state(
+            make_initial_runtime_state(),
+            OpenModalAction(modal_kind="tool_selection", modal_title="Pick Tools"),
+        )
+        status = {
+            "runtime_flow": "internal-flow",
+            "global_llm_override": "smart",
+            "session_tool_confirmation_overrides": {"default_policy": "confirm"},
+            "active_session": {"title": "Review Session", "session_id": "session-1"},
+            "active_agent_profile": "coder.safe",
+            "agent": "coder.safe",
+            "last_run_summary": {
+                "agent_path": ["coder.safe"],
+                "current_llm_profile": "smart",
+                "current_llm_model": "gpt-test",
+                "llm_usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "llm_cost_usd": 0.01,
+                "context_stats": {"files": 2},
+            },
+        }
+        active_profile = SimpleNamespace(name="coder.safe", source="workspace", description="Focus mode")
+
+        summary_text = select_inspector_summary_text(
+            runtime_state=state,
+            status=status,
+            active_profile=active_profile,
+            active_skill_names=("python-lint",),
+            global_llm_override="smart",
+            auto_confirm_tools=True,
+        )
+        preview_text = select_run_preview_text(state, status)
+
+        assert "Modal: Pick Tools" in summary_text
+        assert "Agent note: Focus mode" in summary_text
+        assert "Active session: Review Session (session-1)" in summary_text
+        assert "active_modal: tool_selection" in preview_text
+        assert "active_modal_title: Pick Tools" in preview_text
+        assert "current_llm_model: gpt-test" in preview_text
+
+    def test_context_session_and_prompt_selectors_render_expected_text(self):
+        status = {
+            "active_session_id": "session-1",
+            "active_session_title": "Review Session",
+            "last_run_summary": {"context_stats": {"files": 2, "snippet_chars": 11}},
+        }
+        cli_context = {
+            "files": {"a.py", "b.py"},
+            "folders": {"src"},
+            "urls": set(),
+            "snippets": {"note": "hello world"},
+        }
+        sessions = [
+            {
+                "session_id": "session-1",
+                "title": "Review Session",
+                "updated_at": "2026-03-07T10:00:00+00:00",
+                "is_active": True,
+            },
+            {
+                "session_id": "session-2",
+                "title": "Earlier Work",
+                "updated_at": "2026-03-07T09:00:00+00:00",
+                "is_active": False,
+            },
+        ]
+        active_profile = SimpleNamespace(extra_prompts=["workspace/prompts/review.md"])
+
+        context_text = select_context_summary(status, cli_context)
+        sessions_text = select_saved_sessions_summary(sessions)
+        prompts_text = select_prompt_summary(("plugin/prompts/base.md",), active_profile)
+
+        assert "session_id: session-1" in context_text
+        assert "files: 2" in context_text
+        assert "Snippets:" in context_text
+        assert "* Review Session | session-1 | 2026-03-07T10:00:00+00:00" in sessions_text
+        assert "- Earlier Work | session-2 | 2026-03-07T09:00:00+00:00" in sessions_text
+        assert "Agent prompt sources:" in prompts_text
+        assert "Profile extra prompts:" in prompts_text
+
+
+class TestTextualUiCommitPath:
+    def test_commit_ui_update_can_refresh_suggestions_and_hydrate_engine_before_apply(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+        calls: list[object] = []
+
+        app._refresh_suggestions = lambda: calls.append("suggest")
+        app._hydrate_cli_state_from_engine = lambda: calls.append("hydrate")
+        app._build_ui_state = lambda: "ui-state"
+        app._apply_ui_state = lambda state: calls.append(("apply", state))
+
+        app._commit_ui_update(hydrate_engine=True, refresh_suggestions=True)
+
+        assert calls == ["suggest", "hydrate", ("apply", "ui-state")]
+
+    def test_batch_ui_update_merges_commit_requests_into_one_apply(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+        calls: list[dict[str, bool]] = []
+
+        app._apply_ui_commit = lambda *, hydrate_engine=False, refresh_suggestions=False: calls.append(
+            {
+                "hydrate_engine": hydrate_engine,
+                "refresh_suggestions": refresh_suggestions,
+            }
+        )
+
+        with app._batch_ui_update(commit=False):
+            app._commit_ui_update()
+            app._commit_ui_update(hydrate_engine=True)
+            app._commit_ui_update(refresh_suggestions=True)
+            assert calls == []
+
+        assert calls == [{"hydrate_engine": True, "refresh_suggestions": True}]
+
+    def test_batch_engine_ui_update_merges_engine_commit_requests_into_one_apply(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+        calls: list[dict[str, bool]] = []
+
+        app._apply_ui_commit = lambda *, hydrate_engine=False, refresh_suggestions=False: calls.append(
+            {
+                "hydrate_engine": hydrate_engine,
+                "refresh_suggestions": refresh_suggestions,
+            }
+        )
+
+        with app._batch_engine_ui_update(commit=False):
+            app._commit_engine_ui_update()
+            app._commit_engine_ui_update(refresh_suggestions=True)
+            assert calls == []
+
+        assert calls == [{"hydrate_engine": True, "refresh_suggestions": True}]
+
+    def test_modal_result_batches_close_and_follow_up_commit_into_one_apply(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+        calls: list[dict[str, bool]] = []
+
+        app._apply_ui_commit = lambda *, hydrate_engine=False, refresh_suggestions=False: calls.append(
+            {
+                "hydrate_engine": hydrate_engine,
+                "refresh_suggestions": refresh_suggestions,
+            }
+        )
+        app.push_screen = lambda screen, callback: callback("ok")
+        app._write_error = lambda text: None
+
+        app._present_modal(
+            object(),
+            modal_kind="asset_picker",
+            modal_title="Select View",
+            on_result=lambda result: app._commit_ui_update(hydrate_engine=True, refresh_suggestions=True),
+            sync_ui=True,
+        )
+
+        assert calls == [{"hydrate_engine": True, "refresh_suggestions": True}]
+
+
 class TestTextualOutputRendering:
     def test_startup_output_starts_empty(self):
         async def exercise() -> None:
@@ -172,6 +449,35 @@ class TestTextualViewSwitching:
 
                 assert isinstance(app.screen, AssetPickerScreen)
                 assert app.screen._title == "Select View"
+
+        asyncio.run(exercise())
+
+    def test_view_picker_tracks_modal_state_while_screen_is_open(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                assert app._runtime_state.active_modal_kind is None
+                assert app._runtime_state.active_modal_title is None
+
+                app.action_pick_view()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                assert app._runtime_state.active_modal_kind == "asset_picker"
+                assert app._runtime_state.active_modal_title == "Select View"
+
+                app.screen.dismiss(None)
+                await pilot.pause(0.05)
+
+                assert app._runtime_state.active_modal_kind is None
+                assert app._runtime_state.active_modal_title is None
 
         asyncio.run(exercise())
 

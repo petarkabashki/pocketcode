@@ -118,10 +118,7 @@ class TextualAppSelectionMixin:
         active_profile = self._engine.active_agent_profile
         if active_profile is not None and active_profile.name == selected_value:
             return
-        if hasattr(self._engine, "set_last_used_active_profile"):
-            self._engine.set_last_used_active_profile(selected_value)
-        else:
-            self._engine.set_active_agent_profile(selected_value)
+        self._set_active_profile_effect(selected_value)
         self._write_info(f"Activated agent profile: {selected_value}")
 
     def _apply_mode_selection(self, selected_value: str) -> None:
@@ -131,20 +128,14 @@ class TextualAppSelectionMixin:
             return
         if active_mode is None and target_mode is None:
             return
-        if hasattr(self._engine, "set_last_used_mode"):
-            self._engine.set_last_used_mode(target_mode)
-        else:
-            self._engine.set_mode(target_mode)
+        self._set_active_mode_effect(target_mode)
         self._write_info(f"Mode: {target_mode or 'none'}")
 
     def _apply_llm_selection(self, selected_value: str) -> None:
         target_llm = None if selected_value == NO_LLM else selected_value
         if target_llm == self._engine.global_llm_override:
             return
-        if hasattr(self._engine, "set_last_used_global_llm_profile"):
-            self._engine.set_last_used_global_llm_profile(target_llm)
-        else:
-            self._engine.set_global_llm_override(target_llm)
+        self._set_global_llm_override_effect(target_llm)
         self._write_info(f"Global LLM override: {self._engine.global_llm_override or 'inherit'}")
 
     def _apply_workspace_view_selection(self, selected_value: str) -> None:
@@ -163,10 +154,7 @@ class TextualAppSelectionMixin:
         current_default = self._engine.session_confirmation_overrides.get("default_policy")
         if target_default == current_default:
             return
-        if hasattr(self._engine, "set_last_used_session_confirmation_default"):
-            self._engine.set_last_used_session_confirmation_default(target_default)
-        else:
-            self._engine.set_session_confirmation_default(target_default)
+        self._set_session_confirmation_default_effect(target_default)
         self._write_info(
             f"Session confirmation default: "
             f"{self._engine.session_confirmation_overrides.get('default_policy') or 'inherit'}"
@@ -184,30 +172,18 @@ class TextualAppSelectionMixin:
             }
         )
 
-        def _handle_submit(payload: dict[str, str | None] | None) -> None:
-            if payload is None:
-                return
-            try:
-                self._apply_system_settings(payload)
-            except Exception as exc:
-                self._write_error(str(exc))
-            finally:
-                self._sync_ui_from_engine()
-
-        self.push_screen(
-            SystemSettingsScreen(
-                theme_name=str(settings.get("theme_name") or self._cli_state.theme_name),
-                workspace_view=str(
-                    settings.get("workspace_view") or settings.get("workspace_mode") or self._cli_state.workspace_view
-                ),
-                default_agent=str(settings.get("default_agent")) if settings.get("default_agent") else None,
-                default_llm_profile=(
-                    str(settings.get("default_llm_profile")) if settings.get("default_llm_profile") else None
-                ),
-                available_agents=self._engine.list_agents(),
-                available_llm_profiles=self._engine.list_llm_profiles(),
+        self._present_system_settings_modal(
+            theme_name=str(settings.get("theme_name") or self._cli_state.theme_name),
+            workspace_view=str(
+                settings.get("workspace_view") or settings.get("workspace_mode") or self._cli_state.workspace_view
             ),
-            callback=_handle_submit,
+            default_agent=str(settings.get("default_agent")) if settings.get("default_agent") else None,
+            default_llm_profile=(
+                str(settings.get("default_llm_profile")) if settings.get("default_llm_profile") else None
+            ),
+            available_agents=self._engine.list_agents(),
+            available_llm_profiles=self._engine.list_llm_profiles(),
+            on_submit=self._apply_system_settings,
         )
 
     def _apply_system_settings(self, payload: dict[str, str | None]) -> None:
@@ -218,21 +194,17 @@ class TextualAppSelectionMixin:
         default_agent = str(payload.get("default_agent")) if payload.get("default_agent") else None
         default_llm_profile = str(payload.get("default_llm_profile")) if payload.get("default_llm_profile") else None
 
-        if not hasattr(self._engine, "save_system_settings"):
-            raise ValueError("This runtime does not support saving system settings.")
-
-        config_path = self._engine.save_system_settings(
+        config_path = self._save_system_settings_effect(
             theme_name=theme_name,
             workspace_view=workspace_view,
             default_agent=default_agent,
             default_llm_profile=default_llm_profile,
         )
-        self._set_cli_theme_name(theme_name)
-        self._apply_workspace_view(workspace_view, announce=False)
-        if default_agent:
-            self._engine.set_agent(default_agent)
-        self._refresh_suggestions()
-        self._write_info(f"Applied system settings and saved to {config_path}.")
+        with self._batch_engine_ui_update(refresh_suggestions=True):
+            self._set_cli_theme_name(theme_name)
+            self._apply_workspace_view(workspace_view, announce=False)
+            self._set_default_agent_effect(default_agent)
+            self._write_info(f"Applied system settings and saved to {config_path}.")
 
     def _apply_view_selection(self, selected_value: str) -> None:
         self._set_current_view(selected_value, announce=True)

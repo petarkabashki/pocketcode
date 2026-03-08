@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-import io
 import logging
-from contextlib import redirect_stdout
 
 from textual.widgets import Button, Input, OptionList, Select, SelectionList, Switch, TextArea
 
-from pocketcode.cli.command_handler import handle_command
-from pocketcode.cli.user_interaction import interaction_placeholder, parse_interaction_response
+from pocketcode.cli.user_interaction import interaction_placeholder
 
 from .shared import LOADING_OPTION, SKILL_GROUP_PREFIX
 
@@ -28,38 +24,30 @@ class TextualAppInteractionMixin:
 
         input_widget = self.query_one("#main-input", Input)
         input_widget.value = ""
-        if self._pending_input_request is not None and self._active_run is not None:
-            request_id = str(
-                self._pending_input_request.get("request_id")
-                or self._pending_input_request.get("prompt_id")
-                or ""
-            )
-            if self._pending_input_request.get("type") == "interaction_requested":
+        pending_input_request = self._runtime_state.pending_input_request
+        if pending_input_request is not None and self._active_run is not None:
+            if pending_input_request.get("type") == "interaction_requested":
                 try:
-                    response_payload = parse_interaction_response(self._pending_input_request, text)
+                    resolved = self._resolve_pending_input_effect(text, pending_input_request)
                 except ValueError as exc:
                     self._write_error(str(exc))
-                    self._set_main_input_placeholder(interaction_placeholder(self._pending_input_request))
+                    self._set_main_input_placeholder(interaction_placeholder(pending_input_request))
                     return
-                display_text = str(response_payload.get("label") or text)
-                self._write_user(display_text)
-                resolved = bool(request_id) and self._active_run.resolve_interaction(request_id, response_payload)
             else:
-                self._write_user(text)
-                resolved = bool(request_id) and self._active_run.resolve_user_input(request_id, text)
+                resolved = self._resolve_pending_input_effect(text, pending_input_request)
             if not resolved:
                 self._write_error("The pending prompt is no longer active.")
-            self._pending_input_request = None
+            self._set_pending_input_request(None)
             self._set_main_input_placeholder()
             return
         normalized_text = text.lower()
-        if self._busy and normalized_text not in {"/stop", "/cancel"}:
+        if self._is_busy and normalized_text not in {"/stop", "/cancel"}:
             self._write_info("A run is already in progress.")
             return
 
         try:
             if text.startswith("/"):
-                self._busy = True
+                self._set_runtime_busy(True)
                 self._write_user(text)
                 if text.lower() == "/copy":
                     self.action_copy_last_response()
@@ -67,47 +55,28 @@ class TextualAppInteractionMixin:
                 if text.lower() == "/copy-all":
                     self.action_copy_output()
                     return
-                command_output, should_exit = await asyncio.to_thread(self._run_command_capture, text)
+                command_output, should_exit = await self._execute_command_effect(text)
                 if command_output:
                     self._write_info(command_output)
                 self._drain_queued_textual_actions()
                 if should_exit:
                     self.exit()
                     return
-                self._sync_ui_from_engine()
             else:
-                self._busy = True
-                self._write_user(text)
-                self._active_run = self._engine.start_request(
-                    text,
-                    self._cli_context,
-                    bridge_user_input=True,
-                )
-                self._live_run_status = "running"
-                self._refresh_ui()
+                with self._batch_ui_update():
+                    self._set_runtime_busy(True)
+                    self._write_user(text)
+                    self._start_request_effect(text)
+                    self._set_runtime_status("running")
         except Exception as exc:
             logger.error("Failed to process Textual input: %s", exc, exc_info=True)
             self._write_error(str(exc))
         finally:
             if self._active_run is None:
-                self._busy = False
+                self._set_runtime_busy(False)
             input_widget.focus()
             if self._active_run is None:
-                self._sync_ui_from_engine()
-
-    def _run_command_capture(self, command_input: str) -> tuple[str, bool]:
-        output = io.StringIO()
-        with redirect_stdout(output):
-            result = handle_command(
-                command_input=command_input,
-                engine=self._engine,
-                cli_context=self._cli_context,
-                active_run=self._active_run,
-            )
-
-        text = output.getvalue().strip()
-        should_exit = result == "__exit__"
-        return text, should_exit
+                self._commit_engine_ui_update(refresh_suggestions=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
@@ -148,10 +117,10 @@ class TextualAppInteractionMixin:
                 self._apply_llm_selection(value)
             elif widget_id == "session-confirm-select":
                 self._apply_session_confirmation_selection(value)
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update()
         except Exception as exc:
             self._write_error(str(exc))
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update()
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if self._syncing_controls:
@@ -165,7 +134,7 @@ class TextualAppInteractionMixin:
                 self._engine.auto_confirm_tools = bool(event.value)
             state = "enabled" if event.value else "disabled"
             self._write_info(f"Auto-confirm tools {state}.")
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update()
 
     def on_key(self, event) -> None:
         if event.key != "space" or not isinstance(self.focused, SelectionList):
@@ -194,7 +163,7 @@ class TextualAppInteractionMixin:
         except Exception as exc:
             self._write_error(str(exc))
         finally:
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update()
 
     def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
         list_id = event.selection_list.id or ""
@@ -238,14 +207,13 @@ class TextualAppInteractionMixin:
         except Exception as exc:
             self._write_error(str(exc))
         finally:
-            self._refresh_suggestions()
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update(refresh_suggestions=True)
 
     def _handle_inspector_tool_toggle(self, event: SelectionList.SelectionToggled, value: str) -> None:
         active_profile = self._engine.active_agent_profile
         if active_profile is None:
             self._write_error("No active agent profile selected.")
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update()
             return
         current_agent = str(getattr(active_profile, "agent", "") or self._engine.get_current_agent() or "")
         available_tools, _, grouped_values, _ = self._build_tool_picker_model(
@@ -254,7 +222,7 @@ class TextualAppInteractionMixin:
         )
         if not available_tools:
             self._write_error("No tools are available for the active agent.")
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update()
             return
 
         selected_tools = set(available_tools if active_profile.tools is None else active_profile.tools)
@@ -279,8 +247,7 @@ class TextualAppInteractionMixin:
         except Exception as exc:
             self._write_error(str(exc))
         finally:
-            self._refresh_suggestions()
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update(refresh_suggestions=True)
 
     def action_pick_view(self) -> None:
         self._open_view_picker()
@@ -296,32 +263,30 @@ class TextualAppInteractionMixin:
 
     def action_toggle_right_panel(self) -> None:
         next_visible = not self._cli_state.right_panel_visible
-        self._set_cli_workspace_view("balanced")
-        self._set_cli_right_panel_visible(next_visible)
-        self._write_info(f"Inspector panel {'shown' if next_visible else 'hidden'}.")
-        self._refresh_ui()
+        with self._batch_ui_update():
+            self._set_cli_workspace_view("balanced")
+            self._set_cli_right_panel_visible(next_visible)
+            self._write_info(f"Inspector panel {'shown' if next_visible else 'hidden'}.")
 
     def action_reload_runtime(self) -> None:
         try:
             self._engine.reload()
-            self._refresh_suggestions()
             self._write_info("Reloaded plugins, agents, tools, and LLM mappings.")
         except Exception as exc:
             self._write_error(str(exc))
         finally:
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update(refresh_suggestions=True)
 
     def action_clear_output(self) -> None:
-        self._output_lines = []
-        self._trimmed_output_line_count = 0
+        self._clear_console_state()
         self._load_text_area_text(self.query_one("#output", TextArea), "")
         self._write_info("Cleared output.")
 
     def action_copy_output(self) -> None:
-        if not self._output_lines:
+        if not self._runtime_state.output_lines:
             self._write_error("No output to copy.")
             return
-        text = "\n".join(self._output_lines)
+        text = "\n".join(self._runtime_state.output_lines)
         try:
             self.copy_to_clipboard(text)
             self._write_info("Copied full console output to clipboard.")
@@ -329,11 +294,11 @@ class TextualAppInteractionMixin:
             self._write_error(f"Clipboard copy failed: {exc}")
 
     def action_copy_last_response(self) -> None:
-        if not self._last_assistant_response:
+        if not self._runtime_state.last_assistant_response:
             self._write_error("No assistant response available to copy.")
             return
         try:
-            self.copy_to_clipboard(self._last_assistant_response)
+            self.copy_to_clipboard(self._runtime_state.last_assistant_response)
             self._write_info("Copied last assistant response to clipboard.")
         except Exception as exc:
             self._write_error(f"Clipboard copy failed: {exc}")

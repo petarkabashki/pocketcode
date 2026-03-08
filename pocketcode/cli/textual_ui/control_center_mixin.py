@@ -193,12 +193,9 @@ class TextualAppControlCenterMixin:
                 self._open_mode_picker()
                 return
             if action == "clear":
-                if hasattr(self._engine, "set_last_used_mode"):
-                    self._engine.set_last_used_mode(None)
-                else:
-                    self._engine.set_mode(None)
+                self._set_active_mode_effect(None)
                 self._write_info("Mode cleared.")
-                self._sync_ui_from_engine()
+                self._commit_engine_ui_update()
                 return
             if action == "edit":
                 self._open_mode_editor()
@@ -261,12 +258,9 @@ class TextualAppControlCenterMixin:
             return
         if category == "sessions":
             if action == "new":
-                if not hasattr(self._engine, "start_new_session"):
-                    self._write_error("This runtime does not support saved sessions.")
-                    return
-                session = self._engine.start_new_session()
+                session = self._start_new_session_effect()
                 self._write_info(f"Started new session: {session.get('session_id')}")
-                self._sync_ui_from_engine()
+                self._commit_engine_ui_update()
                 return
             if action == "resume":
                 self._open_saved_session_picker()
@@ -314,10 +308,7 @@ class TextualAppControlCenterMixin:
         )
 
     def _resume_saved_session(self, session_id: str) -> None:
-        if not hasattr(self._engine, "resume_session"):
-            self._write_error("This runtime does not support saved sessions.")
-            return
-        session = self._engine.resume_session(session_id)
+        session = self._resume_saved_session_effect(session_id)
         self._write_info(f"Resumed session: {session.get('session_id')}")
 
     def _confirm_delete_saved_session(self, session_id: str) -> None:
@@ -333,10 +324,7 @@ class TextualAppControlCenterMixin:
         )
 
     def _delete_saved_session(self, session_id: str) -> None:
-        if not hasattr(self._engine, "delete_session"):
-            self._write_error("This runtime does not support saved sessions.")
-            return
-        deleted = self._engine.delete_session(session_id)
+        deleted = self._delete_saved_session_effect(session_id)
         self._write_info(f"Deleted session: {deleted.get('session_id')}")
 
     def _confirm_clear_saved_sessions(self) -> None:
@@ -352,8 +340,5 @@ class TextualAppControlCenterMixin:
         )
 
     def _clear_saved_sessions(self) -> None:
-        if not hasattr(self._engine, "clear_saved_sessions"):
-            self._write_error("This runtime does not support saved sessions.")
-            return
-        removed = self._engine.clear_saved_sessions()
+        removed = self._clear_saved_sessions_effect()
         self._write_info(f"Cleared {removed} saved session{'s' if removed != 1 else ''}.")

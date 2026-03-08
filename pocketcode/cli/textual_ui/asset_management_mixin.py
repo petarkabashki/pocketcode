@@ -19,8 +19,7 @@ class TextualAppAssetManagementMixin:
                 self._write_error("This runtime does not support saving agent skills.")
                 return
             self._engine.save_agent_profile_skills(profile_name, selected_skills)
-            self._refresh_suggestions()
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update(refresh_suggestions=True)
             self._write_info(
                 f"Saved inspector skills to workspace agent '{profile_name}': "
                 f"{', '.join(selected_skills) if selected_skills else 'none'}."
@@ -43,8 +42,7 @@ class TextualAppAssetManagementMixin:
                 self._write_error("This runtime does not support saving agent tools.")
                 return
             self._engine.save_agent_profile_tools(profile_name, selected_tools)
-            self._refresh_suggestions()
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update(refresh_suggestions=True)
             self._write_info(
                 f"Saved inspector tools to workspace agent '{profile_name}': "
                 f"{', '.join(selected_tools) if selected_tools else 'all'}."
@@ -56,54 +54,26 @@ class TextualAppAssetManagementMixin:
         )
 
     def _clone_selected_asset(self, asset_name: str, new_name: str) -> None:
-        active_profile = self._engine.active_agent_profile
+        cloned = self._clone_asset_effect(asset_name, new_name)
         if asset_name == "agent":
-            if active_profile is None:
-                self._write_error("No active agent to clone.")
-                return
-            cloner = getattr(self._engine, "clone_agent", None) or getattr(self._engine, "clone_agent_profile")
-            cloned = cloner(active_profile.name, new_name)
-            self._engine.set_active_agent_profile(new_name)
             target_path = getattr(cloned, "source_path", None)
             if target_path:
                 self._write_info(f"Cloned active agent to {target_path}.")
             else:
                 self._write_info(f"Cloned active agent to workspace agent '{new_name}'.")
         elif asset_name == "llm":
-            profile_name = self._current_llm_profile_name()
-            if not profile_name:
-                self._write_error("No active LLM profile to clone.")
-                return
-            if not hasattr(self._engine, "clone_llm_profile"):
-                self._write_error("This runtime does not support cloning LLM profiles.")
-                return
-            cloned = self._engine.clone_llm_profile(profile_name, new_name)
-            self._engine.set_global_llm_override(new_name)
             target_path = cloned.get("source_path") if isinstance(cloned, dict) else getattr(cloned, "source_path", None)
             if target_path:
                 self._write_info(f"Cloned active LLM profile to {target_path}.")
             else:
                 self._write_info(f"Cloned active LLM profile to workspace profile '{new_name}'.")
         elif asset_name == "mode":
-            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-            if active_mode is None:
-                self._write_error("No active mode to clone.")
-                return
-            if not hasattr(self._engine, "clone_mode"):
-                self._write_error("This runtime does not support cloning modes.")
-                return
-            target_path = self._engine.clone_mode(active_mode.name, new_name)
-            if hasattr(self._engine, "set_last_used_mode"):
-                self._engine.set_last_used_mode(new_name)
-            else:
-                self._engine.set_mode(new_name)
-            self._write_info(f"Cloned active mode to {target_path}.")
+            self._write_info(f"Cloned active mode to {cloned}.")
         else:
             self._write_error(f"Unsupported clone target: {asset_name}")
             return
 
-        self._refresh_suggestions()
-        self._sync_ui_from_engine()
+        self._commit_engine_ui_update(refresh_suggestions=True)
 
     def _confirm_delete_current_asset(self, asset_name: str) -> None:
         current_name = None
@@ -129,48 +99,22 @@ class TextualAppAssetManagementMixin:
         )
 
     def _delete_current_asset(self, asset_name: str) -> None:
+        deleted_name, target_path = self._delete_asset_effect(asset_name)
         if asset_name == "agent":
-            active_profile = self._engine.active_agent_profile
-            if active_profile is None:
-                self._write_error("No active agent selected.")
-                return
-            if not hasattr(self._engine, "delete_agent_profile"):
-                self._write_error("This runtime does not support deleting agent profiles.")
-                return
-            target_path = self._engine.delete_agent_profile(active_profile.name)
-            self._write_info(f"Deleted workspace agent '{active_profile.name}' from {target_path}.")
+            self._write_info(f"Deleted workspace agent '{deleted_name}' from {target_path}.")
         elif asset_name == "llm":
-            profile_name = self._current_llm_profile_name()
-            if not profile_name:
-                self._write_error("No active LLM profile selected.")
-                return
-            if not hasattr(self._engine, "delete_llm_profile"):
-                self._write_error("This runtime does not support deleting LLM profiles.")
-                return
-            target_path = self._engine.delete_llm_profile(profile_name)
-            self._write_info(f"Deleted workspace LLM profile '{profile_name}' from {target_path}.")
+            self._write_info(f"Deleted workspace LLM profile '{deleted_name}' from {target_path}.")
         elif asset_name == "mode":
-            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-            if active_mode is None:
-                self._write_error("No active mode selected.")
-                return
-            if not hasattr(self._engine, "delete_mode"):
-                self._write_error("This runtime does not support deleting modes.")
-                return
-            target_path = self._engine.delete_mode(active_mode.name)
-            self._write_info(f"Deleted mode '{active_mode.name}' from {target_path}.")
+            self._write_info(f"Deleted mode '{deleted_name}' from {target_path}.")
         else:
             self._write_error(f"Unsupported delete target: {asset_name}")
             return
-        self._refresh_suggestions()
-        self._sync_ui_from_engine()
+        self._commit_engine_ui_update(refresh_suggestions=True)
 
     def _save_selection_preset(self, preset_name: str) -> None:
-        if not hasattr(self._engine, "save_textual_selection_preset"):
-            raise ValueError("This runtime does not support selection presets.")
-        target_path = self._engine.save_textual_selection_preset(preset_name)
+        target_path = self._save_selection_preset_effect(preset_name)
         self._write_info(f"Saved selection preset '{preset_name}' to {target_path}.")
-        self._sync_ui_from_engine()
+        self._commit_engine_ui_update()
 
     def _selection_preset_options(self) -> tuple[PickerOption, ...]:
         if not hasattr(self._engine, "list_textual_selection_presets"):
@@ -212,21 +156,15 @@ class TextualAppAssetManagementMixin:
 
     def _apply_selection_preset_action(self, action: str, preset_name: str) -> None:
         if action == "load":
-            if not hasattr(self._engine, "apply_textual_selection_preset"):
-                self._write_error("This runtime does not support selection presets.")
-                return
-            self._engine.apply_textual_selection_preset(preset_name)
+            self._apply_selection_preset_effect(preset_name)
             self._write_info(f"Loaded selection preset '{preset_name}'.")
         elif action == "delete":
-            if not hasattr(self._engine, "delete_textual_selection_preset"):
-                self._write_error("This runtime does not support selection presets.")
-                return
-            self._engine.delete_textual_selection_preset(preset_name)
+            self._delete_selection_preset_effect(preset_name)
             self._write_info(f"Deleted selection preset '{preset_name}'.")
         else:
             self._write_error(f"Unsupported preset action: {action}")
             return
-        self._sync_ui_from_engine()
+        self._commit_engine_ui_update()
 
     def _open_tool_selection_picker(self, profile_name: str | None = None) -> None:
         if profile_name is None:
@@ -269,18 +207,16 @@ class TextualAppAssetManagementMixin:
                     on_ready=lambda target_name: self._save_tool_selection_default(target_name, tools),
                 )
 
-        self.push_screen(
-            ToolSelectionScreen(
-                title="Edit Allowed Tools",
-                tools=tuple(picker_options),
-                selected_values=initial_selected_values,
-                help_text=(
-                    "Apply saves last-used tools. Reset clears last-used overrides. "
-                    "Save as Default writes the workspace agent YAML."
-                ),
-                grouped_values=grouped_values,
+        self._present_tool_selection_modal(
+            title="Edit Allowed Tools",
+            tools=tuple(picker_options),
+            selected_values=initial_selected_values,
+            help_text=(
+                "Apply saves last-used tools. Reset clears last-used overrides. "
+                "Save as Default writes the workspace agent YAML."
             ),
-            callback=_handle_selection,
+            grouped_values=grouped_values,
+            on_submit=_handle_selection,
         )
 
     def _open_skill_selection_picker(self) -> None:
@@ -334,22 +270,19 @@ class TextualAppAssetManagementMixin:
                 self._write_info(
                     f"Saved default skills: {', '.join(selected_skill_names) if selected_skill_names else 'none'}."
                 )
-            self._refresh_suggestions()
-            self._sync_ui_from_engine()
+            self._commit_engine_ui_update(refresh_suggestions=True)
 
-        self.push_screen(
-            ToolSelectionScreen(
-                title="Select Skills",
-                tools=tuple(picker_options),
-                selected_values=selected_values,
-                help_text=(
-                    "Apply saves skills for the active profile when one is selected. "
-                    "Reset restores that profile's fallback skills. "
-                    "Save as Default writes the default skill set to pocketcode.yml."
-                ),
-                empty_message="No matching skills.",
-                filter_placeholder="Filter skills...",
-                grouped_values=grouped_values,
+        self._present_tool_selection_modal(
+            title="Select Skills",
+            tools=tuple(picker_options),
+            selected_values=selected_values,
+            help_text=(
+                "Apply saves skills for the active profile when one is selected. "
+                "Reset restores that profile's fallback skills. "
+                "Save as Default writes the default skill set to pocketcode.yml."
             ),
-            callback=_handle_selection,
+            empty_message="No matching skills.",
+            filter_placeholder="Filter skills...",
+            grouped_values=grouped_values,
+            on_submit=_handle_selection,
         )
