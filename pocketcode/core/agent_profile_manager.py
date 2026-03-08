@@ -16,6 +16,18 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from pocketcode.core.discovery_rules import DiscoveryFilter
+from pocketcode.core.reference_syntax import (
+    normalize_prompt_source,
+    normalize_registry_reference,
+    validate_prompt_source,
+    validate_registry_reference,
+)
+from pocketcode.core.resource_roots import (
+    ResourceRoot,
+    discover_resource_roots,
+    primary_resource_root,
+    resource_root_for_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +37,13 @@ class CompositeAgentManager:
 
     def __init__(self, workspace_root: Path) -> None:
         self._workspace_root = Path(workspace_root).resolve()
-        self._workspace_pocketcode_root: Path = self._workspace_root / ".pocketcode"
-        self._workspace_agents_dir: Path = self._workspace_pocketcode_root / "agents"
-        self._legacy_workspace_agents_dir: Path = self._workspace_pocketcode_root / "agent-profiles"
+        self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._workspace_agents_dir: Path = self._primary_resource_root.path / "agents"
+        self._legacy_workspace_agents_dir: Path = self._primary_resource_root.path / "agent-profiles"
         self._agents: Dict[str, Any] = {}
         self._flow_definitions: Dict[str, Any] = {}
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
+        self._resource_root_filters = self._build_resource_root_filters()
         self._global_plugin_filter = DiscoveryFilter.from_root(
             self._workspace_root,
             ignore_dir=self._workspace_root,
@@ -48,10 +58,11 @@ class CompositeAgentManager:
             for name, definition in flow_definitions.items()
         }
         self._agents = {}
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
+        self._resource_roots = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._workspace_agents_dir = self._primary_resource_root.path / "agents"
+        self._legacy_workspace_agents_dir = self._primary_resource_root.path / "agent-profiles"
+        self._resource_root_filters = self._build_resource_root_filters()
         self._global_plugin_filter = DiscoveryFilter.from_root(
             self._workspace_root,
             ignore_dir=self._workspace_root,
@@ -191,22 +202,27 @@ class CompositeAgentManager:
                 self._load_agent_file(yaml_file, source="plugin")
 
     def _load_workspace_files(self) -> None:
-        yaml_files: List[Path] = []
-        if self._legacy_workspace_agents_dir.exists():
-            yaml_files.extend(sorted(self._legacy_workspace_agents_dir.glob("*.yaml")))
-        if self._workspace_agents_dir.exists():
-            yaml_files.extend(sorted(self._workspace_agents_dir.glob("*.yaml")))
+        for resource_root in self._resource_roots:
+            resource_filter = self._resource_root_filter(resource_root)
+            yaml_files: List[Path] = []
+            legacy_dir = resource_root.path / "agent-profiles"
+            agents_dir = resource_root.path / "agents"
+            if legacy_dir.exists():
+                yaml_files.extend(sorted(legacy_dir.glob("*.yaml")))
+            if agents_dir.exists():
+                yaml_files.extend(sorted(agents_dir.glob("*.yaml")))
 
-        for yaml_file in yaml_files:
-            if self._workspace_filter.ignores(yaml_file, is_dir=False):
-                continue
-            self._load_agent_file(yaml_file, source="workspace")
+            for yaml_file in yaml_files:
+                if resource_filter.ignores(yaml_file, is_dir=False):
+                    continue
+                self._load_agent_file(yaml_file, source="workspace")
 
     def _plugin_agent_file_is_ignored(self, plugin_root: Path, yaml_file: Path) -> bool:
         resolved_plugin_root = plugin_root.resolve()
         resolved_yaml = yaml_file.resolve()
-        if self._is_under_workspace_pocketcode(resolved_plugin_root):
-            return self._workspace_filter.ignores(resolved_yaml, is_dir=False)
+        containing_root = resource_root_for_path(resolved_plugin_root, self._resource_roots)
+        if containing_root is not None:
+            return self._resource_root_filter(containing_root).ignores(resolved_yaml, is_dir=False)
         try:
             relative = resolved_yaml.relative_to(resolved_plugin_root)
         except ValueError:
@@ -216,12 +232,17 @@ class CompositeAgentManager:
             is_dir=False,
         )
 
-    def _is_under_workspace_pocketcode(self, path: Path) -> bool:
-        try:
-            path.resolve().relative_to(self._workspace_pocketcode_root.resolve())
-        except ValueError:
-            return False
-        return True
+    def _build_resource_root_filters(self) -> Dict[Path, DiscoveryFilter]:
+        return {
+            resource_root.path.resolve(): DiscoveryFilter.from_root(
+                resource_root.path,
+                ignore_dir=resource_root.path,
+            )
+            for resource_root in self._resource_roots
+        }
+
+    def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
+        return self._resource_root_filters[resource_root.path.resolve()]
 
     def _load_agent_file(self, yaml_file: Path, *, source: str) -> None:
         from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
@@ -246,7 +267,16 @@ class CompositeAgentManager:
                 )
                 return
 
-            normalized_flow_name = str(flow_name).replace("::", ".")
+            normalized_flow_name = str(flow_name).strip()
+            validate_registry_reference(
+                normalized_flow_name,
+                allowed_kinds={"agent", "flow"},
+                field_name=f"{yaml_file.name}: flow",
+            )
+            normalized_flow_name = normalize_registry_reference(
+                normalized_flow_name,
+                allowed_kinds={"agent", "flow"},
+            )
             flow_def = (
                 self._flow_definitions.get(str(flow_name))
                 or self._flow_definitions.get(normalized_flow_name)
@@ -266,6 +296,24 @@ class CompositeAgentManager:
                 skills_raw = None
 
             inherited_tools = list(getattr(flow_def, "tools", None) or []) or None
+            extra_prompts = [str(p) for p in raw.get("extra_prompts", []) if isinstance(p, str)]
+            for index, prompt_ref in enumerate(extra_prompts):
+                validate_prompt_source(prompt_ref, field_name=f"{yaml_file.name}: extra_prompts[{index}]")
+            extra_prompts = [normalize_prompt_source(prompt_ref) for prompt_ref in extra_prompts]
+
+            normalized_tools = None
+            if has_tools_key and tools_raw is not None:
+                normalized_tools = [str(t) for t in tools_raw if isinstance(t, str)]
+                for index, tool_ref in enumerate(normalized_tools):
+                    validate_registry_reference(
+                        tool_ref,
+                        allowed_kinds={"tool"},
+                        field_name=f"{yaml_file.name}: tools[{index}]",
+                    )
+                normalized_tools = [
+                    normalize_registry_reference(tool_ref, allowed_kinds={"tool"})
+                    for tool_ref in normalized_tools
+                ]
 
             agent = Agent(
                 name=str(name),
@@ -276,15 +324,15 @@ class CompositeAgentManager:
                     if raw.get("llm_profile")
                     else getattr(flow_def, "llm_profile", None)
                 ),
-                extra_prompts=[str(p) for p in raw.get("extra_prompts", []) if isinstance(p, str)],
+                extra_prompts=extra_prompts,
                 skills=(
                     [str(skill) for skill in skills_raw if isinstance(skill, str)]
                     if has_skills_key and skills_raw is not None
                     else None
                 ),
                 tools=(
-                    [str(t) for t in tools_raw if isinstance(t, str)]
-                    if has_tools_key and tools_raw is not None
+                    normalized_tools
+                    if has_tools_key and normalized_tools is not None
                     else inherited_tools
                 ),
                 tool_confirmation={
@@ -315,11 +363,15 @@ class CompositeAgentManager:
         if default_policy:
             tool_confirmation["default"] = default_policy
         if overrides:
-            tool_confirmation["overrides"] = dict(overrides)
+            tool_confirmation["overrides"] = {
+                normalize_registry_reference(str(tool_name), allowed_kinds={"tool"}): str(policy)
+                for tool_name, policy in overrides.items()
+                if str(tool_name).strip() and str(policy).strip()
+            }
 
         data: Dict[str, Any] = {
             "name": agent.name,
-            "flow": agent.flow,
+            "flow": normalize_registry_reference(str(agent.flow), allowed_kinds={"agent", "flow"}),
         }
         if agent.description:
             data["description"] = agent.description
@@ -328,9 +380,17 @@ class CompositeAgentManager:
         if agent.skills is not None:
             data["skills"] = list(agent.skills)
         if agent.tools is not None:
-            data["tools"] = list(agent.tools)
+            data["tools"] = [
+                normalize_registry_reference(str(tool_name), allowed_kinds={"tool"})
+                for tool_name in agent.tools
+                if str(tool_name).strip()
+            ]
         if agent.extra_prompts:
-            data["extra_prompts"] = list(agent.extra_prompts)
+            data["extra_prompts"] = [
+                normalize_prompt_source(str(prompt_ref))
+                for prompt_ref in agent.extra_prompts
+                if str(prompt_ref).strip()
+            ]
         if tool_confirmation:
             data["tool_confirmation"] = tool_confirmation
         return data

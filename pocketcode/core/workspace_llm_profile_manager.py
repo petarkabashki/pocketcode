@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from pocketcode.core.resource_roots import discover_resource_roots, primary_resource_root
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +18,25 @@ class WorkspaceLlmProfileManager:
 
     def __init__(self, workspace_root: Path) -> None:
         self._workspace_root = Path(workspace_root).resolve()
-        self._workspace_llm_profiles_dir = self._workspace_root / ".pocketcode" / "llm-profiles"
+        self._resource_roots = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._workspace_llm_profiles_dir = self._primary_resource_root.path / "llm-profiles"
         self._profiles: Dict[str, Dict[str, Any]] = {}
         self._source_paths: Dict[str, Path] = {}
 
     def load(self) -> None:
         self._profiles = {}
         self._source_paths = {}
-        if not self._workspace_llm_profiles_dir.exists():
-            return
+        self._resource_roots = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._workspace_llm_profiles_dir = self._primary_resource_root.path / "llm-profiles"
 
-        for yaml_file in sorted(self._workspace_llm_profiles_dir.glob("*.yaml")):
-            self._load_profile_file(yaml_file)
+        for resource_root in self._resource_roots:
+            llm_profiles_dir = resource_root.path / "llm-profiles"
+            if not llm_profiles_dir.exists():
+                continue
+            for yaml_file in sorted(llm_profiles_dir.glob("*.yaml")):
+                self._load_profile_file(yaml_file)
 
     def reload(self) -> None:
         self.load()

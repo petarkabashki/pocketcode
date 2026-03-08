@@ -15,10 +15,10 @@ Neither introduces a second execution engine.
 
 ### Location
 
-Modes live under:
+Modes are loaded from every discovered resource root under:
 
 ```text
-.pocketcode/modes/*.md
+<resource_root>/modes/*.md
 ```
 
 ### File Format
@@ -95,10 +95,10 @@ Current commands:
 
 ### Location
 
-Skills live under:
+Skills are loaded from every discovered resource root under:
 
 ```text
-.pocketcode/skills/<skill_name>/
+<resource_root>/skills/<skill_name>/
 ```
 
 ### Expected Layout
@@ -135,7 +135,7 @@ Reproduce failures first, then patch minimally.
 Skills can contribute:
 
 - inline prompt body text
-- referenced prompt files through `extra_prompts`
+- referenced prompts through `extra_prompts`; entries may be file paths or `prompt:` resource references
 - references to already-registered tools through `tools`
 - new Python tool modules loaded from `tools/*.py`
 - static reference files, scripts, and assets for human use
@@ -171,12 +171,12 @@ Modes and skills can be disabled without deleting them.
 
 If any path component contains `.disabled`, the runtime skips that file or directory.
 
-### `.pocketcode/.pocketcodeignore`
+### `<resource_root>/.pocketcodeignore`
 
-Workspace-owned modes and skills use rules from:
+Direct modes and skills inside a resource root use rules from:
 
 ```text
-.pocketcode/.pocketcodeignore
+<resource_root>/.pocketcodeignore
 ```
 
 Patterns are gitignore-style and support `!` re-includes.
@@ -214,6 +214,20 @@ More precisely:
 - modes resolve into the active profile before a turn starts
 - skills append prompt guidance and add tools after the profile has been resolved
 - session-level Textual overrides can further modify profile tools and confirmation overrides
+
+For modes, skills, and agent overlays, `extra_prompts` now accepts either:
+
+- a path such as `prompts/review.md`
+- a prompt resource reference such as `prompt:resource_root.pocketcode.review`
+
+Malformed typed refs in mode and skill front matter are rejected while those files load. A bad `tool:` or `prompt:` value causes the specific mode or skill to be skipped with a warning instead of remaining partially loadable.
+
+After engine startup, PocketCoder runs a second validation pass against the populated registries:
+
+- modes that reference missing target flows or base agent profiles are removed from the loaded registry
+- resolvable mode and skill tool refs are canonicalized to their registry-backed qualified names
+- invalid prompt-resource refs are warned and pruned from the effective loaded definition
+- unqualified refs that require runtime agent context, especially in skills, remain deferred until the skill is applied to a concrete active flow
 
 ## Repository-Shipped Workspace Skills
 

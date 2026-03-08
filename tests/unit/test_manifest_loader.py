@@ -224,6 +224,82 @@ class TestManifestSchemaErrors:
         with pytest.raises(ManifestSchemaError):
             load_manifest(p)
 
+        def test_invalid_typed_tool_ref_in_flow_raises(self, tmp_path):
+                p = write_yaml(
+                        tmp_path,
+                        "plugin.yaml",
+                        """
+                        schema_version: 1
+                        name: bad
+                        description: ""
+                        flows:
+                            analyst:
+                                module: flows/analyst.py
+                                entry_fn: create_flow
+                                tools:
+                                    - prompt:resource_root.pocketcode.shared
+                        """,
+                )
+                with pytest.raises(ManifestSchemaError, match=r"flows.analyst.tools\[0\]"):
+                        load_manifest(p)
+
+        def test_invalid_prompt_ref_in_flow_prompt_files_raises(self, tmp_path):
+                p = write_yaml(
+                        tmp_path,
+                        "plugin.yaml",
+                        """
+                        schema_version: 1
+                        name: bad
+                        description: ""
+                        flows:
+                            analyst:
+                                module: flows/analyst.py
+                                entry_fn: create_flow
+                                prompt_files:
+                                    - tool:core.read_file
+                        """,
+                )
+                with pytest.raises(ManifestSchemaError, match=r"flows.analyst.prompt_files\[0\]"):
+                        load_manifest(p)
+
+        def test_load_manifest_normalizes_typed_and_legacy_refs(self, tmp_path):
+                p = write_yaml(
+                        tmp_path,
+                        "plugin.yaml",
+                        """
+                        schema_version: 1
+                        name: good
+                        description: ""
+                        flows:
+                            analyst:
+                                module: flows/analyst.py
+                                entry_fn: create_flow
+                                tools:
+                                    - tool:core.read_file
+                                prompt_files:
+                                    - prompt:resource_root.pocketcode#review
+                                handoff_agents:
+                                    - agent:core.reviewer
+                                composite_agents:
+                                    - flow:core.summarizer
+                                default_agent:
+                                    tools:
+                                        - tool:core.write_file
+                                    extra_prompts:
+                                        - prompt:resource_root.pocketcode#lint
+                        """,
+                )
+
+                manifest = load_manifest(p)
+                flow = manifest.flows["analyst"]
+
+                assert flow["tools"] == ["core.read_file"]
+                assert flow["prompt_files"] == ["prompt:resource_root.pocketcode.review"]
+                assert flow["handoff_agents"] == ["core.reviewer"]
+                assert flow["composite_agents"] == ["core.summarizer"]
+                assert flow["default_agent"]["tools"] == ["core.write_file"]
+                assert flow["default_agent"]["extra_prompts"] == ["prompt:resource_root.pocketcode.lint"]
+
 
 # ---------------------------------------------------------------------------
 # agent.yaml (legacy) detection

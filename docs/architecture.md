@@ -17,11 +17,27 @@ Built-in core tools have a single canonical package location:
 
 - `pocketcode/plugins/core/tools/` contains the package-owned implementations and shared exports.
 - `pocketcode/tools/` is a compatibility facade for older imports plus workspace-owned shim exports.
-- `.pocketcode/tools/` remains the workspace-local tool surface registered under `workspace`.
+- `.pocketcode/tools/` remains the default direct resource-root tool surface and is also aliased under the legacy `workspace` namespace.
 
 Core filesystem-style tools in `pocketcode/plugins/core/tools/filesystem.py` and staged file-edit helpers in `pocketcode/plugins/core/tools/file_ops.py` are constrained to the current workspace root. The engine publishes that root into each request's shared store, and any path that resolves outside it is rejected before read, write, mkdir, glob, selection, extract, or staged-apply work is performed.
 
 Workspace-owned compatibility shims are loaded through the shared helper in `pocketcode/core/workspace_module_loader.py`.
+
+## Workspace Root Versus Resource Root
+
+PocketCoder distinguishes between:
+
+1. `workspace_root`: the operational project boundary used for config, sessions, and filesystem safety.
+2. `resource_root`: a discoverable folder inside the workspace that can contribute direct resources and nested plugins.
+
+The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain at least one recognized resource collection such as `agents/`, `modes/`, `skills/`, `prompts/`, `tools/`, `flows/`, `plugins/`, or `llm-profiles/`.
+
+Examples:
+
+- `.pocketcode/`
+- `.pocketflow/`
+
+When `.pocketcode/` exists, it remains the primary save location for workspace-backed edits and runtime state.
 
 ## Startup Sequence
 
@@ -29,13 +45,19 @@ Engine construction in `pocketcode.core.engine.PocketCodeEngine` follows this or
 
 1. Load `pocketcode.yml` from the workspace root.
 2. Build `PluginManager` and load package plugins plus configured plugin roots.
-3. Load workspace prompt and tool resources from `.pocketcode/prompts/` and `.pocketcode/tools/`.
+3. Load direct prompt and tool resources from all discovered resource roots.
 4. Build `AgentManager` from loaded flows.
-5. Load workspace modes from `.pocketcode/modes/`.
-6. Load workspace skills from `.pocketcode/skills/`.
-7. Load workspace LLM profiles from `.pocketcode/llm-profiles/`.
-8. Build `LlmRouter`, `ToolRuntime`, and `AgentRuntime`.
-9. Restore persisted Textual selection state such as active profile, mode, skills, and last-used tool overrides.
+5. Load modes from all discovered resource roots.
+6. Load skills from all discovered resource roots.
+7. Load workspace LLM profiles from all discovered resource roots.
+8. Validate loaded agent profiles, modes, and skills against the populated registries, canonicalizing resolvable refs and pruning invalid registry-backed targets.
+9. Build `LlmRouter`, `ToolRuntime`, and `AgentRuntime`.
+10. Restore persisted Textual selection state such as active profile, mode, skills, and last-used tool overrides.
+
+This creates a two-phase validation model:
+
+- load-time syntax validation in the individual loaders
+- engine-time existence validation after flows, tools, prompts, and workspace resources are all registered
 
 ## Key Runtime Types
 
@@ -76,7 +98,7 @@ Important fields:
 
 ### `ModeDefinition`
 
-Loaded by `ModeManager` from Markdown files in `.pocketcode/modes/`.
+Loaded by `ModeManager` from Markdown files in discovered resource roots.
 
 Modes choose a target flow or base agent profile and then layer:
 
@@ -88,7 +110,7 @@ Modes choose a target flow or base agent profile and then layer:
 
 ### `SkillDefinition`
 
-Loaded by `SkillManager` from `.pocketcode/skills/<name>/SKILL.md`.
+Loaded by `SkillManager` from discovered resource roots.
 
 Skills contribute:
 
@@ -97,13 +119,29 @@ Skills contribute:
 - references to already-registered tools
 - tool modules loaded from `tools/*.py`
 
+After managers load, the engine performs a second pass over modes and skills:
+
+- modes with missing target flows or base agent profiles are removed from the loaded registry
+- mode and skill refs that can be resolved globally are canonicalized to registry form
+- invalid prompt-resource or tool refs are warned and pruned
+- unqualified skill or mode refs that depend on runtime agent context are retained for per-run resolution
+
 ## Registries And Names
 
 `NamespaceRegistry` stores resources in canonical `plugin.resource` form.
 
 - Qualified lookup accepts both `plugin.resource` and `plugin::resource`.
+- Typed lookup also accepts `tool:...`, `flow:...`, `agent:...`, and `prompt:...`; the type prefix is stripped before registry resolution.
 - Unqualified lookup is allowed only when the name is unique, otherwise it raises `RegistryError`.
 - Internally, flows, tools, and prompts are all stored in the same qualified naming scheme.
+
+Reference parsing is centralized in `pocketcode/core/reference_syntax.py`.
+
+- `ResourceReference` is the shared parsed representation used for typed-kind detection, canonical target normalization, and qualified versus unqualified checks.
+- manifest loading, workspace agent loading, markdown mode and skill loading, registry normalization, prompt-resource resolution, and engine-side post-load pruning now consume this parsed form instead of duplicating string-splitting logic.
+- runtime tool lookup, allowlist checks, and confirmation-policy maps also normalize legacy and typed tool ids through the same parser-backed path.
+- persistence paths reuse the same normalization layer, so workspace agent YAML, saved session confirmation overrides, persistent tool-confirmation config, and Textual selection presets are written back with canonical dotted registry ids instead of mixed legacy forms.
+- compatibility helpers such as `normalize_registry_reference()` remain available, but they are wrappers over the shared parser.
 
 ## Plugin Discovery
 
@@ -123,18 +161,19 @@ If a plugin root contains both `__init__.py` and `plugin.yaml`, the factory-base
 
 ## Workspace Resources
 
-The workspace-local extension surface is:
+Each discovered resource root contributes a workspace-owned extension surface:
 
-- `.pocketcode/plugins/`
-- `.pocketcode/agents/`
-- `.pocketcode/llm-profiles/`
-- `.pocketcode/modes/`
-- `.pocketcode/skills/`
-- `.pocketcode/tools/`
-- `.pocketcode/prompts/`
-- `.pocketcode/state/sessions/`
+- `<resource_root>/plugins/`
+- `<resource_root>/agents/`
+- `<resource_root>/llm-profiles/`
+- `<resource_root>/modes/`
+- `<resource_root>/skills/`
+- `<resource_root>/tools/`
+- `<resource_root>/prompts/`
 
-Workspace prompts are registered under the `workspace` namespace. Workspace tools are auto-discovered from public exports and are also registered under `workspace`.
+Runtime session state is persisted under `<primary_resource_root>/state/sessions/`.
+
+Direct resource-root prompts and tools are registered under `resource_root.<name>`. For backward compatibility, the default `.pocketcode/` resource root also exposes direct prompts and tools under the legacy `workspace` namespace.
 
 Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/session_manager.py` and scoped to the current workspace root.
 

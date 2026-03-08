@@ -5,13 +5,14 @@ from pocketcode.plugins.core.tools.filesystem import ReadFileTool
 from pocketcode.plugins.core.tools.user_input import AskUserInputTool
 
 
-def _build_runtime(tools=None) -> ToolRuntime:
+def _build_runtime(tools=None, **kwargs) -> ToolRuntime:
     return ToolRuntime(
         tools
         or {
             "core.read_file": ReadFileTool,
             "core.ask_user_input": AskUserInputTool,
-        }
+        },
+        **kwargs,
     )
 
 
@@ -27,8 +28,35 @@ class TestToolDescriptions:
         assert filesystem_tool["source_path"].endswith("tools/filesystem.py")
         assert user_input_tool["source_path"].endswith("tools/user_input.py")
 
+    def test_describe_tool_accepts_typed_reference(self):
+        runtime = _build_runtime()
+
+        filesystem_tool = runtime.describe_tool("tool:core.read_file")
+
+        assert filesystem_tool["group_path"] == ["core", "filesystem"]
+        assert filesystem_tool["source_path"].endswith("tools/filesystem.py")
+
 
 class TestScopedToolConfirmation:
+    def test_confirmation_config_normalizes_typed_tool_reference(self):
+        runtime = _build_runtime(
+            confirmation_config={
+                "default_policy": "allow",
+                "tool_policies": {
+                    "tool:core.read_file": "deny",
+                },
+            }
+        )
+
+        policy = runtime._resolve_confirmation_policy(
+            tool_name="core.read_file",
+            shared_store={},
+            agent_name=None,
+            auto_confirm=False,
+        )
+
+        assert policy == "deny"
+
     def test_request_tool_confirmation_returns_scope_payload(self):
         runtime = _build_runtime()
         runtime._confirm_tool = SimpleNamespace(
@@ -82,6 +110,27 @@ class TestScopedToolConfirmation:
 
 
 class TestFilesystemToolScoping:
+    def test_execute_tool_accepts_typed_reference_against_canonical_allowlist(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        inside = workspace / "allowed.txt"
+        inside.write_text("ok", encoding="utf-8")
+
+        runtime = _build_runtime()
+
+        result = runtime.execute_tool(
+            "tool:core.read_file",
+            {"path": str(inside)},
+            {
+                "filesystem_root": str(workspace),
+                "active_allowed_tools": ["core.read_file"],
+            },
+            auto_confirm=True,
+        )
+
+        assert result["success"] is True
+        assert result["content"] == "ok"
+
     def test_execute_tool_denies_reads_outside_runtime_root(self, tmp_path):
         workspace = tmp_path / "workspace"
         workspace.mkdir()

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
+from pocketcode.core.resource_roots import primary_resource_root
+
 logger = logging.getLogger(__name__)
 
 
@@ -136,7 +138,7 @@ class SessionSummary:
 class SessionManager:
     def __init__(self, workspace_root: str | Path):
         self._workspace_root = Path(workspace_root).resolve()
-        self._storage_dir = self._workspace_root / ".pocketcode" / "state" / "sessions"
+        self._storage_dir = primary_resource_root(self._workspace_root).path / "state" / "sessions"
 
     @property
     def storage_dir(self) -> Path:

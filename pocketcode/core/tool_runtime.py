@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from pocketcode.core.interfaces import BaseTool
+from pocketcode.core.reference_syntax import normalize_registry_reference
 from pocketcode.plugins.core.tools import ConfirmUserInputTool
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,11 @@ class ToolRuntime:
     ):
         self._tools = tools
         self._require_confirmation = require_confirmation
-        self._auto_approved_tools = set(auto_approved_tools or [])
+        self._auto_approved_tools = {
+            normalized
+            for tool_name in (auto_approved_tools or [])
+            if (normalized := self._normalize_tool_name(tool_name))
+        }
         self._confirmation_config = self._normalize_confirmation_config(
             config=confirmation_config or {},
             require_confirmation=require_confirmation,
@@ -90,12 +95,49 @@ class ToolRuntime:
         return Path(source_file).resolve()
 
     def _tool_group_path(self, tool_name: str, source_path: Path | None) -> tuple[str, ...]:
-        qualified = str(tool_name).replace("::", ".").strip()
+        qualified = self._normalize_tool_name(tool_name)
         namespace = qualified.split(".", 1)[0] if qualified and "." in qualified else (qualified or "other")
         source_parts = self._tool_source_group_parts(source_path)
         if not source_parts:
             return (namespace,)
         return (namespace, *source_parts)
+
+    def _normalize_tool_name(self, tool_name: Any) -> str:
+        cleaned = str(tool_name or "").strip()
+        if not cleaned:
+            return ""
+        try:
+            return normalize_registry_reference(cleaned, allowed_kinds={"tool"})
+        except ValueError:
+            return cleaned.replace("::", ".")
+
+    def _registered_tool_name(self, tool_name: str) -> str:
+        raw_name = str(tool_name or "").strip()
+        normalized_name = self._normalize_tool_name(raw_name)
+        for candidate in dict.fromkeys([raw_name, normalized_name]):
+            if candidate in self._tools:
+                return candidate
+        return normalized_name or raw_name
+
+    def _normalized_tool_set(self, tool_names: Any) -> set[str]:
+        if not isinstance(tool_names, list):
+            return set()
+        normalized_names: set[str] = set()
+        for tool_name in tool_names:
+            normalized = self._normalize_tool_name(tool_name)
+            if normalized:
+                normalized_names.add(normalized)
+        return normalized_names
+
+    def _tool_policy_value(self, policies: Any, tool_name: str) -> Any:
+        if not isinstance(policies, dict):
+            return None
+        raw_name = str(tool_name or "").strip()
+        normalized_name = self._normalize_tool_name(raw_name)
+        for candidate in dict.fromkeys([raw_name, normalized_name]):
+            if candidate in policies:
+                return policies.get(candidate)
+        return None
 
     def _tool_source_group_parts(self, source_path: Path | None) -> tuple[str, ...]:
         if source_path is None:
@@ -119,27 +161,29 @@ class ToolRuntime:
         auto_confirm: bool = False,
         agent_name: str | None = None,
     ) -> Any:
+        normalized_tool_name = self._registered_tool_name(tool_name)
+
         # T019b: deny immediately if tool is not in the active per-turn allowlist.
         active_allowed_tools = shared_store.get("active_allowed_tools")
         if isinstance(active_allowed_tools, list):
-            if tool_name not in active_allowed_tools:
+            if normalized_tool_name not in self._normalized_tool_set(active_allowed_tools):
                 return {
                     "success": False,
-                    "error": f"Tool '{tool_name}' is not in the active tool allowlist.",
+                    "error": f"Tool '{normalized_tool_name}' is not in the active tool allowlist.",
                 }
 
         # Fallback for callers that only pass the active profile.
         if not isinstance(active_allowed_tools, list):
             _ap = self._get_active_profile(shared_store, agent_name)
             if _ap is not None and _ap.tools is not None:
-                if tool_name not in _ap.tools:
+                if normalized_tool_name not in self._normalized_tool_set(_ap.tools):
                     return {
                         "success": False,
-                        "error": f"Tool '{tool_name}' is not in the active agent profile's tool allowlist.",
+                        "error": f"Tool '{normalized_tool_name}' is not in the active agent profile's tool allowlist.",
                     }
 
         policy = self._resolve_confirmation_policy(
-            tool_name=tool_name,
+            tool_name=normalized_tool_name,
             shared_store=shared_store,
             agent_name=agent_name,
             auto_confirm=auto_confirm,
@@ -147,11 +191,11 @@ class ToolRuntime:
         if policy == "deny":
             return {
                 "success": False,
-                "error": f"Execution of tool '{tool_name}' denied by confirmation policy.",
+                "error": f"Execution of tool '{normalized_tool_name}' denied by confirmation policy.",
             }
         if policy == "confirm":
             approved, approval_scope = self._request_tool_confirmation(
-                tool_name=tool_name,
+                tool_name=normalized_tool_name,
                 arguments=arguments,
                 shared_store=shared_store,
                 agent_name=agent_name,
@@ -159,27 +203,27 @@ class ToolRuntime:
             if not approved:
                 return {
                     "success": False,
-                    "error": f"Execution of tool '{tool_name}' denied by user confirmation.",
+                    "error": f"Execution of tool '{normalized_tool_name}' denied by user confirmation.",
                 }
             self._apply_confirmation_response(
-                tool_name=tool_name,
+                tool_name=normalized_tool_name,
                 shared_store=shared_store,
                 approval_scope=approval_scope,
                 agent_name=agent_name,
             )
 
-        tool_impl = self._resolve_tool(tool_name)
+        tool_impl = self._resolve_tool(normalized_tool_name)
         tool_instance = self._instantiate_tool(tool_impl)
         execution_mode = self._resolve_execution_mode(tool_impl, tool_instance)
 
         if execution_mode == "managed_subprocess":
             if tool_instance is None:
                 raise TypeError(
-                    f"Tool '{tool_name}' uses execution_mode='managed_subprocess' but is not a BaseTool implementation."
+                    f"Tool '{normalized_tool_name}' uses execution_mode='managed_subprocess' but is not a BaseTool implementation."
                 )
             return self._execute_managed_subprocess_tool(
                 tool=tool_instance,
-                tool_name=tool_name,
+                tool_name=normalized_tool_name,
                 arguments=arguments,
                 shared_store=shared_store,
                 agent_name=agent_name,
@@ -190,24 +234,25 @@ class ToolRuntime:
         if callable(tool_impl):
             return self._call_callable_tool(tool_impl, arguments, shared_store)
 
-        raise TypeError(f"Unsupported tool implementation type for '{tool_name}': {type(tool_impl)}")
+        raise TypeError(f"Unsupported tool implementation type for '{normalized_tool_name}': {type(tool_impl)}")
 
     def _resolve_tool(self, tool_name: str) -> Any:
-        if tool_name not in self._tools:
+        registered_tool_name = self._registered_tool_name(tool_name)
+        if registered_tool_name not in self._tools:
             # Check if it's a built-in tool that hasn't been registered yet?
             # Or if it's a dynamic path
-            if "/" in tool_name or ".py:" in tool_name:
+            if "/" in registered_tool_name or ".py:" in registered_tool_name:
                  # Attempt dynamic load? Actually ToolRuntime should probably just use what's in self._tools
                  # which is populated by PluginManager.
                  pass
-            raise KeyError(f"Tool '{tool_name}' is not registered.")
+            raise KeyError(f"Tool '{registered_tool_name}' is not registered.")
 
-        tool_impl = self._tools[tool_name]
+        tool_impl = self._tools[registered_tool_name]
 
         if isinstance(tool_impl, str):
             if "." not in tool_impl and ":" not in tool_impl:
                 raise ValueError(
-                    f"String tool reference '{tool_impl}' for '{tool_name}' must be an import path or file:Object."
+                    f"String tool reference '{tool_impl}' for '{registered_tool_name}' must be an import path or file:Object."
                 )
             
             if ":" in tool_impl:
@@ -217,7 +262,7 @@ class ToolRuntime:
             module_name, object_name = tool_impl.rsplit(".", 1)
             module = importlib.import_module(module_name)
             tool_impl = getattr(module, object_name)
-            self._tools[tool_name] = tool_impl
+            self._tools[registered_tool_name] = tool_impl
 
         return tool_impl
 
@@ -423,10 +468,14 @@ class ToolRuntime:
             for raw_tool_name, raw_policy in raw_tool_policies.items():
                 policy = self._normalize_policy(raw_policy)
                 if policy:
-                    tool_policies[str(raw_tool_name)] = policy
+                    normalized_tool_name = self._normalize_tool_name(raw_tool_name)
+                    if normalized_tool_name:
+                        tool_policies[normalized_tool_name] = policy
 
         for tool_name in auto_approved_tools:
-            tool_policies.setdefault(str(tool_name), "allow")
+            normalized_tool_name = self._normalize_tool_name(tool_name)
+            if normalized_tool_name:
+                tool_policies.setdefault(normalized_tool_name, "allow")
 
         agent_policies: Dict[str, Dict[str, Any]] = {}
         raw_agent_policies = config.get("agent_policies", {})
@@ -441,7 +490,9 @@ class ToolRuntime:
                     for raw_tool_name, raw_policy in raw_agent_tool_policies.items():
                         policy = self._normalize_policy(raw_policy)
                         if policy:
-                            normalized_agent_tool_policies[str(raw_tool_name)] = policy
+                            normalized_tool_name = self._normalize_tool_name(raw_tool_name)
+                            if normalized_tool_name:
+                                normalized_agent_tool_policies[normalized_tool_name] = policy
                 agent_policies[str(raw_agent_name)] = {
                     "default_policy": normalized_agent_default,
                     "tool_policies": normalized_agent_tool_policies,
@@ -497,24 +548,18 @@ class ToolRuntime:
         layers = [
             # Tier 1 – session per-agent per-tool
             self._normalize_policy(
-                (session_agent_policy.get("tool_policies") or {}).get(tool_name)
-                if isinstance(session_agent_policy.get("tool_policies"), dict)
-                else None
+                self._tool_policy_value(session_agent_policy.get("tool_policies"), tool_name)
             ),
             # Tier 1.5 (T018) – profile per-tool override
             self._normalize_policy(
-                (profile_tc.get("overrides") or {}).get(tool_name)
-                if isinstance(profile_tc.get("overrides"), dict)
-                else None
+                self._tool_policy_value(profile_tc.get("overrides"), tool_name)
             ),
             # Tier 2 – config per-agent per-tool
             self._normalize_policy(
-                (agent_policy.get("tool_policies") or {}).get(tool_name)
-                if isinstance(agent_policy.get("tool_policies"), dict)
-                else None
+                self._tool_policy_value(agent_policy.get("tool_policies"), tool_name)
             ),
             # Tier 3 – session global per-tool
-            self._normalize_policy(session_tools.get(tool_name)),
+            self._normalize_policy(self._tool_policy_value(session_tools, tool_name)),
             # Tier 4 – session per-agent default
             self._normalize_policy(session_agent_policy.get("default_policy")),
             # Tier 4.5 (T019) – profile default

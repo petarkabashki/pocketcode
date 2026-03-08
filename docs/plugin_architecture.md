@@ -20,8 +20,9 @@ Current plugin discovery sources are:
 
 1. package plugins under `pocketcode/plugins/`
 2. extra plugin roots listed in `runtime.plugin_paths`
+3. nested `plugins/` folders inside each discovered resource root such as `.pocketcode/plugins/` or `.pocketflow/plugins/`
 
-The common workspace setup is to point `runtime.plugin_paths` at `.pocketcode/plugins`.
+The common workspace setup is still to point `runtime.plugin_paths` at `.pocketcode/plugins`, but direct resource-root plugin folders are now discovered automatically.
 
 ## Supported Plugin Loading Forms
 
@@ -62,9 +63,20 @@ flows:
     tools:
       - read_notes
       - core.read_file
+      - tool:resource_root.pocketcode.shared_check
     prompt_files:
       - prompts/system.md
 ```
+
+Flow-level `tools` entries resolve through the shared registry. They accept bare local names, canonical `plugin.resource`, legacy `plugin::resource`, and typed `tool:` references.
+
+Internally, these manifest-facing string forms are parsed through the shared `ResourceReference` model in `pocketcode/core/reference_syntax.py`, so tool, flow, agent, and prompt refs now share the same normalization and kind-validation path.
+
+That normalization now happens during manifest loading as well as during later registry-backed validation, so the effective loaded flow definitions already carry canonical dotted tool, handoff, and composite-agent refs plus canonical `prompt:` resource refs before plugin registration finishes.
+
+Malformed typed references in flow manifests are rejected during manifest loading. For example, using `prompt:` inside a flow `tools:` list or `tool:` inside `prompt_files:` raises a schema error before the plugin is registered.
+
+Once all plugins and direct resource-root assets are loaded, PocketCoder also validates registry-backed flow references against the populated registries. Missing tool, handoff, composite-agent, or prompt-resource targets are logged once and removed from the effective loaded definition.
 
 ## Manifest Keys
 
@@ -152,7 +164,21 @@ Supported prompt sources are:
 - file lists in `prompt_files`
 - compatibility alias `prompts`
 
-If no explicit prompt file is provided, the loader also checks default prompt candidates:
+Explicit prompt resource references are also supported anywhere a prompt file reference is accepted.
+
+Current supported forms are:
+
+- `prompt:plugin.prompt_name`
+- `prompt:resource_root.<root_name>.prompt_name`
+- `prompt:<container>#<prompt_name>` which normalizes to `<container>.<prompt_name>`
+
+Examples:
+
+- `prompt:core.system`
+- `prompt:resource_root.pocketcode.review.default`
+- `prompt:resource_root.pocketcode#review.default`
+
+If no explicit prompt file or prompt resource reference is provided, the loader also checks default prompt candidates:
 
 - `prompts/flows/<flow_name>.md`
 - `prompts/agents/<flow_name>.md`
@@ -197,6 +223,8 @@ flows:
         default: confirm
 ```
 
+The flow key and any nested profile `flow` target may be referenced through canonical `plugin.resource`, legacy `plugin::resource`, or typed `flow:` and `agent:` forms on user-facing surfaces.
+
 This becomes the flow's `default_agent_profile` and participates in agent profile precedence.
 
 ## Plugin-Local Agent Profiles
@@ -228,14 +256,16 @@ That object can contribute:
 
 Flow instances returned by factory plugins are wrapped into `FlowDefinition` objects with `is_programmatic=True`.
 
-## Workspace Tools And Prompts
+## Resource-Root Tools And Prompts
 
-Workspace-local shared assets are not declared through plugin manifests.
+Direct resource-root shared assets are not declared through plugin manifests.
 
-- `.pocketcode/prompts/` files are auto-registered under `workspace`
-- `.pocketcode/tools/*.py` modules are auto-discovered and registered under `workspace`
+- `<resource_root>/prompts/` files are auto-registered under `resource_root.<name>`
+- `<resource_root>/tools/*.py` modules are auto-discovered and registered under `resource_root.<name>`
 
-Built-in core tools are separate from these workspace resources. Their canonical implementation lives under `pocketcode/plugins/core/tools/`, while `pocketcode/tools/` is retained as a compatibility import surface.
+For backward compatibility, the default `.pocketcode/` resource root also exposes its direct prompts and tools under the legacy `workspace` namespace.
+
+Built-in core tools are separate from these direct resource-root resources. Their canonical implementation lives under `pocketcode/plugins/core/tools/`, while `pocketcode/tools/` is retained as a compatibility import surface.
 
 These are separate from manifest plugin loading, but they join the same global registries.
 
@@ -245,7 +275,7 @@ Plugins and plugin-local resources can be skipped through:
 
 - `.disabled` in any path component
 - ignore rules from workspace-root `.pocketcodeignore`
-- workspace `.pocketcode/.pocketcodeignore` when the plugin root itself lives under `.pocketcode/`
+- resource-root `.pocketcodeignore` when the plugin root itself lives under a discovered resource root
 
 ## Legacy `agent.yaml`
 

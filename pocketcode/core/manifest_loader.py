@@ -7,6 +7,13 @@ from typing import Any, Dict
 
 import yaml
 
+from pocketcode.core.reference_syntax import (
+    normalize_prompt_source,
+    normalize_registry_reference,
+    validate_prompt_source,
+    validate_registry_reference,
+)
+
 logger = logging.getLogger(__name__)
 
 SUPPORTED_SCHEMA_VERSIONS: frozenset = frozenset({1})
@@ -234,8 +241,161 @@ def _expect_flow_dict(value: Any, path: Path) -> Dict[str, Dict[str, Any]]:
                 + ", ".join(f"'{f}'" for f in missing)
                 + ". Both 'module' and 'entry_fn' are required."
             )
+        _validate_flow_reference_fields(flow_name, flow_cfg, path)
         result[flow_name] = dict(flow_cfg)
     return result
+
+
+def _validate_flow_reference_fields(flow_name: str, flow_cfg: Dict[str, Any], path: Path) -> None:
+    tools = flow_cfg.get("tools")
+    if isinstance(tools, list):
+        for index, tool_ref in enumerate(tools):
+            if not isinstance(tool_ref, str):
+                continue
+            if tool_ref.strip() == "*":
+                continue
+            _validate_manifest_ref(
+                validate_registry_reference,
+                tool_ref,
+                field_name=f"flows.{flow_name}.tools[{index}]",
+                path=path,
+                allowed_kinds={"tool"},
+            )
+
+    prompt_files = flow_cfg.get("prompt_files")
+    if prompt_files is None and isinstance(flow_cfg.get("prompts"), list):
+        prompt_files = flow_cfg.get("prompts")
+    if isinstance(prompt_files, list):
+        for index, prompt_ref in enumerate(prompt_files):
+            if not isinstance(prompt_ref, str):
+                continue
+            _validate_manifest_ref(
+                validate_prompt_source,
+                prompt_ref,
+                field_name=f"flows.{flow_name}.prompt_files[{index}]",
+                path=path,
+            )
+
+    handoff_agents = flow_cfg.get("handoff_agents")
+    if isinstance(handoff_agents, list):
+        for index, handoff_ref in enumerate(handoff_agents):
+            if not isinstance(handoff_ref, str):
+                continue
+            _validate_manifest_ref(
+                validate_registry_reference,
+                handoff_ref,
+                field_name=f"flows.{flow_name}.handoff_agents[{index}]",
+                path=path,
+                allowed_kinds={"agent", "flow"},
+            )
+
+    raw_default_agent = flow_cfg.get("default_agent") or flow_cfg.get("default_agent_profile")
+    if isinstance(raw_default_agent, dict):
+        default_tools = raw_default_agent.get("tools")
+        if isinstance(default_tools, list):
+            for index, tool_ref in enumerate(default_tools):
+                if not isinstance(tool_ref, str):
+                    continue
+                _validate_manifest_ref(
+                    validate_registry_reference,
+                    tool_ref,
+                    field_name=f"flows.{flow_name}.default_agent.tools[{index}]",
+                    path=path,
+                    allowed_kinds={"tool"},
+                )
+        extra_prompts = raw_default_agent.get("extra_prompts")
+        if isinstance(extra_prompts, list):
+            for index, prompt_ref in enumerate(extra_prompts):
+                if not isinstance(prompt_ref, str):
+                    continue
+                _validate_manifest_ref(
+                    validate_prompt_source,
+                    prompt_ref,
+                    field_name=f"flows.{flow_name}.default_agent.extra_prompts[{index}]",
+                    path=path,
+                )
+
+    composite_agents = (
+        flow_cfg.get("composite_agents")
+        or flow_cfg.get("sub_agents")
+        or flow_cfg.get("delegate_agents")
+    )
+    if isinstance(composite_agents, list):
+        for index, composite_ref in enumerate(composite_agents):
+            if not isinstance(composite_ref, str):
+                continue
+            _validate_manifest_ref(
+                validate_registry_reference,
+                composite_ref,
+                field_name=f"flows.{flow_name}.composite_agents[{index}]",
+                path=path,
+                allowed_kinds={"agent", "flow"},
+            )
+
+    _normalize_flow_reference_fields(flow_cfg)
+
+
+def _normalize_flow_reference_fields(flow_cfg: Dict[str, Any]) -> None:
+    _normalize_registry_ref_list(flow_cfg, "tools", allowed_kinds={"tool"}, preserve_wildcard=True)
+    _normalize_registry_ref_list(flow_cfg, "handoff_agents", allowed_kinds={"agent", "flow"})
+    _normalize_registry_ref_list(flow_cfg, "composite_agents", allowed_kinds={"agent", "flow"})
+    _normalize_registry_ref_list(flow_cfg, "sub_agents", allowed_kinds={"agent", "flow"})
+    _normalize_registry_ref_list(flow_cfg, "delegate_agents", allowed_kinds={"agent", "flow"})
+
+    if isinstance(flow_cfg.get("prompt_files"), list):
+        _normalize_prompt_source_list(flow_cfg, "prompt_files")
+    if isinstance(flow_cfg.get("prompts"), list):
+        _normalize_prompt_source_list(flow_cfg, "prompts")
+
+    raw_default_agent = flow_cfg.get("default_agent") or flow_cfg.get("default_agent_profile")
+    if isinstance(raw_default_agent, dict):
+        _normalize_registry_ref_list(raw_default_agent, "tools", allowed_kinds={"tool"})
+        _normalize_prompt_source_list(raw_default_agent, "extra_prompts")
+
+
+def _normalize_registry_ref_list(
+    mapping: Dict[str, Any],
+    key: str,
+    *,
+    allowed_kinds: set[str],
+    preserve_wildcard: bool = False,
+) -> None:
+    raw_values = mapping.get(key)
+    if not isinstance(raw_values, list):
+        return
+
+    normalized: list[Any] = []
+    for value in raw_values:
+        if not isinstance(value, str):
+            normalized.append(value)
+            continue
+        candidate = value.strip()
+        if preserve_wildcard and candidate == "*":
+            normalized.append("*")
+            continue
+        normalized.append(normalize_registry_reference(candidate, allowed_kinds=allowed_kinds))
+    mapping[key] = normalized
+
+
+def _normalize_prompt_source_list(mapping: Dict[str, Any], key: str) -> None:
+    raw_values = mapping.get(key)
+    if not isinstance(raw_values, list):
+        return
+
+    normalized: list[Any] = []
+    for value in raw_values:
+        if not isinstance(value, str):
+            normalized.append(value)
+            continue
+        normalized.append(normalize_prompt_source(value))
+    mapping[key] = normalized
+
+
+def _validate_manifest_ref(validator: Any, ref: str, *, field_name: str, path: Path, **kwargs: Any) -> None:
+    try:
+        validator(ref, field_name=field_name, **kwargs)
+    except ValueError as exc:
+        raise ManifestSchemaError(f"{path}: {exc}") from exc
 
 
 _expect_agent_dict = _expect_flow_dict

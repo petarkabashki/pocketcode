@@ -14,6 +14,7 @@ import yaml
 from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
 from pocketcode.core.run_handle import RunCancelledError
 from pocketcode.core.runtime_models import AgentDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
@@ -1088,10 +1089,27 @@ class AgentRuntime:
         if profile is None or not profile.extra_prompts:
             return ""
         workspace_root = self._plugins.workspace_root
-        workspace_pocketcode = self._plugins.workspace_root / ".pocketcode"
         plugin_root = self._resolve_profile_plugin_root(profile)
+        context_plugin = self._resolve_profile_plugin_name(profile)
         parts: List[str] = []
         for path_str in profile.extra_prompts:
+            if is_prompt_reference(path_str):
+                try:
+                    prompt_text, _ = resolve_prompt_reference(
+                        path_str,
+                        prompt_registry=self._plugins.prompts,
+                        context_plugin=context_plugin,
+                    )
+                    if prompt_text:
+                        parts.append(prompt_text)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "extra_prompts: could not resolve prompt reference '%s' for profile '%s': %s. Skipping.",
+                        path_str,
+                        profile.name,
+                        exc,
+                    )
+                continue
             resolved = None
             if profile.source_path is not None:
                 candidate = profile.source_path.parent / path_str
@@ -1102,7 +1120,7 @@ class AgentRuntime:
                 if candidate.is_file():
                     resolved = candidate
             if resolved is None:
-                for base_dir in (workspace_root, workspace_pocketcode, workspace_pocketcode / "prompts"):
+                for base_dir in self._plugins._workspace_prompt_fallback_dirs():
                     candidate = base_dir / path_str
                     if candidate.is_file():
                         resolved = candidate
@@ -1173,7 +1191,10 @@ class AgentRuntime:
         profile = shared_store.get("active_agent_profile")
         if profile is None:
             return None
-        return profile if getattr(profile, "agent", None) == agent_name else None
+        profile_agent = getattr(profile, "agent", None)
+        normalized_agent_name = self._plugins.agents.qualify(agent_name)
+        normalized_profile_agent = self._plugins.agents.qualify(profile_agent) if profile_agent else None
+        return profile if normalized_profile_agent == normalized_agent_name else None
 
     def _resolve_profile_plugin_root(self, profile: Any) -> Path | None:
         agent_name = getattr(profile, "agent", None)
@@ -1186,3 +1207,13 @@ class AgentRuntime:
         if not plugin_root:
             return None
         return Path(str(plugin_root)).resolve()
+
+    def _resolve_profile_plugin_name(self, profile: Any) -> str | None:
+        agent_name = getattr(profile, "agent", None)
+        if not isinstance(agent_name, str):
+            return None
+        agent_definition = self._plugins.agents.get(agent_name)
+        if agent_definition is None:
+            return None
+        plugin_name = (agent_definition.metadata or {}).get("plugin")
+        return str(plugin_name).strip() if plugin_name else None

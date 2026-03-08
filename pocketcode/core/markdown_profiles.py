@@ -15,6 +15,13 @@ import yaml
 
 from pocketcode.core.discovery_rules import DiscoveryFilter
 from pocketcode.core.interfaces import BaseTool
+from pocketcode.core.reference_syntax import (
+    normalize_prompt_source,
+    normalize_registry_reference,
+    validate_prompt_source,
+    validate_registry_reference,
+)
+from pocketcode.core.resource_roots import ResourceRoot, discover_resource_roots, primary_resource_root
 
 logger = logging.getLogger(__name__)
 
@@ -111,38 +118,39 @@ class SkillDefinition:
 class ModeManager:
     def __init__(self, workspace_root: Path) -> None:
         self._workspace_root = Path(workspace_root).resolve()
-        self._workspace_pocketcode_root = self._workspace_root / ".pocketcode"
-        self._modes_dir = self._workspace_pocketcode_root / "modes"
+        self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._modes_dir = self._primary_resource_root.path / "modes"
         self._modes: Dict[str, ModeDefinition] = {}
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
+        self._resource_root_filters = self._build_resource_root_filters()
 
     def load(self) -> None:
         self._modes = {}
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
-        if not self._modes_dir.is_dir():
-            return
+        self._resource_roots = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._modes_dir = self._primary_resource_root.path / "modes"
+        self._resource_root_filters = self._build_resource_root_filters()
 
-        for mode_path in sorted(self._modes_dir.rglob("*.md")):
-            if self._workspace_filter.ignores(mode_path, is_dir=False):
+        for resource_root in self._resource_roots:
+            modes_dir = resource_root.path / "modes"
+            if not modes_dir.is_dir():
                 continue
-            mode = self._load_mode_file(mode_path)
-            if mode is None:
-                continue
-            existing = self._modes.get(mode.name)
-            if existing is not None:
-                logger.warning(
-                    "Mode name collision for '%s': '%s' overrides '%s'.",
-                    mode.name,
-                    mode_path,
-                    existing.source_path,
-                )
-            self._modes[mode.name] = mode
+            resource_filter = self._resource_root_filter(resource_root)
+            for mode_path in sorted(modes_dir.rglob("*.md")):
+                if resource_filter.ignores(mode_path, is_dir=False):
+                    continue
+                mode = self._load_mode_file(mode_path)
+                if mode is None:
+                    continue
+                existing = self._modes.get(mode.name)
+                if existing is not None:
+                    logger.warning(
+                        "Mode name collision for '%s': '%s' overrides '%s'.",
+                        mode.name,
+                        mode_path,
+                        existing.source_path,
+                    )
+                self._modes[mode.name] = mode
 
     def get(self, name: str) -> Optional[ModeDefinition]:
         return self._modes.get(name)
@@ -231,10 +239,22 @@ class ModeManager:
             raise ValueError(f"Skipping mode file '{source_path}': missing name.")
 
         tools_specified, tools = normalize_tool_selection(front_matter.get("tools"))
+        flow_value = str(front_matter["flow"]).strip() if front_matter.get("flow") else None
+        if flow_value:
+            validate_registry_reference(flow_value, allowed_kinds={"agent", "flow"}, field_name=f"{source_path.name}: flow")
+            flow_value = normalize_registry_reference(flow_value, allowed_kinds={"agent", "flow"})
+        extra_prompts = coerce_str_list(front_matter.get("extra_prompts"))
+        for index, prompt_ref in enumerate(extra_prompts):
+            validate_prompt_source(prompt_ref, field_name=f"{source_path.name}: extra_prompts[{index}]")
+        extra_prompts = [normalize_prompt_source(prompt_ref) for prompt_ref in extra_prompts]
+        if tools:
+            for index, tool_ref in enumerate(tools):
+                validate_registry_reference(tool_ref, allowed_kinds={"tool"}, field_name=f"{source_path.name}: tools[{index}]")
+            tools = [normalize_registry_reference(tool_ref, allowed_kinds={"tool"}) for tool_ref in tools]
         return ModeDefinition(
             name=raw_name.strip(),
             description=str(front_matter.get("description", "")),
-            flow=str(front_matter["flow"]).strip() if front_matter.get("flow") else None,
+            flow=flow_value,
             agent=str(front_matter["agent"]).strip() if front_matter.get("agent") else None,
             llm_profile=(
                 str(front_matter["llm_profile"]).strip()
@@ -242,7 +262,7 @@ class ModeManager:
                 else None
             ),
             inline_prompt=body,
-            extra_prompts=coerce_str_list(front_matter.get("extra_prompts")),
+            extra_prompts=extra_prompts,
             tools=tools,
             tools_specified=tools_specified,
             tool_confirmation=normalize_tool_confirmation(front_matter.get("tool_confirmation")),
@@ -274,44 +294,57 @@ class ModeManager:
             return f"---\n{front_matter_text}\n---\n{body}\n"
         return f"---\n{front_matter_text}\n---\n"
 
+    def _build_resource_root_filters(self) -> Dict[Path, DiscoveryFilter]:
+        return {
+            resource_root.path.resolve(): DiscoveryFilter.from_root(
+                resource_root.path,
+                ignore_dir=resource_root.path,
+            )
+            for resource_root in self._resource_roots
+        }
+
+    def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
+        return self._resource_root_filters[resource_root.path.resolve()]
+
 
 class SkillManager:
     def __init__(self, workspace_root: Path) -> None:
         self._workspace_root = Path(workspace_root).resolve()
-        self._workspace_pocketcode_root = self._workspace_root / ".pocketcode"
-        self._skills_dir = self._workspace_pocketcode_root / "skills"
+        self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._skills_dir = self._primary_resource_root.path / "skills"
         self._skills: Dict[str, SkillDefinition] = {}
         self._dynamic_module_names: set[str] = set()
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
+        self._resource_root_filters = self._build_resource_root_filters()
 
     def load(self) -> None:
         self._unload_dynamic_modules()
         self._skills = {}
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
-        if not self._skills_dir.is_dir():
-            return
+        self._resource_roots = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._skills_dir = self._primary_resource_root.path / "skills"
+        self._resource_root_filters = self._build_resource_root_filters()
 
-        for skill_dir in sorted(path for path in self._skills_dir.iterdir() if path.is_dir()):
-            if self._workspace_filter.ignores(skill_dir, is_dir=True):
+        for resource_root in self._resource_roots:
+            skills_dir = resource_root.path / "skills"
+            if not skills_dir.is_dir():
                 continue
-            skill = self._load_skill_dir(skill_dir)
-            if skill is None:
-                continue
-            existing = self._skills.get(skill.name)
-            if existing is not None:
-                logger.warning(
-                    "Skill name collision for '%s': '%s' overrides '%s'.",
-                    skill.name,
-                    skill.source_path,
-                    existing.source_path,
-                )
-            self._skills[skill.name] = skill
+            resource_filter = self._resource_root_filter(resource_root)
+            for skill_dir in sorted(path for path in skills_dir.iterdir() if path.is_dir()):
+                if resource_filter.ignores(skill_dir, is_dir=True):
+                    continue
+                skill = self._load_skill_dir(skill_dir, resource_root)
+                if skill is None:
+                    continue
+                existing = self._skills.get(skill.name)
+                if existing is not None:
+                    logger.warning(
+                        "Skill name collision for '%s': '%s' overrides '%s'.",
+                        skill.name,
+                        skill.source_path,
+                        existing.source_path,
+                    )
+                self._skills[skill.name] = skill
 
     def get(self, name: str) -> Optional[SkillDefinition]:
         return self._skills.get(name)
@@ -319,7 +352,7 @@ class SkillManager:
     def list(self) -> list[SkillDefinition]:
         return sorted(self._skills.values(), key=lambda skill: skill.name)
 
-    def _load_skill_dir(self, skill_dir: Path) -> Optional[SkillDefinition]:
+    def _load_skill_dir(self, skill_dir: Path, resource_root: ResourceRoot) -> Optional[SkillDefinition]:
         skill_path = skill_dir / "SKILL.md"
         if not skill_path.is_file():
             return None
@@ -337,40 +370,58 @@ class SkillManager:
             logger.warning("Skipping skill '%s': missing name.", skill_dir)
             return None
 
-        provided_tools = self._load_skill_tools(skill_dir / "tools", raw_name.strip())
-        return SkillDefinition(
-            name=raw_name.strip(),
-            description=str(front_matter.get("description", "")),
-            inline_prompt=body,
-            tool_refs=coerce_str_list(front_matter.get("tools")),
-            extra_prompts=coerce_str_list(front_matter.get("extra_prompts")),
-            provided_tools=provided_tools,
-            references=self._list_relative_files(skill_dir / "references", skill_dir),
-            scripts=self._list_relative_files(skill_dir / "scripts", skill_dir),
-            assets=self._list_relative_files(skill_dir / "assets", skill_dir),
-            source_path=skill_path.resolve(),
-        )
+        try:
+            provided_tools = self._load_skill_tools(skill_dir / "tools", raw_name.strip(), resource_root)
+            tool_refs = coerce_str_list(front_matter.get("tools"))
+            for index, tool_ref in enumerate(tool_refs):
+                validate_registry_reference(
+                    tool_ref,
+                    allowed_kinds={"tool"},
+                    field_name=f"{skill_path.name}: tools[{index}]",
+                )
+            tool_refs = [normalize_registry_reference(tool_ref, allowed_kinds={"tool"}) for tool_ref in tool_refs]
+            extra_prompts = coerce_str_list(front_matter.get("extra_prompts"))
+            for index, prompt_ref in enumerate(extra_prompts):
+                validate_prompt_source(prompt_ref, field_name=f"{skill_path.name}: extra_prompts[{index}]")
+            extra_prompts = [normalize_prompt_source(prompt_ref) for prompt_ref in extra_prompts]
+            return SkillDefinition(
+                name=raw_name.strip(),
+                description=str(front_matter.get("description", "")),
+                inline_prompt=body,
+                tool_refs=tool_refs,
+                extra_prompts=extra_prompts,
+                provided_tools=provided_tools,
+                references=self._list_relative_files(skill_dir / "references", skill_dir, resource_root),
+                scripts=self._list_relative_files(skill_dir / "scripts", skill_dir, resource_root),
+                assets=self._list_relative_files(skill_dir / "assets", skill_dir, resource_root),
+                source_path=skill_path.resolve(),
+            )
+        except ValueError as exc:
+            logger.warning("Skipping skill '%s': %s", skill_dir.name, exc)
+            return None
 
-    def _list_relative_files(self, root: Path, skill_dir: Path) -> list[str]:
+    def _list_relative_files(self, root: Path, skill_dir: Path, resource_root: ResourceRoot) -> list[str]:
         if not root.is_dir():
             return []
+        resource_filter = self._resource_root_filter(resource_root)
         return sorted(
             str(path.resolve().relative_to(skill_dir.resolve()))
             for path in root.rglob("*")
             if path.is_file()
-            if not self._workspace_filter.ignores(path, is_dir=False)
+            if not resource_filter.ignores(path, is_dir=False)
         )
 
-    def _load_skill_tools(self, tools_root: Path, skill_name: str) -> Dict[str, Any]:
+    def _load_skill_tools(self, tools_root: Path, skill_name: str, resource_root: ResourceRoot) -> Dict[str, Any]:
         loaded: Dict[str, Any] = {}
         if not tools_root.is_dir():
             return loaded
 
         skill_slug = self._slugify(skill_name)
+        resource_filter = self._resource_root_filter(resource_root)
         for tool_file in sorted(tools_root.rglob("*.py")):
             if tool_file.name == "__init__.py":
                 continue
-            if self._workspace_filter.ignores(tool_file, is_dir=False):
+            if resource_filter.ignores(tool_file, is_dir=False):
                 continue
             try:
                 module = self._load_module_from_file(tool_file)
@@ -386,6 +437,18 @@ class SkillManager:
                 qualified_name = f"skill.{skill_slug}.{tool_name}"
                 loaded[qualified_name] = tool_impl
         return loaded
+
+    def _build_resource_root_filters(self) -> Dict[Path, DiscoveryFilter]:
+        return {
+            resource_root.path.resolve(): DiscoveryFilter.from_root(
+                resource_root.path,
+                ignore_dir=resource_root.path,
+            )
+            for resource_root in self._resource_roots
+        }
+
+    def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
+        return self._resource_root_filters[resource_root.path.resolve()]
 
     def _load_module_from_file(self, file_path: Path) -> types.ModuleType:
         digest = hashlib.sha1(str(file_path.resolve()).encode("utf-8")).hexdigest()[:12]

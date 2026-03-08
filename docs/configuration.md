@@ -69,7 +69,7 @@ llm:
 Common runtime keys used by the current engine include:
 
 - `default_agent`: default flow to start from
-- `plugin_paths`: additional plugin roots, commonly `.pocketcode/plugins`
+- `plugin_paths`: additional plugin roots; discovered resource-root plugin folders such as `.pocketcode/plugins` and `.pocketflow/plugins` are also scanned automatically
 - `require_tool_confirmation`: global default confirmation behavior seed
 - `auto_approved_tools`: tools that default to `allow`
 - `auto_confirm_tools`: bypass confirmation at runtime
@@ -79,7 +79,7 @@ Common runtime keys used by the current engine include:
 
 `runtime.default_agent` is normalized against the loaded flow registry during engine startup and when saved from the Textual system-settings editor. Legacy values such as `core::react` are accepted, but when the backing registry can qualify them they are persisted in canonical `plugin.resource` form such as `core.react`.
 
-Saved session history is not configured inside `pocketcode.yml`. It is runtime state stored separately under `.pocketcode/state/sessions/`.
+Saved session history is not configured inside `pocketcode.yml`. It is runtime state stored separately under `<primary_resource_root>/state/sessions/`.
 
 ### Tool confirmation config shape
 
@@ -97,6 +97,10 @@ Where `agent_policies` is keyed by flow name and can contain:
 
 - `default_policy`
 - `tool_policies`
+
+`tool_policies` keys accept canonical `plugin.resource`, legacy `plugin::resource`, and typed `tool:` references. The runtime normalizes them to canonical dotted tool ids before lookup and persistence.
+
+Session confirmation overrides follow the same rule when they are written into saved-session state: tool and agent keys are canonicalized to dotted registry ids, while invalid or unresolvable policy entries are dropped.
 
 Supported policies are:
 
@@ -126,32 +130,47 @@ The engine still reads legacy `workspace_mode` values from older configs, but `w
 - session confirmation default
 - `auto_confirm_tools`
 
-Session-only inspector selections are not written into `runtime.textual.last_used`. They live in the active saved session under `.pocketcode/state/sessions/*.json`.
+Session-only inspector selections are not written into `runtime.textual.last_used`. They live in the active saved session under `<primary_resource_root>/state/sessions/*.json`.
 
 Current skill persistence order inside `runtime.textual` is:
 
 1. active saved-session per-profile override
-2. `.pocketcode/agents/<profile>.yaml -> skills`
+2. `<primary_resource_root>/agents/<profile>.yaml -> skills`
 3. active saved-session global override
 4. `default_skills`
 
 `runtime.textual.selection_presets` can still store reusable snapshot data, including per-profile tool and skill selections, but applying a preset hydrates the current session state rather than creating new persistent `last_used` overrides.
 
+When selection presets are saved, any registry-backed tool references embedded in per-profile tool selections or per-profile tool-confirmation overrides are normalized to canonical dotted ids before they are written to `pocketcode.yml`.
+
 ## Workspace Resource Layout
 
-The current workspace extension surface lives under `.pocketcode/`:
+PocketCoder distinguishes between the workspace root and one or more discovered `resource_root` folders inside it.
+
+The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain recognized resource collections.
+
+Examples:
+
+- `.pocketcode/`
+- `.pocketflow/`
+
+Each resource root can provide this extension surface:
 
 ```text
-.pocketcode/
+<resource_root>/
 ├── agents/
 ├── llm-profiles/
 ├── modes/
 ├── plugins/
 ├── prompts/
-├── state/
-│   └── sessions/
 ├── skills/
 └── tools/
+```
+
+Runtime session state is stored under:
+
+```text
+<primary_resource_root>/state/sessions/
 ```
 
 Purpose of each directory:
@@ -159,17 +178,17 @@ Purpose of each directory:
 - `agents/`: workspace-backed agent profiles in YAML
 - `llm-profiles/`: workspace-backed LLM profile YAML files
 - `modes/`: Markdown-authored runtime overlays
-- `plugins/`: workspace plugin roots discovered through `runtime.plugin_paths`
-- `prompts/`: shared workspace prompt files
-- `state/sessions/`: runtime-managed saved session JSON files
+- `plugins/`: nested plugin roots under this resource root
+- `prompts/`: shared direct prompt resources for this resource root
+- `state/sessions/`: runtime-managed saved session JSON files under the primary resource root
 - `skills/`: skill packs with `SKILL.md` and optional assets
-- `tools/`: shared workspace Python tools auto-registered under `workspace`
+- `tools/`: shared direct Python tools auto-registered under `resource_root.<name>`; the default `.pocketcode/` root is also aliased under `workspace`
 
-Built-in core filesystem tools are not allowed to operate outside the workspace root itself. Workspace-local tools under `.pocketcode/tools/` can implement their own path rules, but the package-owned `core.read_file`, `core.write_to_file`, `core.create_directory`, `core.list_files`, `core.glob_files`, and staged file-edit helpers are rooted to the current workspace directory.
+Built-in core filesystem tools are not allowed to operate outside the workspace root itself. Direct tools under `<resource_root>/tools/` can implement their own path rules, but the package-owned `core.read_file`, `core.write_to_file`, `core.create_directory`, `core.list_files`, `core.glob_files`, and staged file-edit helpers are rooted to the current workspace directory.
 
 ## Workspace LLM Profiles
 
-Workspace LLM profiles are stored at `.pocketcode/llm-profiles/<name>.yaml`.
+Workspace LLM profiles are loaded from every discovered `<resource_root>/llm-profiles/<name>.yaml`. New or cloned profiles are written to the primary resource root.
 
 They are loaded in addition to:
 
@@ -180,7 +199,7 @@ These files are the editable workspace-backed copies used by the Textual clone/e
 
 ## Workspace Agent Profiles
 
-Workspace agent profiles live at `.pocketcode/agents/<name>.yaml`.
+Workspace agent profiles are loaded from every discovered `<resource_root>/agents/<name>.yaml`. New or cloned profiles are written to the primary resource root.
 
 Current schema:
 
@@ -208,6 +227,7 @@ Notes:
 - `skills` is optional. When omitted, the profile falls back to the global Textual skill selection order.
 - `tools` is optional. When omitted, the profile inherits the flow tool set.
 - `extra_prompts` are resolved relative to the profile file first, then against plugin and workspace fallback roots.
+- saving a workspace agent profile rewrites registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries to canonical dotted ids; `prompt:` entries remain typed and file-path prompt entries remain unchanged.
 
 ## Prompt Loading
 
@@ -217,8 +237,10 @@ Supported features:
 
 - inline prompt fields
 - prompt file references
+- prompt resource references such as `prompt:resource_root.pocketcode.review`
 - prompt file lists
 - `{{ include:path.md }}` expansion
+- `{{ import:prompt:resource_root.pocketcode.review }}` expansion
 - cycle detection for nested includes
 - fallback resolution through workspace prompt roots
 
@@ -242,7 +264,7 @@ This applies to:
 
 There are two relevant ignore scopes:
 
-- workspace-owned `.pocketcode/` resources use `.pocketcode/.pocketcodeignore`
+- direct resources and nested plugins inside a resource root use `<resource_root>/.pocketcodeignore`
 - package/external plugin roots use workspace-root `.pocketcodeignore`
 
 Patterns are gitignore-style and support re-includes with `!`.
@@ -251,4 +273,4 @@ Patterns are gitignore-style and support re-includes with `!`.
 
 Internally, the registry stores qualified names as `plugin.resource`.
 
-The configuration surface may still use `plugin::resource` in places, and the runtime normalizes it. When authoring new configs, prefer the canonical `plugin.resource` form unless you are editing an existing file that already uses `::` consistently.
+The configuration surface may still use `plugin::resource` in places, and the runtime normalizes it. Registry-backed references also accept typed forms such as `tool:core.read_file`, `flow:core.react`, `agent:core.react`, and `prompt:resource_root.pocketcode.review`. When authoring new configs, prefer the canonical `plugin.resource` form unless a field is explicitly typed, such as `prompt:` references in prompt bundles.

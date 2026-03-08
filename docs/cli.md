@@ -708,6 +708,7 @@ Important behavior:
 - empty `last_used` sections are removed from config
 - preset snapshots are normalized before save and when loaded back
 - session files hold live skill selections, tool selections, and session confirmation overrides for the active session
+- registry-backed tool refs inside preset snapshots and saved session confirmation maps are persisted in canonical dotted form
 - deleting a workspace asset also cleans invalid references from selection presets and last-used state
 
 ## System Settings
@@ -726,6 +727,8 @@ Current values returned are:
 When the Textual system-settings editor opens, it normalizes legacy `plugin::resource` agent ids from config to the registry's canonical `plugin.resource` form so older saved defaults continue to load without crashing the agent select widget.
 
 The same normalization also happens inside `PocketCodeEngine` when system settings are read, applied, and saved, so `runtime.default_agent` cannot drift back to an incompatible form after startup.
+
+Other engine control surfaces that accept flow or agent ids also normalize typed references such as `flow:core.react` and `agent:core.react` before lookup, so CLI and TUI paths resolve through the same canonical registry form.
 
 ## Output Model
 

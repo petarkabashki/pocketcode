@@ -125,6 +125,18 @@ class TestResolveQualified:
         with pytest.raises(RegistryError, match="core.missing"):
             reg.resolve("core.missing")
 
+    def test_typed_qualified_reference_resolves(self):
+        reg: NamespaceRegistry[Any] = NamespaceRegistry()
+        t = _make_tool("concrete_tool")
+        reg.register("core", "read_file", t)
+        assert reg.resolve("tool:core.read_file") is t
+
+    def test_hash_qualified_reference_resolves(self):
+        reg: NamespaceRegistry[Any] = NamespaceRegistry()
+        t = _make_tool("shared")
+        reg.register("resource_root.pocketcode", "shared", t)
+        assert reg.resolve("prompt:resource_root.pocketcode#shared") is t
+
 
 # ---------------------------------------------------------------------------
 # resolve() — unqualified, 1 owner → WARNING
@@ -221,6 +233,14 @@ class TestResolveContextPlugin:
         with pytest.raises(RegistryError):
             reg.resolve("tool", context_plugin="c")
 
+    def test_typed_unqualified_ref_uses_context_plugin(self):
+        reg: NamespaceRegistry[Any] = NamespaceRegistry()
+        local = _make_tool("local")
+        reg.register("myplugin", "tool", local)
+
+        result = reg.resolve("tool:tool", context_plugin="myplugin")
+        assert result is local
+
 
 # ---------------------------------------------------------------------------
 # unregister_plugin()
@@ -258,6 +278,15 @@ class TestUnregisterPlugin:
         with caplog.at_level(logging.WARNING, logger="pocketcode.core.namespace_registry"):
             result = reg.resolve("tool")
         assert result is t  # now only 1 owner
+
+
+class TestContains:
+    def test_contains_accepts_typed_reference(self):
+        reg: NamespaceRegistry[Any] = NamespaceRegistry()
+        reg.register("core", "read_file", _make_tool())
+
+        assert "tool:core.read_file" in reg
+        assert "tool:read_file" in reg
 
     def test_unregister_nonexistent_is_noop(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()

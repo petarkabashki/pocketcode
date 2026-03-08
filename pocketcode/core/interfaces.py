@@ -41,6 +41,14 @@ class PluginContext:
         """Retrieve a local prompt by name."""
         if name in self.prompts:
             return self.prompts[name]
+
+        try:
+            prompt_registry = getattr(getattr(self._runtime, "_plugins", None), "prompts", None)
+            if prompt_registry is not None:
+                prompt_ref = f"{self.name}.{name}"
+                return str(prompt_registry.resolve(prompt_ref))
+        except Exception:
+            pass
         
         # Fallback: try to resolve via runtime/filesystem if not pre-loaded
         try:

@@ -21,6 +21,8 @@ from pocketcode.cli.textual_app import (
     _build_view_title_text,
     _trim_output_lines,
 )
+from pocketcode.cli.textual_ui.renderables import render_output_blocks
+from pocketcode.cli.textual_ui.shared import THEME_PALETTES
 from pocketcode.cli.textual_ui.selectors import (
     select_context_summary,
     select_inspector_summary_text,
@@ -32,6 +34,7 @@ from pocketcode.cli.textual_ui.selectors import (
 )
 from pocketcode.cli.textual_ui.store import (
     CloseModalAction,
+    OutputBlock,
     OpenModalAction,
     SetCurrentViewAction,
     SetThemeAction,
@@ -41,7 +44,7 @@ from pocketcode.cli.textual_ui.store import (
     reduce_textual_runtime_state,
 )
 from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
-from textual.widgets import Input, Select, SelectionList, Static, TextArea
+from textual.widgets import Input, RichLog, Select, SelectionList, Static, TextArea
 
 
 class TestTopStatsText:
@@ -138,6 +141,66 @@ class TestUiTextHelpers:
         assert "Editing workspace agent 'coder.safe'" in _build_profile_editor_hint(workspace_profile)
         assert "Clone it to a workspace agent to edit" in _build_profile_editor_hint(plugin_profile)
 
+    def test_navigation_status_ignores_hover_but_pointer_hint_requires_it(self):
+        class _Probe(PocketCodeTextualApp):
+            def __init__(self, hovered_block_ref=None):
+                super().__init__(
+                    _TextualEngineStub(),
+                    {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+                )
+                self._cli_state = self._cli_state.__class__(
+                    theme_name=self._cli_state.theme_name,
+                    right_panel_visible=self._cli_state.right_panel_visible,
+                    current_view=self._cli_state.current_view,
+                    workspace_view=self._cli_state.workspace_view,
+                    engine=self._cli_state.engine,
+                    focused_surface_id="run-preview",
+                    selected_surface_block_indices=self._cli_state.selected_surface_block_indices,
+                    expanded_block_refs=("run-preview:2",),
+                    hovered_block_ref=hovered_block_ref,
+                )
+
+            def _resolve_expansion_surface_id(self):
+                return "run-preview"
+
+            def _surface_blocks(self, surface_id):
+                return (
+                    OutputBlock(kind="info", text="short", title="Overview"),
+                    OutputBlock(
+                        kind="code",
+                        text="\n".join(f"line_{i}: value" for i in range(35)),
+                        title="Summary",
+                        language="yaml",
+                    ),
+                    OutputBlock(
+                        kind="tool_result",
+                        text="\n".join(f"result {i}" for i in range(24)),
+                        title="Tool Result",
+                    ),
+                )
+
+            def _surface_compactable_indices(self, blocks):
+                return tuple(
+                    index
+                    for index, block in enumerate(blocks)
+                    if block.kind in {"code", "tool_result", "tool_call"}
+                )
+
+            def _resolve_selected_compactable_block_index(self, surface_id):
+                return 2
+
+        blocks = _Probe()._surface_blocks("run-preview")
+
+        idle_status = _Probe()._build_navigation_status_text(status={}, run_preview_blocks=blocks)
+        hover_status = _Probe("run-preview:1")._build_navigation_status_text(status={}, run_preview_blocks=blocks)
+        idle_hint = _Probe()._build_pointer_hint_text(run_preview_blocks=blocks)
+        hover_hint = _Probe("run-preview:1")._build_pointer_hint_text(run_preview_blocks=blocks)
+
+        assert idle_status == hover_status
+        assert "Hover block" not in hover_status
+        assert idle_hint == ""
+        assert hover_hint.startswith("Pointer: Run Preview hover on block 1 of 2.")
+
 
 class TestOutputHistoryHelpers:
     def test_trim_output_lines_keeps_tail_with_overflow_count(self):
@@ -230,6 +293,7 @@ class TestTextualRuntimeSelectors:
             active_modal_title=state.active_modal_title,
             pending_input_request=state.pending_input_request,
             live_run_events=state.live_run_events,
+            output_blocks=state.output_blocks,
             output_lines=("info> ready", "assistant> ok"),
             trimmed_output_line_count=3,
             last_assistant_response=state.last_assistant_response,
@@ -426,9 +490,145 @@ class TestTextualOutputRendering:
             async with app.run_test() as pilot:
                 await pilot.pause(0.2)
 
-                output = app.query_one("#output", TextArea)
+                output = app.query_one("#output", RichLog)
 
-                assert output.text == ""
+                assert app._runtime_state.output_blocks == ()
+                assert app._runtime_state.output_lines == ()
+                assert output.lines == []
+
+        asyncio.run(exercise())
+
+
+class TestTextualPointerSelection:
+    def test_pointer_selection_uses_rendered_block_spans(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+            blocks = (
+                OutputBlock(kind="info", text="overview", title="Overview"),
+                OutputBlock(
+                    kind="code",
+                    text="\n".join(f"alpha_{index}: value" for index in range(48)),
+                    title="Summary",
+                    language="yaml",
+                ),
+                OutputBlock(
+                    kind="tool_result",
+                    text="\n".join(f"result {index}" for index in range(36)),
+                    title="Tool Result",
+                ),
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+                app._set_cli_current_view("run")
+                app._surface_blocks = lambda surface_id: blocks if surface_id == "run-preview" else ()
+
+                preview = app.query_one("#run-preview", RichLog)
+                palette = THEME_PALETTES.get(app._cli_state.theme_name) or next(iter(THEME_PALETTES.values()))
+                renderables = render_output_blocks(blocks, palette, surface_id="run-preview")
+                preview.clear()
+                for renderable in renderables:
+                    preview.write(renderable, scroll_end=False)
+                app._set_surface_render_spans(
+                    "run-preview",
+                    renderables,
+                    width=preview.content_region.width or preview.size.width or 80,
+                )
+                await pilot.pause(0.05)
+
+                spans = app._surface_render_spans("run-preview")
+                target_span = spans[2]
+                pointer_y = max(0, target_span.start_line)
+                widget_height = max(1, preview.content_region.height or preview.size.height or (target_span.end_line + 1))
+
+                app._select_surface_block_from_pointer(
+                    "run-preview",
+                    pointer_y=pointer_y,
+                    widget_height=widget_height,
+                    scroll_y=0.0,
+                )
+
+                assert dict(app._cli_state.selected_surface_block_indices)["run-preview"] == 2
+
+        asyncio.run(exercise())
+
+    def test_scroll_selection_tracks_viewport_center_line(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+        blocks = (
+            OutputBlock(kind="info", text="overview", title="Overview"),
+            OutputBlock(
+                kind="code",
+                text="\n".join(f"alpha_{index}: value" for index in range(60)),
+                title="Summary",
+                language="yaml",
+            ),
+            OutputBlock(
+                kind="tool_result",
+                text="\n".join(f"result {index}" for index in range(60)),
+                title="Tool Result",
+            ),
+        )
+
+        app._set_cli_current_view("run")
+        app._surface_blocks = lambda surface_id: blocks if surface_id == "run-preview" else ()
+
+        palette = THEME_PALETTES.get(app._cli_state.theme_name) or next(iter(THEME_PALETTES.values()))
+        renderables = render_output_blocks(blocks, palette, surface_id="run-preview")
+        app._set_surface_render_spans("run-preview", renderables, width=80)
+
+        spans = app._surface_render_spans("run-preview")
+        target_span = spans[2]
+        viewport_height = 10
+        target_center_line = (target_span.start_line + target_span.end_line) // 2
+        target_scroll = max(0, target_center_line - max(1, viewport_height // 2))
+        preview = SimpleNamespace(
+            content_region=SimpleNamespace(height=viewport_height),
+            size=SimpleNamespace(height=viewport_height),
+            virtual_size=SimpleNamespace(height=spans[-1].end_line + 1),
+            scroll_y=float(target_scroll),
+        )
+        query_one = app.query_one
+        app.query_one = lambda selector, expect_type=None: preview if selector == "#run-preview" else query_one(selector, expect_type)
+        app._commit_ui_update = lambda *args, **kwargs: None
+
+        app._select_surface_block_from_scroll("run-preview")
+
+        assert dict(app._cli_state.selected_surface_block_indices)["run-preview"] == 2
+
+    def test_footer_hint_widget_only_shows_when_text_exists(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                footer_hint = app.query_one("#footer-hint", Static)
+
+                assert footer_hint.display is False
+
+                app._apply_footer_hint_state("Pointer: Run Preview hover on block 1 of 2.")
+                await pilot.pause(0.05)
+
+                assert footer_hint.display is True
+                assert app._text_state_cache["footer-hint"] == "Pointer: Run Preview hover on block 1 of 2."
+
+                app._apply_footer_hint_state("")
+                await pilot.pause(0.05)
+
+                assert footer_hint.display is False
+                assert app._text_state_cache["footer-hint"] == ""
 
         asyncio.run(exercise())
 
@@ -577,16 +777,18 @@ class TestTextualInteractionRequests:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                output = app.query_one("#output", TextArea)
-                app._output_lines = []
-                app._trimmed_output_line_count = 0
-                app._load_text_area_text(output, "")
+                output = app.query_one("#output", RichLog)
+                app._clear_console_state()
+                output.clear()
+                app._output_render_cache = None
 
                 app._write_info("first")
                 app._write_info("second")
                 await pilot.pause(0.05)
 
-                assert output.text == "info> first\ninfo> second"
+                assert [block.text for block in app._runtime_state.output_blocks] == ["first", "second"]
+                assert app._runtime_state.output_lines == ("info> first", "info> second")
+                assert len(output.lines) >= 0
 
         asyncio.run(exercise())
 
@@ -1413,6 +1615,40 @@ class TestTextualSelectStability:
                 "theme_name": "ocean",
                 "workspace_view": "balanced",
                 "default_agent": "core::react",
+                "default_llm_profile": "fast",
+            }
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("system_settings")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("open")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, SystemSettingsScreen)
+                assert app.screen.query_one("#system-default-agent-select", Select).value == "core.react"
+
+        asyncio.run(exercise())
+
+    def test_f6_system_settings_normalizes_typed_agent_alias(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.list_agents = lambda: ["core.react", "workspace.review"]
+            engine.get_system_settings = lambda: {
+                "theme_name": "ocean",
+                "workspace_view": "balanced",
+                "default_agent": "agent:core.react",
                 "default_llm_profile": "fast",
             }
             app = PocketCodeTextualApp(

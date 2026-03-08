@@ -31,16 +31,18 @@ Current fields:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | `str` | none | Unique profile identifier |
-| `flow` | `str` | none | Qualified target flow name |
+| `flow` | `str` | none | Qualified target flow name; accepts canonical `plugin.resource`, legacy `plugin::resource`, and typed `flow:` or `agent:` forms |
 | `description` | `str` | `""` | Human-readable description |
 | `llm_profile` | `str \| None` | `None` | LLM profile override |
 | `inline_prompt` | `str` | `""` | Inline prompt text appended after the flow prompt |
-| `extra_prompts` | `List[str]` | `[]` | Additional prompt file references |
+| `extra_prompts` | `List[str]` | `[]` | Additional prompt references; each entry may be a file path or a `prompt:` resource reference |
 | `skills` | `List[str] \| None` | `None` | Default enabled skills; `None` means use global skill defaults |
 | `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` means inherit flow tool surface |
 | `tool_confirmation` | `dict` | `{}` | Confirmation defaults and per-tool overrides |
 | `source` | `str` | `"synthesised"` | One of `synthesised`, `plugin`, or `workspace` |
 | `source_path` | `Path \| None` | `None` | Source YAML path for workspace-backed profiles |
+
+- `tools` entries resolve through the shared registry, so they accept `plugin.resource`, `plugin::resource`, and typed `tool:` references.
 
 ## Source And Precedence
 
@@ -87,11 +89,11 @@ Current confirmation resolution order is:
 
 The agent-profile system uses these workspace paths:
 
-- `.pocketcode/agents/` for workspace profile YAML files
-- `.pocketcode/llm-profiles/` for workspace LLM profile YAML files
-- `.pocketcode/plugins/` for workspace plugins
-- `.pocketcode/tools/` for shared workspace tools under the `workspace` namespace
-- `.pocketcode/prompts/` for shared workspace prompts and prompt fallback resolution
+- `<resource_root>/agents/` for workspace profile YAML files
+- `<resource_root>/llm-profiles/` for workspace LLM profile YAML files
+- `<resource_root>/plugins/` for nested plugins
+- `<resource_root>/tools/` for shared direct tools under `resource_root.<name>`; the default `.pocketcode/` root is also aliased under `workspace`
+- `<resource_root>/prompts/` for shared direct prompts and prompt fallback resolution
 
 Built-in core tools are package resources under `pocketcode/plugins/core/tools/`. The older `pocketcode/tools/` package remains available only as a backward-compatible import facade.
 
@@ -112,7 +114,7 @@ parameters:
 
 ## Workspace Agent Profile Schema
 
-Workspace agent profiles are stored in `.pocketcode/agents/<name>.yaml`.
+Workspace agent profiles are loaded from all discovered `<resource_root>/agents/<name>.yaml` locations and are saved into the primary resource root.
 
 Example:
 
@@ -139,7 +141,12 @@ Notes:
 - `flow` is required.
 - `skills` omitted means fall back to the global Textual skill selection order.
 - `tools` omitted means inherit the target flow tool surface.
-- `extra_prompts` are resolved relative to the profile file first, then through plugin and workspace fallback roots.
+- agent-facing runtime controls such as flow selection, tool listing, and per-agent LLM overrides normalize `plugin::resource` and typed `flow:` or `agent:` references before registry lookup.
+- `extra_prompts` entries beginning with `prompt:` resolve through the prompt registry.
+- path-based `extra_prompts` are resolved relative to the profile file first, then through plugin and resource-root fallback roots.
+- workspace-backed agent profile YAML now validates and normalizes typed refs while loading; malformed `flow`, `tools`, or `extra_prompts` entries cause that profile file to be skipped with a warning instead of failing later during runtime resolution.
+- when a workspace-backed agent profile is saved or updated, registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries are written back in canonical `plugin.resource` form, while `prompt:` sources remain typed and plain path-based prompt entries remain plain paths.
+- after the engine has loaded flows, tools, and prompts, agent profiles are validated again against the live registries; resolvable tool refs are canonicalized, invalid prompt-resource refs are removed with a warning, and profiles whose target flow is no longer available are dropped from the loaded registry.
 
 ## Inline Flow Default Agent Block
 

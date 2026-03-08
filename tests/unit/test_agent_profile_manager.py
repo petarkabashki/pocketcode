@@ -217,6 +217,20 @@ class TestWorkspaceYamlLoading:
 
         assert apm.get("custom") is not None
 
+    def test_workspace_profiles_load_from_additional_resource_root(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        ws_profiles = tmp_path / ".pocketflow" / "agents"
+        self._write_ws_profile(
+            ws_profiles,
+            "flow-review.yaml",
+            {"name": "flow-review", "flow": qname},
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        assert apm.get("flow-review") is not None
+
     def test_workspace_yaml_loads_profile_skills(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
         ws_profiles = tmp_path / ".pocketcode" / "agents"
@@ -264,6 +278,43 @@ class TestWorkspaceYamlLoading:
         assert apm.get("drop") is None
         assert apm.get("keep") is not None
         assert apm.get("hidden") is None
+
+    def test_invalid_typed_flow_reference_skips_workspace_profile(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        ws_profiles = tmp_path / ".pocketcode" / "agents"
+        self._write_ws_profile(
+            ws_profiles,
+            "bad.yaml",
+            {"name": "bad", "flow": "tool:core.read_file"},
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        assert apm.get("bad") is None
+
+    def test_workspace_profile_loader_normalizes_typed_refs(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        ws_profiles = tmp_path / ".pocketcode" / "agents"
+        self._write_ws_profile(
+            ws_profiles,
+            "typed.yaml",
+            {
+                "name": "typed",
+                "flow": "flow:plug.agent",
+                "tools": ["tool:core.read_file"],
+                "extra_prompts": ["prompt:resource_root.pocketcode#review"],
+            },
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({"plug.agent": defn})
+
+        profile = apm.get("typed")
+        assert profile is not None
+        assert profile.flow == "plug.agent"
+        assert profile.tools == ["core.read_file"]
+        assert profile.extra_prompts == ["prompt:resource_root.pocketcode.review"]
 
     def test_workspace_beats_synthesised_same_name(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
@@ -371,6 +422,38 @@ class TestClone:
 
         saved = yaml.safe_load(profile.source_path.read_text(encoding="utf-8"))
         assert saved["skills"] == ["python-testing"]
+
+    def test_save_canonicalizes_persisted_reference_fields(self, tmp_path):
+        profile = AgentProfile(
+            name="cloned",
+            flow="agent:coder.coder",
+            extra_prompts=["prompt:resource_root.pocketcode.review", "prompts/base.md"],
+            tools=["tool:filesystem.read_file", "search::web_search"],
+            tool_confirmation={
+                "default": "confirm",
+                "overrides": {
+                    "tool:filesystem.delete_file": "deny",
+                    "search::web_search": "allow",
+                },
+            },
+            source="workspace",
+            source_path=tmp_path / ".pocketcode" / "agents" / "cloned.yaml",
+        )
+        apm = AgentProfileManager(tmp_path)
+
+        apm.save(profile)
+
+        saved = yaml.safe_load(profile.source_path.read_text(encoding="utf-8"))
+        assert saved["flow"] == "coder.coder"
+        assert saved["extra_prompts"] == ["prompt:resource_root.pocketcode.review", "prompts/base.md"]
+        assert saved["tools"] == ["filesystem.read_file", "search.web_search"]
+        assert saved["tool_confirmation"] == {
+            "default": "confirm",
+            "overrides": {
+                "filesystem.delete_file": "deny",
+                "search.web_search": "allow",
+            },
+        }
 
     def test_clone_missing_source_raises(self, tmp_path):
         apm = AgentProfileManager(tmp_path)

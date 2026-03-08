@@ -12,9 +12,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch, PropertyMock
 from typing import Any, Dict
+from types import SimpleNamespace
 
 import pytest
 
+from pocketcode.core.agent_runtime import AgentRuntime
+from pocketcode.core.namespace_registry import NamespaceRegistry
 from pocketcode.core.runtime_models import AgentDefinition, AgentProfile
 from pocketcode.core.tool_runtime import ToolRuntime
 
@@ -81,6 +84,32 @@ class TestLLMTier:
     def test_profile_llm_profile_none_when_not_set(self):
         profile = _make_profile()
         assert profile.llm_profile is None
+
+
+class TestPromptReferenceResolution:
+    def test_extra_prompts_support_prompt_resource_refs(self, tmp_path):
+        prompts = NamespaceRegistry()
+        prompts.register("resource_root.pocketcode", "review", "Review via prompt ref.")
+
+        plugins = SimpleNamespace(
+            workspace_root=tmp_path,
+            prompts=prompts,
+            agents=NamespaceRegistry(),
+        )
+        runtime = AgentRuntime(
+            plugin_manager=plugins,
+            llm_router=MagicMock(),
+            tool_runtime=MagicMock(),
+            runtime_config={},
+        )
+
+        profile = AgentProfile(
+            name="review-profile",
+            flow="plug.agent",
+            extra_prompts=["prompt:resource_root.pocketcode.review"],
+        )
+
+        assert runtime._resolve_extra_prompts_content(profile) == "Review via prompt ref."
 
 
 # ---------------------------------------------------------------------------

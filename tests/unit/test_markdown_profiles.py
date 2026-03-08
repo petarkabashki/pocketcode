@@ -31,7 +31,7 @@ Review the code for regressions.
         mode = manager.get("review")
         assert mode is not None
         assert mode.description == "Review mode"
-        assert mode.flow == "core::react"
+        assert mode.flow == "core.react"
         assert mode.llm_profile == "smart"
         assert mode.tools == ["core.read_file"]
         assert mode.tools_specified is True
@@ -53,6 +53,52 @@ Review the code for regressions.
         assert manager.get("skip") is None
         assert manager.get("hidden") is None
         assert manager.get("keep") is not None
+
+        def test_mode_loader_normalizes_typed_refs(self, tmp_path):
+                modes_dir = tmp_path / ".pocketcode" / "modes"
+                modes_dir.mkdir(parents=True, exist_ok=True)
+                (modes_dir / "review.md").write_text(
+                        """---
+name: review
+flow: flow:core.react
+tools:
+    - tool:core.read_file
+extra_prompts:
+    - prompt:resource_root.pocketcode#review
+---
+Review it.
+""",
+                        encoding="utf-8",
+                )
+
+                manager = ModeManager(tmp_path)
+                manager.load()
+
+                mode = manager.get("review")
+                assert mode is not None
+                assert mode.flow == "core.react"
+                assert mode.tools == ["core.read_file"]
+                assert mode.extra_prompts == ["prompt:resource_root.pocketcode.review"]
+
+        def test_invalid_typed_tool_ref_skips_mode(self, tmp_path):
+                modes_dir = tmp_path / ".pocketcode" / "modes"
+                modes_dir.mkdir(parents=True, exist_ok=True)
+                (modes_dir / "bad.md").write_text(
+                        """---
+name: bad
+flow: core::react
+tools:
+    - prompt:resource_root.pocketcode.review
+---
+Bad mode.
+""",
+                        encoding="utf-8",
+                )
+
+                manager = ModeManager(tmp_path)
+                manager.load()
+
+                assert manager.get("bad") is None
 
 
 class TestSkillManager:
@@ -135,3 +181,46 @@ def run_pytest(shared_store=None):
         assert sorted(skill.provided_tools.keys()) == ["skill.python_testing.keep_tool"]
         assert skill.references == ["references/keep.md"]
         assert manager.get("hidden") is None
+
+        def test_skill_loader_normalizes_typed_refs(self, tmp_path):
+                skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(
+                        """---
+name: python-testing
+tools:
+    - tool:core.read_file
+extra_prompts:
+    - prompt:resource_root.pocketcode#review
+---
+Use it.
+""",
+                        encoding="utf-8",
+                )
+
+                manager = SkillManager(tmp_path)
+                manager.load()
+
+                skill = manager.get("python-testing")
+                assert skill is not None
+                assert skill.tool_refs == ["core.read_file"]
+                assert skill.extra_prompts == ["prompt:resource_root.pocketcode.review"]
+
+        def test_invalid_typed_prompt_ref_skips_skill(self, tmp_path):
+                skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(
+                        """---
+name: python-testing
+extra_prompts:
+    - tool:core.read_file
+---
+Use it.
+""",
+                        encoding="utf-8",
+                )
+
+                manager = SkillManager(tmp_path)
+                manager.load()
+
+                assert manager.get("python-testing") is None

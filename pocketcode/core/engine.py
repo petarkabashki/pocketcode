@@ -16,6 +16,13 @@ from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.namespace_registry import RegistryError
 from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
+from pocketcode.core.reference_syntax import (
+    normalize_prompt_source,
+    normalize_registry_reference,
+    parse_prompt_reference,
+    parse_reference,
+)
 from pocketcode.core.run_handle import RunCancelledError, RunHandle
 from pocketcode.core.runtime_models import AgentProfile
 from pocketcode.core.session_manager import SessionManager
@@ -49,6 +56,7 @@ class PocketCodeEngine:
         self._session_manager = SessionManager(self._workspace_root)
         self._workspace_llm_profile_manager = WorkspaceLlmProfileManager(self._workspace_root)
         self._workspace_llm_profile_manager.load()
+        self._validate_loaded_reference_surfaces()
         self.active_agent_profile = None  # type: ignore[assignment]  # AgentProfile | None
         self.active_mode: ModeDefinition | None = None
         self.session_profile_overrides: Dict[str, Dict[str, Any]] = {}
@@ -104,6 +112,8 @@ class PocketCodeEngine:
         self._agent_profile_manager.reload(dict(self._plugins.agents))
         self._mode_manager.load()
         self._skill_manager.load()
+        self._workspace_llm_profile_manager.load()
+        self._validate_loaded_reference_surfaces()
         # Re-apply active profile by name if it still exists; else fall back to
         # the current agent's default profile.
         if self.active_mode is not None:
@@ -124,7 +134,6 @@ class PocketCodeEngine:
                 self._activate_default_profile_for(self.current_agent)
             else:
                 self.active_agent_profile = None
-        self._workspace_llm_profile_manager.load()
         self._llm_router = LlmRouter(config=self._config, plugin_llm_profiles=self._merged_llm_profiles())
         self.config_llm_overrides = self._build_llm_overrides_config()
         self._tool_confirmation_config = self._build_tool_confirmation_config()
@@ -162,6 +171,280 @@ class PocketCodeEngine:
             for skill_name in self.enabled_skills
             if self._skill_manager.get(skill_name) is not None
         ]
+
+    def _validate_loaded_reference_surfaces(self) -> None:
+        self._validate_loaded_agent_profiles()
+        self._validate_loaded_modes()
+        self._validate_loaded_skills()
+
+    def _validate_loaded_agent_profiles(self) -> None:
+        profile_manager = getattr(self, "_agent_profile_manager", None)
+        if profile_manager is None:
+            return
+
+        for profile in list(profile_manager.list()):
+            normalized_agent_name = self._normalize_agent_name(profile.agent)
+            if not normalized_agent_name or normalized_agent_name not in self._plugins.agents:
+                logger.warning(
+                    "Agent profile '%s' targets unknown agent '%s'. Removing it from the loaded registry.",
+                    profile.name,
+                    profile.agent,
+                )
+                self._drop_loaded_profile(profile.name)
+                continue
+
+            context_plugin = self._context_plugin_for_agent(normalized_agent_name)
+            profile.flow = normalized_agent_name
+            if profile.tools is not None:
+                profile.tools = self._qualify_existing_tool_refs(
+                    profile.tools,
+                    owner_name=profile.name,
+                    field_name="tools",
+                    context_agent=normalized_agent_name,
+                )
+            profile.extra_prompts = self._filter_existing_prompt_refs(
+                profile.extra_prompts,
+                owner_name=profile.name,
+                field_name="extra_prompts",
+                context_plugin=context_plugin,
+                allow_context_deferred=False,
+            )
+            self._store_loaded_profile(profile)
+
+    def _validate_loaded_modes(self) -> None:
+        mode_manager = getattr(self, "_mode_manager", None)
+        if mode_manager is None:
+            return
+
+        for mode in list(mode_manager.list()):
+            target_flow = None
+            if mode.agent:
+                base_profile = self._base_agent_profile(mode.agent)
+                if base_profile is None:
+                    logger.warning(
+                        "Mode '%s' references unknown agent profile '%s'. Removing it from the loaded registry.",
+                        mode.name,
+                        mode.agent,
+                    )
+                    self._drop_loaded_mode(mode.name)
+                    continue
+                target_flow = self._normalize_agent_name(base_profile.agent)
+            elif mode.flow:
+                target_flow = self._normalize_agent_name(mode.flow)
+
+            if target_flow and target_flow not in self._plugins.agents:
+                logger.warning(
+                    "Mode '%s' targets unknown flow '%s'. Removing it from the loaded registry.",
+                    mode.name,
+                    mode.flow or target_flow,
+                )
+                self._drop_loaded_mode(mode.name)
+                continue
+
+            updated_mode = dataclasses.replace(
+                mode,
+                flow=target_flow if mode.flow and target_flow else mode.flow,
+                tools=(
+                    self._qualify_existing_tool_refs(
+                        mode.tools,
+                        owner_name=mode.name,
+                        field_name="tools",
+                        context_agent=target_flow,
+                        allow_context_deferred=target_flow is None,
+                    )
+                    if mode.tools is not None
+                    else None
+                ),
+                extra_prompts=self._filter_existing_prompt_refs(
+                    mode.extra_prompts,
+                    owner_name=mode.name,
+                    field_name="extra_prompts",
+                    context_plugin=self._context_plugin_for_agent(target_flow) if target_flow else None,
+                    allow_context_deferred=target_flow is None,
+                ),
+            )
+            self._store_loaded_mode(updated_mode)
+
+    def _validate_loaded_skills(self) -> None:
+        skill_manager = getattr(self, "_skill_manager", None)
+        if skill_manager is None:
+            return
+
+        for skill in list(skill_manager.list()):
+            updated_skill = dataclasses.replace(
+                skill,
+                tool_refs=self._qualify_existing_tool_refs(
+                    skill.tool_refs,
+                    owner_name=skill.name,
+                    field_name="tools",
+                    context_agent=None,
+                    allow_context_deferred=True,
+                ),
+                extra_prompts=self._filter_existing_prompt_refs(
+                    skill.extra_prompts,
+                    owner_name=skill.name,
+                    field_name="extra_prompts",
+                    context_plugin=None,
+                    allow_context_deferred=True,
+                ),
+            )
+            self._store_loaded_skill(updated_skill)
+
+    def _qualify_existing_tool_refs(
+        self,
+        refs: List[str],
+        *,
+        owner_name: str,
+        field_name: str,
+        context_agent: str | None,
+        allow_context_deferred: bool = False,
+    ) -> List[str]:
+        qualified: List[str] = []
+        for ref in refs:
+            candidate = str(ref or "").strip()
+            if not candidate:
+                continue
+            if candidate == "*":
+                return ["*"]
+            if candidate.startswith("skill."):
+                if candidate not in qualified:
+                    qualified.append(candidate)
+                continue
+
+            try:
+                normalized_candidate = parse_reference(candidate, allowed_kinds={"tool"})
+            except ValueError as exc:
+                logger.warning(
+                    "Resource '%s' has invalid %s ref '%s': %s. Skipping it.",
+                    owner_name,
+                    field_name,
+                    candidate,
+                    exc,
+                )
+                continue
+
+            if allow_context_deferred and context_agent is None and not normalized_candidate.is_qualified:
+                if candidate not in qualified:
+                    qualified.append(candidate)
+                continue
+
+            try:
+                resolved = self._qualify_tool_reference(candidate, context_agent=context_agent)
+            except ValueError as exc:
+                logger.warning(
+                    "Resource '%s' has invalid %s ref '%s': %s. Skipping it.",
+                    owner_name,
+                    field_name,
+                    candidate,
+                    exc,
+                )
+                continue
+            if resolved and resolved not in qualified:
+                qualified.append(resolved)
+        return qualified
+
+    def _filter_existing_prompt_refs(
+        self,
+        refs: List[str],
+        *,
+        owner_name: str,
+        field_name: str,
+        context_plugin: str | None,
+        allow_context_deferred: bool,
+    ) -> List[str]:
+        filtered: List[str] = []
+        for ref in refs:
+            candidate = str(ref or "").strip()
+            if not candidate:
+                continue
+            if not is_prompt_reference(candidate):
+                filtered.append(candidate)
+                continue
+
+            try:
+                normalized_candidate = parse_prompt_reference(candidate)
+            except ValueError as exc:
+                logger.warning(
+                    "Resource '%s' has invalid %s ref '%s': %s. Skipping it.",
+                    owner_name,
+                    field_name,
+                    candidate,
+                    exc,
+                )
+                continue
+            if allow_context_deferred and context_plugin is None and not normalized_candidate.is_qualified:
+                filtered.append(candidate)
+                continue
+
+            try:
+                _prompt_text, prompt_sources = resolve_prompt_reference(
+                    candidate,
+                    prompt_registry=self._plugins.prompts,
+                    context_plugin=context_plugin,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Resource '%s' has invalid %s ref '%s': %s. Skipping it.",
+                    owner_name,
+                    field_name,
+                    candidate,
+                    exc,
+                )
+                continue
+
+            canonical_ref = next(
+                (source for source in prompt_sources if isinstance(source, str) and source.startswith("prompt:")),
+                candidate,
+            )
+            if canonical_ref not in filtered:
+                filtered.append(canonical_ref)
+        return filtered
+
+    def _context_plugin_for_agent(self, agent_name: str | None) -> str | None:
+        if not agent_name:
+            return None
+        agent_definition = self._plugins.agents.get(agent_name)
+        if agent_definition is None:
+            return None
+        plugin_name = (agent_definition.metadata or {}).get("plugin")
+        return str(plugin_name).strip() if plugin_name else None
+
+    def _store_loaded_profile(self, profile: AgentProfile) -> None:
+        manager = getattr(self, "_agent_profile_manager", None)
+        mapping = self._manager_store(manager, "_agents", "_profiles")
+        if mapping is not None:
+            mapping[profile.name] = profile
+
+    def _drop_loaded_profile(self, profile_name: str) -> None:
+        manager = getattr(self, "_agent_profile_manager", None)
+        mapping = self._manager_store(manager, "_agents", "_profiles")
+        if mapping is not None:
+            mapping.pop(profile_name, None)
+
+    def _store_loaded_mode(self, mode: ModeDefinition) -> None:
+        manager = getattr(self, "_mode_manager", None)
+        mapping = self._manager_store(manager, "_modes")
+        if mapping is not None:
+            mapping[mode.name] = mode
+
+    def _drop_loaded_mode(self, mode_name: str) -> None:
+        manager = getattr(self, "_mode_manager", None)
+        mapping = self._manager_store(manager, "_modes")
+        if mapping is not None:
+            mapping.pop(mode_name, None)
+
+    def _store_loaded_skill(self, skill: SkillDefinition) -> None:
+        manager = getattr(self, "_skill_manager", None)
+        mapping = self._manager_store(manager, "_skills")
+        if mapping is not None:
+            mapping[skill.name] = skill
+
+    def _manager_store(self, manager: Any, *attr_names: str) -> Dict[str, Any] | None:
+        for attr_name in attr_names:
+            mapping = getattr(manager, attr_name, None)
+            if isinstance(mapping, dict):
+                return mapping
+        return None
 
     def list_agents(self) -> List[str]:
         """Backward-compatible alias for registered flow names."""
@@ -350,12 +633,13 @@ class PocketCodeEngine:
                 f"Unknown agent profile '{name}'. "
                 f"Available: {available}"
             )
-        if profile.agent not in self._plugins.agents:
+        normalized_profile_agent = self._normalize_agent_name(profile.agent)
+        if not normalized_profile_agent or normalized_profile_agent not in self._plugins.agents:
             raise ValueError(
                 f"Agent profile '{name}' targets unknown agent '{profile.agent}'."
         )
         self.active_mode = None
-        self.current_agent = self._normalize_agent_name(profile.agent)
+        self.current_agent = normalized_profile_agent
         self.active_agent_profile = self._apply_session_profile_overrides(profile)
         self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
         self._maybe_refresh_runtime_components()
@@ -396,9 +680,18 @@ class PocketCodeEngine:
         if not cleaned:
             return None
 
-        agents_registry = getattr(self._plugins, "agents", None)
+        try:
+            canonical_candidate = normalize_registry_reference(
+                cleaned,
+                allowed_kinds={"agent", "flow"},
+            )
+        except ValueError:
+            canonical_candidate = cleaned.replace("::", ".")
+
+        plugins = getattr(self, "_plugins", None)
+        agents_registry = getattr(plugins, "agents", None)
         if agents_registry is None:
-            return cleaned.replace("::", ".")
+            return canonical_candidate
 
         qualify = getattr(agents_registry, "qualify", None)
         if callable(qualify):
@@ -410,15 +703,20 @@ class PocketCodeEngine:
         if cleaned in agents_registry:
             return cleaned
 
-        canonical = cleaned.replace("::", ".")
-        if canonical in agents_registry:
-            return canonical
+        if canonical_candidate in agents_registry:
+            return canonical_candidate
 
-        legacy = cleaned.replace(".", "::")
+        legacy = canonical_candidate.replace(".", "::")
         if legacy in agents_registry:
             return legacy
 
-        return canonical
+        return canonical_candidate
+
+    def _require_known_agent_name(self, agent_name: str, *, label: str = "agent") -> str:
+        normalized_agent_name = self._normalize_agent_name(agent_name)
+        if not normalized_agent_name or normalized_agent_name not in self._plugins.agents:
+            raise KeyError(f"Unknown {label} '{agent_name}'.")
+        return normalized_agent_name
 
     def list_skills(self) -> List[str]:
         return [skill.name for skill in self._skill_manager.list()]
@@ -609,7 +907,12 @@ class PocketCodeEngine:
         """Return known agent profile names, optionally filtered by target agent."""
         profiles = self._agent_profile_manager.list()
         if agent_name:
-            profiles = [profile for profile in profiles if profile.agent == agent_name]
+            normalized_agent_name = self._normalize_agent_name(agent_name)
+            profiles = [
+                profile
+                for profile in profiles
+                if self._normalize_agent_name(profile.agent) == normalized_agent_name
+            ]
         return sorted({p.name for p in profiles})
 
     def list_available_agents(self, flow_name: Optional[str] = None) -> List[str]:
@@ -756,8 +1059,9 @@ class PocketCodeEngine:
             raw_overrides = dict(tool_confirmation_overrides)
 
         normalized_overrides = {
-            str(tool_name): normalized
+            tool_key: normalized
             for tool_name, policy in raw_overrides.items()
+            if (tool_key := self._normalize_tool_key_for_persistence(tool_name))
             if (normalized := self._normalize_confirmation_policy(policy)) is not None
         }
         if normalized_overrides:
@@ -773,8 +1077,8 @@ class PocketCodeEngine:
                 if skills is not _UNSET
                 else (list(profile.skills) if profile.skills is not None else None)
             ),
-            tools=list(tools) if tools is not None else None,
-            extra_prompts=list(extra_prompts),
+            tools=self._normalize_tool_list(tools) if tools is not None else None,
+            extra_prompts=self._normalize_prompt_sources(extra_prompts),
             tool_confirmation=confirmation,
         )
         self._agent_profile_manager.save(updated)
@@ -912,17 +1216,16 @@ class PocketCodeEngine:
         apply_active_profile: bool = False,
     ) -> List[str]:
         """Return tool names for an agent, optionally filtered by the active profile."""
-        if agent_name not in self._plugins.agents:
-            raise KeyError(f"Unknown agent '{agent_name}'.")
-        if not apply_active_profile and agent_name in self._agent_tools_cache:
-            return list(self._agent_tools_cache[agent_name])
+        normalized_agent_name = self._require_known_agent_name(agent_name)
+        if not apply_active_profile and normalized_agent_name in self._agent_tools_cache:
+            return list(self._agent_tools_cache[normalized_agent_name])
 
-        tool_names = list(self._plugins.resolve_tools_for_agent(agent_name))
+        tool_names = list(self._plugins.resolve_tools_for_agent(normalized_agent_name))
         if apply_active_profile:
             active_profile = self.active_agent_profile
             if (
                 active_profile is not None
-                and active_profile.agent == agent_name
+                and self._normalize_agent_name(active_profile.agent) == normalized_agent_name
                 and active_profile.tools is not None
             ):
                 tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
@@ -934,7 +1237,7 @@ class PocketCodeEngine:
                     tool_names.append(tool_name)
         sorted_tool_names = sorted(tool_names)
         if not apply_active_profile:
-            self._agent_tools_cache[agent_name] = list(sorted_tool_names)
+            self._agent_tools_cache[normalized_agent_name] = list(sorted_tool_names)
         return sorted_tool_names
 
     def list_tools_for_flow(
@@ -957,16 +1260,17 @@ class PocketCodeEngine:
                 "profiles": [],
                 "tools": [],
             }
-        definition = self._plugins.agents.get(target)
+        normalized_target = self._require_known_agent_name(target)
+        definition = self._plugins.agents.get(normalized_target)
         if definition is None:
             raise KeyError(f"Unknown agent '{target}'.")
         return {
-            "name": target,
+            "name": normalized_target,
             "description": definition.description,
             "execution_mode": definition.execution_mode,
             "prompt_sources": list(definition.prompt_sources),
-            "profiles": self.list_agent_profiles(target),
-            "tools": self.list_tools_for_agent(target),
+            "profiles": self.list_agent_profiles(normalized_target),
+            "tools": self.list_tools_for_agent(normalized_target),
         }
 
     def describe_flow(self, flow_name: Optional[str] = None) -> Dict[str, Any]:
@@ -977,7 +1281,8 @@ class PocketCodeEngine:
         target = agent_name or self.current_agent
         if not target:
             return []
-        definition = self._plugins.agents.get(target)
+        normalized_target = self._require_known_agent_name(target)
+        definition = self._plugins.agents.get(normalized_target)
         if definition is None:
             raise KeyError(f"Unknown agent '{target}'.")
         return list(definition.prompt_sources)
@@ -991,19 +1296,22 @@ class PocketCodeEngine:
         self.active_agent_profile = self._apply_session_profile_overrides(profile)
 
     def _get_default_profile_for(self, agent_name: str) -> Any:
-        defn = self._plugins.agents.get(agent_name)
+        normalized_agent_name = self._normalize_agent_name(agent_name)
+        if not normalized_agent_name:
+            return None
+        defn = self._plugins.agents.get(normalized_agent_name)
         if defn is None:
             return None
         explicit = getattr(defn, "default_agent_profile", None)
         if explicit is not None:
             default_name = explicit.name
         else:
-            default_name = agent_name  # synthesised profile is named after the agent
+            default_name = normalized_agent_name  # synthesised profile is named after the agent
         profile = self._base_agent_profile(default_name)
         if profile is None:
             # Fall back to any profile whose agent field matches.
             for p in self._agent_profile_manager.list():
-                if p.agent == agent_name:
+                if self._normalize_agent_name(p.agent) == normalized_agent_name:
                     profile = p
                     break
         return profile
@@ -1016,15 +1324,14 @@ class PocketCodeEngine:
         self.global_llm_override = profile_name
 
     def set_agent_llm_override(self, agent_name: str, profile_name: Optional[str]) -> None:
-        if agent_name not in self._plugins.agents:
-            raise KeyError(f"Unknown agent '{agent_name}'.")
+        normalized_agent_name = self._require_known_agent_name(agent_name)
 
         if not profile_name:
-            self.agent_llm_overrides.pop(agent_name, None)
+            self.agent_llm_overrides.pop(normalized_agent_name, None)
             return
 
         self._llm_router.resolve_profile_config(profile_name)
-        self.agent_llm_overrides[agent_name] = profile_name
+        self.agent_llm_overrides[normalized_agent_name] = profile_name
 
     def set_flow_llm_override(self, flow_name: str, profile_name: Optional[str]) -> None:
         self.set_agent_llm_override(flow_name, profile_name)
@@ -1035,12 +1342,10 @@ class PocketCodeEngine:
         target_agent: str,
         profile_name: Optional[str],
     ) -> None:
-        if source_agent not in self._plugins.agents:
-            raise KeyError(f"Unknown source agent '{source_agent}'.")
-        if target_agent not in self._plugins.agents:
-            raise KeyError(f"Unknown target agent '{target_agent}'.")
+        normalized_source_agent = self._require_known_agent_name(source_agent, label="source agent")
+        normalized_target_agent = self._require_known_agent_name(target_agent, label="target agent")
 
-        handoff_key = f"{source_agent}->{target_agent}"
+        handoff_key = f"{normalized_source_agent}->{normalized_target_agent}"
 
         if not profile_name:
             self.handoff_llm_overrides.pop(handoff_key, None)
@@ -1050,11 +1355,14 @@ class PocketCodeEngine:
         self.handoff_llm_overrides[handoff_key] = str(profile_name)
 
     def describe_tools_for_agent(self, agent_name: str) -> List[Dict[str, Any]]:
-        if agent_name not in self._plugins.agents:
-            raise KeyError(f"Unknown agent '{agent_name}'.")
-        tool_names = self._plugins.resolve_tools_for_agent(agent_name)
+        normalized_agent_name = self._require_known_agent_name(agent_name)
+        tool_names = self._plugins.resolve_tools_for_agent(normalized_agent_name)
         active_profile = self.active_agent_profile
-        if active_profile is not None and active_profile.agent == agent_name and active_profile.tools is not None:
+        if (
+            active_profile is not None
+            and self._normalize_agent_name(active_profile.agent) == normalized_agent_name
+            and active_profile.tools is not None
+        ):
             tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
         for tool_name in self._active_skill_existing_tool_refs():
             if tool_name not in tool_names:
@@ -1359,51 +1667,10 @@ class PocketCodeEngine:
         self.session_confirmation_overrides["default_policy"] = self._normalize_confirmation_policy(policy)
 
     def set_session_tool_confirmation(self, tool_name: str, policy: Optional[str]) -> None:
-        self._set_policy_entry(self.session_confirmation_overrides["tool_policies"], tool_name, policy)
+        self._set_policy_entry(self.session_confirmation_overrides["tool_policies"], tool_name, policy, kind="tool")
 
     def replace_session_confirmation_overrides(self, overrides: Dict[str, Any]) -> None:
-        normalized = {
-            "default_policy": self._normalize_confirmation_policy(overrides.get("default_policy"))
-            if overrides.get("default_policy") is not None
-            else None,
-            "tool_policies": {},
-            "agent_policies": {},
-        }
-
-        raw_tool_policies = overrides.get("tool_policies", {})
-        if isinstance(raw_tool_policies, dict):
-            for tool_name, policy in raw_tool_policies.items():
-                try:
-                    normalized_policy = self._normalize_confirmation_policy(policy)
-                except ValueError:
-                    continue
-                if normalized_policy is not None:
-                    normalized["tool_policies"][str(tool_name)] = normalized_policy
-
-        raw_agent_policies = overrides.get("agent_policies", {})
-        if isinstance(raw_agent_policies, dict):
-            for agent_name, raw_policy in raw_agent_policies.items():
-                if not isinstance(raw_policy, dict):
-                    continue
-                entry = {"default_policy": None, "tool_policies": {}}
-                if raw_policy.get("default_policy") is not None:
-                    try:
-                        entry["default_policy"] = self._normalize_confirmation_policy(raw_policy.get("default_policy"))
-                    except ValueError:
-                        entry["default_policy"] = None
-                raw_entry_tools = raw_policy.get("tool_policies", {})
-                if isinstance(raw_entry_tools, dict):
-                    for tool_name, policy in raw_entry_tools.items():
-                        try:
-                            normalized_policy = self._normalize_confirmation_policy(policy)
-                        except ValueError:
-                            continue
-                        if normalized_policy is not None:
-                            entry["tool_policies"][str(tool_name)] = normalized_policy
-                if entry["default_policy"] is not None or entry["tool_policies"]:
-                    normalized["agent_policies"][str(agent_name)] = entry
-
-        self.session_confirmation_overrides = normalized
+        self.session_confirmation_overrides = self._normalize_session_confirmation_overrides(overrides)
         self._update_active_session_snapshot()
 
     def set_persistent_tool_confirmation(self, tool_name: str, policy: Optional[str]) -> Path:
@@ -1419,7 +1686,7 @@ class PocketCodeEngine:
         if not isinstance(tool_policies, dict):
             tool_policies = {}
             confirmation_section["tool_policies"] = tool_policies
-        self._set_policy_entry(tool_policies, tool_name, policy)
+        self._set_policy_entry(tool_policies, tool_name, policy, kind="tool")
         self._runtime_config = runtime_section
         self._tool_confirmation_config = self._build_tool_confirmation_config()
         self._refresh_runtime_components()
@@ -1436,7 +1703,7 @@ class PocketCodeEngine:
 
     def set_session_agent_tool_confirmation(self, agent_name: str, tool_name: str, policy: Optional[str]) -> None:
         agent_entry = self._get_or_create_session_agent_entry(agent_name)
-        self._set_policy_entry(agent_entry.setdefault("tool_policies", {}), tool_name, policy)
+        self._set_policy_entry(agent_entry.setdefault("tool_policies", {}), tool_name, policy, kind="tool")
         self._cleanup_session_agent_entry(agent_name)
 
     def clear_session_confirmation_overrides(self) -> None:
@@ -1454,8 +1721,9 @@ class PocketCodeEngine:
         current_tools = None if effective_profile is None else self._normalize_tool_list(effective_profile.tools)
         if current_tools is None:
             return effective_profile
-        if tool_name not in current_tools:
-            self.set_last_used_profile_tools(profile_name, current_tools + [tool_name])
+        normalized_tool_name = self._normalize_tool_key_for_persistence(tool_name)
+        if normalized_tool_name not in current_tools:
+            self.set_last_used_profile_tools(profile_name, current_tools + [normalized_tool_name])
         return self.get_agent_profile(profile_name)
 
     def _restore_saved_session(self, record: Any) -> None:
@@ -1663,19 +1931,29 @@ class PocketCodeEngine:
             return normalized
         raise ValueError(f"Invalid confirmation policy '{policy}'. Use allow|confirm|deny.")
 
-    def _set_policy_entry(self, store: Dict[str, Any], key: str, policy: Optional[str]) -> None:
+    def _set_policy_entry(self, store: Dict[str, Any], key: str, policy: Optional[str], *, kind: str = "tool") -> None:
+        normalized_key = (
+            self._normalize_tool_key_for_persistence(key)
+            if kind == "tool"
+            else self._normalize_agent_key_for_persistence(key)
+        )
+        if not normalized_key:
+            return
         normalized = self._normalize_confirmation_policy(policy)
         if normalized is None:
-            store.pop(key, None)
+            store.pop(normalized_key, None)
         else:
-            store[key] = normalized
+            store[normalized_key] = normalized
 
     def _get_or_create_session_agent_entry(self, agent_name: str) -> Dict[str, Any]:
         agent_policies = self.session_confirmation_overrides.setdefault("agent_policies", {})
-        entry = agent_policies.get(agent_name)
+        normalized_agent_name = self._normalize_agent_key_for_persistence(agent_name)
+        if not normalized_agent_name:
+            return {"tool_policies": {}}
+        entry = agent_policies.get(normalized_agent_name)
         if not isinstance(entry, dict):
             entry = {"tool_policies": {}}
-            agent_policies[agent_name] = entry
+            agent_policies[normalized_agent_name] = entry
         entry.setdefault("tool_policies", {})
         return entry
 
@@ -1683,7 +1961,10 @@ class PocketCodeEngine:
         agent_policies = self.session_confirmation_overrides.get("agent_policies", {})
         if not isinstance(agent_policies, dict):
             return
-        entry = agent_policies.get(agent_name)
+        normalized_agent_name = self._normalize_agent_key_for_persistence(agent_name)
+        if not normalized_agent_name:
+            return
+        entry = agent_policies.get(normalized_agent_name)
         if not isinstance(entry, dict):
             return
         tool_policies = entry.get("tool_policies", {})
@@ -1693,30 +1974,60 @@ class PocketCodeEngine:
 
         has_default = "default_policy" in entry and entry.get("default_policy") is not None
         if not has_default and not tool_policies:
-            agent_policies.pop(agent_name, None)
+            agent_policies.pop(normalized_agent_name, None)
 
-    def _copy_session_confirmation_overrides(self) -> Dict[str, Any]:
-        source = self.session_confirmation_overrides
-        copied_agent_policies: Dict[str, Any] = {}
+    def _normalize_session_confirmation_overrides(self, overrides: Any) -> Dict[str, Any]:
+        source = overrides if isinstance(overrides, dict) else {}
+        normalized = {
+            "default_policy": self._normalize_confirmation_policy(source.get("default_policy"))
+            if source.get("default_policy") is not None
+            else None,
+            "tool_policies": {},
+            "agent_policies": {},
+        }
+
+        raw_tool_policies = source.get("tool_policies", {})
+        if isinstance(raw_tool_policies, dict):
+            for tool_name, policy in raw_tool_policies.items():
+                try:
+                    normalized_policy = self._normalize_confirmation_policy(policy)
+                except ValueError:
+                    continue
+                normalized_tool_name = self._normalize_tool_key_for_persistence(tool_name)
+                if normalized_policy is not None and normalized_tool_name:
+                    normalized["tool_policies"][normalized_tool_name] = normalized_policy
+
         raw_agent_policies = source.get("agent_policies", {})
         if isinstance(raw_agent_policies, dict):
             for agent_name, entry in raw_agent_policies.items():
                 if not isinstance(entry, dict):
                     continue
-                copied_agent_policies[agent_name] = {
-                    "default_policy": entry.get("default_policy"),
-                    "tool_policies": dict(entry.get("tool_policies", {}))
-                    if isinstance(entry.get("tool_policies", {}), dict)
-                    else {},
-                }
+                normalized_agent_name = self._normalize_agent_key_for_persistence(agent_name)
+                if not normalized_agent_name:
+                    continue
+                normalized_entry = {"default_policy": None, "tool_policies": {}}
+                if entry.get("default_policy") is not None:
+                    try:
+                        normalized_entry["default_policy"] = self._normalize_confirmation_policy(entry.get("default_policy"))
+                    except ValueError:
+                        normalized_entry["default_policy"] = None
+                raw_entry_tools = entry.get("tool_policies", {})
+                if isinstance(raw_entry_tools, dict):
+                    for tool_name, policy in raw_entry_tools.items():
+                        try:
+                            normalized_policy = self._normalize_confirmation_policy(policy)
+                        except ValueError:
+                            continue
+                        normalized_tool_name = self._normalize_tool_key_for_persistence(tool_name)
+                        if normalized_policy is not None and normalized_tool_name:
+                            normalized_entry["tool_policies"][normalized_tool_name] = normalized_policy
+                if normalized_entry["default_policy"] is not None or normalized_entry["tool_policies"]:
+                    normalized["agent_policies"][normalized_agent_name] = normalized_entry
 
-        return {
-            "default_policy": source.get("default_policy"),
-            "tool_policies": dict(source.get("tool_policies", {}))
-            if isinstance(source.get("tool_policies", {}), dict)
-            else {},
-            "agent_policies": copied_agent_policies,
-        }
+        return normalized
+
+    def _copy_session_confirmation_overrides(self) -> Dict[str, Any]:
+        return self._normalize_session_confirmation_overrides(self.session_confirmation_overrides)
 
     def _copy_session_profile_overrides(self) -> Dict[str, Any]:
         copied: Dict[str, Any] = {}
@@ -1775,14 +2086,14 @@ class PocketCodeEngine:
         if not active_mode and current_active_mode is not None:
             active_mode = current_active_mode.name
         return {
-            "active_agent": source.get("active_agent") or self.current_agent,
+            "active_agent": self._normalize_agent_key_for_persistence(source.get("active_agent") or self.current_agent),
             "active_profile": getattr(active_profile, "name", None),
             "active_mode": active_mode,
             "enabled_skills": skill_names,
             "global_llm_profile": source.get("cli_llm_override") or self.global_llm_override,
             "session_global_skills_override": list(getattr(self, "session_global_skills_override", None) or []),
             "session_profile_overrides": self._copy_session_profile_overrides(),
-            "session_confirmation_overrides": dict(
+            "session_confirmation_overrides": self._normalize_session_confirmation_overrides(
                 source.get("session_tool_confirmation")
                 if isinstance(source.get("session_tool_confirmation"), dict)
                 else self._copy_session_confirmation_overrides()
@@ -2265,7 +2576,7 @@ class PocketCodeEngine:
             return None
         normalized: list[str] = []
         for raw_name in tools:
-            tool_name = str(raw_name).strip()
+            tool_name = self._normalize_tool_key_for_persistence(raw_name)
             if tool_name and tool_name not in normalized:
                 normalized.append(tool_name)
         return sorted(normalized)
@@ -2275,13 +2586,34 @@ class PocketCodeEngine:
             return {}
         normalized: Dict[str, str] = {}
         for tool_name, policy in overrides.items():
-            tool_key = str(tool_name).strip()
+            tool_key = self._normalize_tool_key_for_persistence(tool_name)
             if not tool_key:
                 continue
             normalized_policy = self._normalize_confirmation_policy(policy)
             if normalized_policy is not None:
                 normalized[tool_key] = normalized_policy
         return normalized
+
+    def _normalize_prompt_sources(self, prompt_refs: List[str]) -> List[str]:
+        normalized: list[str] = []
+        for prompt_ref in prompt_refs or []:
+            candidate = normalize_prompt_source(str(prompt_ref))
+            if candidate and candidate not in normalized:
+                normalized.append(candidate)
+        return normalized
+
+    def _normalize_tool_key_for_persistence(self, tool_name: Any) -> str:
+        cleaned = str(tool_name or "").strip()
+        if not cleaned:
+            return ""
+        try:
+            return normalize_registry_reference(cleaned, allowed_kinds={"tool"})
+        except ValueError:
+            return cleaned.replace("::", ".")
+
+    def _normalize_agent_key_for_persistence(self, agent_name: Any) -> str:
+        normalized = self._normalize_agent_name(agent_name)
+        return str(normalized).strip() if normalized else ""
 
     def _base_agent_profile(self, name: str) -> Any:
         manager = getattr(self, "_agent_profile_manager", None)

@@ -21,7 +21,7 @@ Rules for maintaining documentation:
 
 The registry's canonical qualified form is `plugin.resource`.
 
-The runtime also accepts `plugin::resource` in user-facing configuration, manifests, and commands, then normalizes it to `plugin.resource` internally. This documentation uses `plugin.resource` when describing registry behavior and may show `plugin::resource` where that matches the current user-facing examples.
+The runtime also accepts `plugin::resource` in user-facing configuration, manifests, and commands, then normalizes it to `plugin.resource` internally. Registry-backed surfaces also accept typed references such as `tool:core.read_file`, `flow:core.react`, `agent:core.react`, and `prompt:resource_root.pocketcode.review`. This documentation uses `plugin.resource` when describing registry behavior and may show legacy or typed forms where that matches the current user-facing surface.
 
 ## Documentation Map
 

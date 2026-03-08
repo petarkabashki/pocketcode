@@ -114,6 +114,59 @@ class TestPluginManagerRuntimeLoading:
         manager.load()
 
         assert manager.prompts.resolve("workspace.shared") == "Shared workspace prompt.\n"
+        assert manager.prompts.resolve("resource_root.pocketcode.shared") == "Shared workspace prompt.\n"
+
+    def test_additional_resource_root_prompts_and_tools_are_loaded(self, tmp_path):
+        _write(tmp_path / ".pocketflow" / "prompts" / "review.md", "Flow review prompt.\n")
+        _write(
+            tmp_path / ".pocketflow" / "tools" / "extras.py",
+            "def pocketflow_tool():\n"
+            "    return {'success': True, 'source': 'pocketflow'}\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.prompts.resolve("resource_root.pocketflow.review") == "Flow review prompt.\n"
+        assert manager.tools.resolve("resource_root.pocketflow.pocketflow_tool")() == {
+            "success": True,
+            "source": "pocketflow",
+        }
+
+    def test_plugins_inside_additional_resource_root_are_auto_discovered(self, tmp_path):
+        plugin_root = tmp_path / ".pocketflow" / "plugins" / "flowplug"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: flowplug",
+                    'description: "resource-root plugin"',
+                    "flows:",
+                    "  planner:",
+                    '    module: "flows/planner.py"',
+                    '    entry_fn: "create_flow"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.py",
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert "flowplug.planner" in manager.agents
 
     def test_workspace_ignore_rules_filter_and_reinclude_workspace_resources(self, tmp_path):
         _write(
@@ -188,6 +241,44 @@ class TestPluginManagerRuntimeLoading:
         manager.load()
 
         assert manager.agents.resolve("workspacepromptplug.planner").system_prompt == "Use the shared workspace instructions."
+
+    def test_prompt_resource_refs_are_available_to_plugin_agents(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "promptrefplug"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: promptrefplug",
+                    'description: "prompt resource ref test"',
+                    "flows:",
+                    "  planner:",
+                    '    module: "flows/planner.py"',
+                    '    entry_fn: "create_flow"',
+                    "    prompt_files:",
+                    '      - "prompt:resource_root.pocketcode.shared"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.py",
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n",
+        )
+        _write(tmp_path / ".pocketcode" / "prompts" / "shared.md", "Prompt ref instructions.\n")
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.agents.resolve("promptrefplug.planner").system_prompt == "Prompt ref instructions."
 
     def test_dot_pocketcode_ignore_applies_to_workspace_plugin_resources(self, tmp_path):
         plugin_root = tmp_path / ".pocketcode" / "plugins" / "workspaceignore"
@@ -274,6 +365,137 @@ class TestPluginManagerRuntimeLoading:
             "result": "hello",
         }
         assert "workspace.workspace_echo" in manager.resolve_tools_for_agent("workspaceplug::planner")
+        assert "workspace.workspace_echo" in manager.resolve_tools_for_agent("flow:workspaceplug.planner")
+
+    def test_typed_tool_refs_in_flow_manifest_resolve(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "typedtoolplug"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: typedtoolplug",
+                    'description: "typed tool ref test"',
+                    "tools:",
+                    '  planner_tool: "tools/planner_tool.py:planner_tool"',
+                    "flows:",
+                    "  planner:",
+                    '    module: "flows/planner.py"',
+                    '    entry_fn: "create_flow"',
+                    "    tools:",
+                    '      - "tool:planner_tool"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.py",
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n",
+        )
+        _write(
+            plugin_root / "tools" / "planner_tool.py",
+            "def planner_tool():\n"
+            "    return {'success': True}\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.resolve_tools_for_agent("flow:typedtoolplug.planner") == ["typedtoolplug.planner_tool"]
+        assert manager.agents.resolve("typedtoolplug.planner").tools == ["typedtoolplug.planner_tool"]
+
+    def test_invalid_handoff_agents_are_dropped_after_load(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "handoffplug"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: handoffplug",
+                    'description: "handoff validation test"',
+                    "flows:",
+                    "  planner:",
+                    '    module: "flows/planner.py"',
+                    '    entry_fn: "create_flow"',
+                    "    handoff_agents:",
+                    '      - "missing"',
+                    '      - "router"',
+                    "  router:",
+                    '    module: "flows/router.py"',
+                    '    entry_fn: "create_flow"',
+                ]
+            ),
+        )
+        planner_flow = (
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n"
+        )
+        _write(plugin_root / "flows" / "planner.py", planner_flow)
+        _write(plugin_root / "flows" / "router.py", planner_flow)
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.agents.resolve("handoffplug.planner").handoff_agents == ["handoffplug.router"]
+
+    def test_invalid_default_agent_prompt_refs_are_dropped_after_load(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "defaultpromptplug"
+        _write(tmp_path / ".pocketcode" / "prompts" / "keep.md", "Keep prompt.\n")
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: defaultpromptplug",
+                    'description: "default prompt validation test"',
+                    "flows:",
+                    "  planner:",
+                    '    module: "flows/planner.py"',
+                    '    entry_fn: "create_flow"',
+                    "    default_agent:",
+                    '      name: "defaultpromptplug::planner"',
+                    "      extra_prompts:",
+                    '        - "prompt:resource_root.pocketcode.missing"',
+                    '        - "prompt:resource_root.pocketcode.keep"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.py",
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        default_agent = manager.agents.resolve("defaultpromptplug.planner").default_agent_profile
+        assert default_agent is not None
+        assert default_agent.extra_prompts == ["prompt:resource_root.pocketcode.keep"]
 
     def test_workspace_tools_support_explicit_tool_exports(self, tmp_path):
         plugin_root = tmp_path / "plugins" / "workspaceexports"

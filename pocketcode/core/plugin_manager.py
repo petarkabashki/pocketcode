@@ -14,8 +14,21 @@ import yaml
 from pocketcode.core.interfaces import BaseTool, Plugin, PluginContext
 from pocketcode.core.manifest_loader import load_manifest
 from pocketcode.core.namespace_registry import NamespaceRegistry, RegistryError, RegistryHolder
-from pocketcode.core.prompt_loader import coerce_str_list, resolve_prompt_bundle
+from pocketcode.core.prompt_loader import (
+    coerce_str_list,
+    is_prompt_reference,
+    resolve_prompt_bundle,
+    resolve_prompt_reference,
+)
 from pocketcode.core.discovery_rules import DiscoveryFilter
+from pocketcode.core.resource_roots import (
+    ResourceRoot,
+    discover_resource_roots,
+    is_default_resource_root,
+    primary_resource_root,
+    resource_root_for_path,
+    resource_root_namespace,
+)
 from pocketcode.core.runtime_models import Agent, FlowDefinition
 
 logger = logging.getLogger(__name__)
@@ -27,7 +40,8 @@ class PluginManager:
     def __init__(self, config: Dict[str, Any], workspace_root: str | Path):
         self._config = config
         self._workspace_root = Path(workspace_root).resolve()
-        self._workspace_pocketcode_root = self._workspace_root / ".pocketcode"
+        self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
 
         self.tools: NamespaceRegistry[Any] = NamespaceRegistry()
         self.flows: NamespaceRegistry[FlowDefinition] = NamespaceRegistry()
@@ -38,10 +52,7 @@ class PluginManager:
         self.plugins: Dict[str, Plugin] = {}
         self._holder: RegistryHolder = RegistryHolder()
         self._dynamic_module_names: set[str] = set()
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
+        self._resource_root_filters: Dict[Path, DiscoveryFilter] = self._build_resource_root_filters()
         self._global_plugin_filter = DiscoveryFilter.from_root(
             self._workspace_root,
             ignore_dir=self._workspace_root,
@@ -50,6 +61,10 @@ class PluginManager:
     @property
     def workspace_root(self) -> Path:
         return self._workspace_root
+
+    @property
+    def resource_roots(self) -> list[ResourceRoot]:
+        return list(self._resource_roots)
 
     def clear(self) -> None:
         self._unload_dynamic_modules()
@@ -60,10 +75,9 @@ class PluginManager:
         self.llm_profiles.clear()
         self.plugin_roots.clear()
         self.plugins.clear()
-        self._workspace_filter = DiscoveryFilter.from_root(
-            self._workspace_pocketcode_root,
-            ignore_dir=self._workspace_pocketcode_root,
-        )
+        self._resource_roots = discover_resource_roots(self._workspace_root)
+        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
+        self._resource_root_filters = self._build_resource_root_filters()
         self._global_plugin_filter = DiscoveryFilter.from_root(
             self._workspace_root,
             ignore_dir=self._workspace_root,
@@ -71,6 +85,8 @@ class PluginManager:
 
     def load(self) -> None:
         self.clear()
+
+        self._load_workspace_prompts_only()
 
         for plugin_root in self._iter_plugin_roots():
             try:
@@ -86,7 +102,8 @@ class PluginManager:
             except Exception as exc:
                 logger.error("Failed loading plugin at %s: %s", plugin_root, exc, exc_info=True)
 
-        self._load_workspace_resources()
+        self._load_workspace_tools_only()
+        self._validate_loaded_flow_references()
 
         logger.info(
             "Plugin load complete. plugins=%d, tools=%d, flows=%d, llm_profiles=%d",
@@ -177,7 +194,12 @@ class PluginManager:
         return self._execute_module_from_file(file_path, module_name)
 
     def resolve_tools_for_agent(self, agent_name: str) -> List[str]:
-        agent = self.flows.get(agent_name)
+        try:
+            normalized_agent_name = self.flows.qualify(agent_name)
+        except RegistryError:
+            return []
+
+        agent = self.flows.get(normalized_agent_name)
         if not agent:
             return []
 
@@ -191,26 +213,27 @@ class PluginManager:
             if tool_ref == "*":
                 return self.tools.list_all()
 
-            # Normalise :: delimiter so manifests can use either "plugin::tool"
-            # or "plugin.tool" — the registry stores as "plugin.tool".
-            tool_ref = tool_ref.replace("::", ".")
+            tool_ref = self.tools._normalize_ref(tool_ref)
 
             # Determine the qualified name for this tool reference
             if "." in tool_ref:
-                qname = tool_ref  # already qualified
+                if tool_ref not in self.tools:
+                    logger.warning("Agent '%s' references unknown tool '%s'.", normalized_agent_name, tool_ref)
+                    continue
+                qname = tool_ref
             elif context_plugin and self.tools.has_local(context_plugin, tool_ref):
                 qname = f"{context_plugin}.{tool_ref}"  # local plugin owns it
             else:
                 owners = self.tools.owners_for(tool_ref)
                 if not owners:
-                    logger.warning("Agent '%s' references unknown tool '%s'.", agent_name, tool_ref)
+                    logger.warning("Agent '%s' references unknown tool '%s'.", normalized_agent_name, tool_ref)
                     continue
                 qname = owners[0]
                 if len(owners) > 1:
                     logger.warning(
                         "Ambiguous tool '%s' for agent '%s': owned by %s. Using '%s'.",
                         tool_ref,
-                        agent_name,
+                        normalized_agent_name,
                         ", ".join(f"'{o}'" for o in owners),
                         qname,
                     )
@@ -228,6 +251,8 @@ class PluginManager:
         built_in_plugins_root = Path(__file__).resolve().parent.parent / "plugins"
 
         candidate_roots: List[Path] = [built_in_plugins_root]
+        for resource_root in self._resource_roots:
+            candidate_roots.append(resource_root.path / "plugins")
         runtime_paths = (
             self._config.get("runtime", {}).get("plugin_paths", [])
             if isinstance(self._config, dict)
@@ -300,44 +325,47 @@ class PluginManager:
                         legacy_key,
                     )
 
-    def _load_workspace_resources(self) -> None:
-        if not self._workspace_pocketcode_root.is_dir():
-            return
-        self._load_workspace_prompts(self._workspace_pocketcode_root / "prompts")
-        self._load_workspace_tools(self._workspace_pocketcode_root / "tools")
+    def _load_workspace_prompts_only(self) -> None:
+        for resource_root in self._resource_roots:
+            self._load_workspace_prompts(resource_root, resource_root.path / "prompts")
 
-    def _load_workspace_prompts(self, prompts_root: Path) -> None:
+    def _load_workspace_tools_only(self) -> None:
+        for resource_root in self._resource_roots:
+            self._load_workspace_tools(resource_root, resource_root.path / "tools")
+
+    def _load_workspace_prompts(self, resource_root: ResourceRoot, prompts_root: Path) -> None:
         if not prompts_root.is_dir():
             return
 
         for prompt_path in sorted(path for path in prompts_root.rglob("*") if path.is_file()):
-            if self._workspace_filter.ignores(prompt_path, is_dir=False):
+            resource_filter = self._resource_root_filter(resource_root)
+            if resource_filter.ignores(prompt_path, is_dir=False):
                 continue
             prompt_name = self._workspace_resource_name(prompts_root, prompt_path)
             if not prompt_name:
                 continue
-            try:
-                self.prompts.register(
-                    WORKSPACE_NAMESPACE,
-                    prompt_name,
-                    prompt_path.read_text(encoding="utf-8"),
-                )
-            except RegistryError as exc:
-                logger.warning(
-                    "Workspace prompt '%s' at '%s' collides with an existing registration: %s",
-                    prompt_name,
-                    prompt_path,
-                    exc,
-                )
+            prompt_text = prompt_path.read_text(encoding="utf-8")
+            for namespace in self._resource_root_namespaces(resource_root):
+                try:
+                    self.prompts.register(namespace, prompt_name, prompt_text)
+                except RegistryError as exc:
+                    logger.warning(
+                        "Resource-root prompt '%s' at '%s' collides with an existing registration in '%s': %s",
+                        prompt_name,
+                        prompt_path,
+                        namespace,
+                        exc,
+                    )
 
-    def _load_workspace_tools(self, tools_root: Path) -> None:
+    def _load_workspace_tools(self, resource_root: ResourceRoot, tools_root: Path) -> None:
         if not tools_root.is_dir():
             return
 
         for tool_file in sorted(tools_root.rglob("*.py")):
             if tool_file.name == "__init__.py":
                 continue
-            if self._workspace_filter.ignores(tool_file, is_dir=False):
+            resource_filter = self._resource_root_filter(resource_root)
+            if resource_filter.ignores(tool_file, is_dir=False):
                 continue
             try:
                 module = self._load_module_from_file(tool_file)
@@ -348,20 +376,153 @@ class PluginManager:
             found_any = False
             for tool_name, tool_impl in self._iter_workspace_tool_exports(module):
                 found_any = True
-                try:
-                    self.tools.register(WORKSPACE_NAMESPACE, tool_name, tool_impl)
-                except RegistryError as exc:
-                    logger.warning(
-                        "Workspace tool '%s' from '%s' collides with an existing registration: %s",
-                        tool_name,
-                        tool_file,
-                        exc,
-                    )
+                for namespace in self._resource_root_namespaces(resource_root):
+                    try:
+                        self.tools.register(namespace, tool_name, tool_impl)
+                    except RegistryError as exc:
+                        logger.warning(
+                            "Resource-root tool '%s' from '%s' collides with an existing registration in '%s': %s",
+                            tool_name,
+                            tool_file,
+                            namespace,
+                            exc,
+                        )
             if not found_any:
                 logger.warning(
                     "Workspace tool module '%s' defines no public tool exports. Skipping.",
                     tool_file,
                 )
+
+    def _validate_loaded_flow_references(self) -> None:
+        for qualified_flow_name, flow_def in self.flows.items():
+            context_plugin = (flow_def.metadata or {}).get("plugin")
+            flow_def.tools = self._qualify_existing_tool_refs(
+                flow_def.tools,
+                owner_name=qualified_flow_name,
+                field_name="tools",
+                context_plugin=context_plugin,
+            )
+            flow_def.handoff_agents = self._qualify_existing_flow_refs(
+                flow_def.handoff_agents,
+                owner_name=qualified_flow_name,
+                field_name="handoff_agents",
+                context_plugin=context_plugin,
+            )
+            flow_def.composite_agents = self._qualify_existing_flow_refs(
+                flow_def.composite_agents,
+                owner_name=qualified_flow_name,
+                field_name="composite_agents",
+                context_plugin=context_plugin,
+            )
+
+            default_agent = flow_def.default_agent_profile
+            if default_agent is None:
+                continue
+            if default_agent.tools is not None:
+                default_agent.tools = self._qualify_existing_tool_refs(
+                    default_agent.tools,
+                    owner_name=f"{qualified_flow_name}.default_agent",
+                    field_name="tools",
+                    context_plugin=context_plugin,
+                )
+            default_agent.extra_prompts = self._filter_existing_prompt_refs(
+                default_agent.extra_prompts,
+                owner_name=f"{qualified_flow_name}.default_agent",
+                field_name="extra_prompts",
+                context_plugin=context_plugin,
+            )
+
+    def _qualify_existing_tool_refs(
+        self,
+        refs: List[str],
+        *,
+        owner_name: str,
+        field_name: str,
+        context_plugin: str | None,
+    ) -> List[str]:
+        qualified: List[str] = []
+        for ref in refs:
+            candidate = str(ref or "").strip()
+            if not candidate:
+                continue
+            if candidate == "*":
+                return ["*"]
+            try:
+                resolved = self.tools.qualify(candidate, context_plugin=context_plugin)
+            except RegistryError as exc:
+                logger.warning(
+                    "Flow '%s' has invalid %s ref '%s': %s. Skipping it.",
+                    owner_name,
+                    field_name,
+                    candidate,
+                    exc,
+                )
+                continue
+            if resolved not in qualified:
+                qualified.append(resolved)
+        return qualified
+
+    def _qualify_existing_flow_refs(
+        self,
+        refs: List[str],
+        *,
+        owner_name: str,
+        field_name: str,
+        context_plugin: str | None,
+    ) -> List[str]:
+        qualified: List[str] = []
+        for ref in refs:
+            candidate = str(ref or "").strip()
+            if not candidate:
+                continue
+            try:
+                resolved = self.flows.qualify(candidate, context_plugin=context_plugin)
+            except RegistryError as exc:
+                logger.warning(
+                    "Flow '%s' has invalid %s ref '%s': %s. Skipping it.",
+                    owner_name,
+                    field_name,
+                    candidate,
+                    exc,
+                )
+                continue
+            if resolved not in qualified:
+                qualified.append(resolved)
+        return qualified
+
+    def _filter_existing_prompt_refs(
+        self,
+        refs: List[str],
+        *,
+        owner_name: str,
+        field_name: str,
+        context_plugin: str | None,
+    ) -> List[str]:
+        filtered: List[str] = []
+        for ref in refs:
+            candidate = str(ref or "").strip()
+            if not candidate:
+                continue
+            if not is_prompt_reference(candidate):
+                filtered.append(candidate)
+                continue
+            try:
+                resolve_prompt_reference(
+                    candidate,
+                    prompt_registry=self.prompts,
+                    context_plugin=context_plugin,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Flow '%s' has invalid %s ref '%s': %s. Skipping it.",
+                    owner_name,
+                    field_name,
+                    candidate,
+                    exc,
+                )
+                continue
+            filtered.append(candidate)
+        return filtered
 
     def _workspace_resource_name(self, root: Path, path: Path) -> str:
         relative = path.resolve().relative_to(root.resolve())
@@ -680,6 +841,8 @@ class PluginManager:
             files_key="prompt_files",
             default_files=[f"prompts/flows/{flow_name}.md", f"prompts/agents/{flow_name}.md"],
             fallback_dirs=self._workspace_prompt_fallback_dirs(),
+            prompt_registry=self.prompts,
+            context_plugin=plugin_name,
         )
 
         pre_handlers = list(
@@ -855,9 +1018,11 @@ class PluginManager:
             return None
 
     def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
-        workspace_root = self._workspace_root
-        workspace_pocketcode = workspace_root / ".pocketcode"
-        return (workspace_root, workspace_pocketcode, workspace_pocketcode / "prompts")
+        fallback_dirs: list[Path] = [self._workspace_root]
+        for resource_root in self._resource_roots:
+            fallback_dirs.append(resource_root.path)
+            fallback_dirs.append(resource_root.path / "prompts")
+        return tuple(dict.fromkeys(fallback_dirs))
 
     def _reference_is_ignored(
         self,
@@ -907,15 +1072,20 @@ class PluginManager:
 
     def _plugin_root_is_ignored(self, plugin_root: Path) -> bool:
         resolved = plugin_root.resolve()
-        if self._is_under_workspace_pocketcode(resolved):
-            return self._workspace_filter.ignores(resolved, is_dir=True)
+        containing_root = resource_root_for_path(resolved, self._resource_roots)
+        if containing_root is not None:
+            return self._resource_root_filter(containing_root).ignores(resolved, is_dir=True)
         return self._global_plugin_filter.ignores_relative(Path(resolved.name), is_dir=True)
 
     def _plugin_resource_is_ignored(self, plugin_root: Path, resource_path: Path) -> bool:
         resolved_plugin_root = plugin_root.resolve()
         resolved_resource = resource_path.resolve()
-        if self._is_under_workspace_pocketcode(resolved_plugin_root):
-            return self._workspace_filter.ignores(resolved_resource, is_dir=resolved_resource.is_dir())
+        containing_root = resource_root_for_path(resolved_plugin_root, self._resource_roots)
+        if containing_root is not None:
+            return self._resource_root_filter(containing_root).ignores(
+                resolved_resource,
+                is_dir=resolved_resource.is_dir(),
+            )
         try:
             relative = resolved_resource.relative_to(resolved_plugin_root)
         except ValueError:
@@ -925,12 +1095,23 @@ class PluginManager:
             is_dir=resolved_resource.is_dir(),
         )
 
-    def _is_under_workspace_pocketcode(self, path: Path) -> bool:
-        try:
-            path.resolve().relative_to(self._workspace_pocketcode_root.resolve())
-        except ValueError:
-            return False
-        return True
+    def _build_resource_root_filters(self) -> Dict[Path, DiscoveryFilter]:
+        return {
+            resource_root.path.resolve(): DiscoveryFilter.from_root(
+                resource_root.path,
+                ignore_dir=resource_root.path,
+            )
+            for resource_root in self._resource_roots
+        }
+
+    def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
+        return self._resource_root_filters[resource_root.path.resolve()]
+
+    def _resource_root_namespaces(self, resource_root: ResourceRoot) -> tuple[str, ...]:
+        namespaces = [resource_root_namespace(resource_root)]
+        if is_default_resource_root(resource_root):
+            namespaces.append(WORKSPACE_NAMESPACE)
+        return tuple(namespaces)
 
     def _load_reference(self, reference: Any, plugin_root: Path) -> Any:
         if not isinstance(reference, str):

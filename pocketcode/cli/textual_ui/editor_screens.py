@@ -8,6 +8,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Select, Static, TextArea
 
+from pocketcode.core.reference_syntax import normalize_registry_reference
+
 from .shared import THEME_OPTIONS, UNSET_OPTION, WORKSPACE_VIEWS
 
 
@@ -18,7 +20,10 @@ def _normalize_agent_select_value(value: str | None, available_agents: Iterable[
         return UNSET_OPTION
     if clean_value in option_values:
         return clean_value
-    canonical_value = clean_value.replace("::", ".")
+    try:
+        canonical_value = normalize_registry_reference(clean_value, allowed_kinds={"agent", "flow"})
+    except ValueError:
+        canonical_value = clean_value.replace("::", ".")
     if canonical_value in option_values:
         return canonical_value
     return UNSET_OPTION

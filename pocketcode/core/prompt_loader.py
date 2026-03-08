@@ -4,7 +4,36 @@ import re
 from pathlib import Path
 from typing import Any, Iterable, List, Sequence, Tuple
 
-_INCLUDE_RE = re.compile(r"\{\{\s*include\s*:\s*([^}]+?)\s*\}\}")
+from pocketcode.core.reference_syntax import (
+    normalize_prompt_reference as normalize_prompt_reference_value,
+    parse_prompt_reference,
+)
+
+_INCLUDE_RE = re.compile(r"\{\{\s*(?:include|import)\s*:\s*([^}]+?)\s*\}\}")
+_PROMPT_REF_PREFIX = "prompt:"
+
+
+def is_prompt_reference(value: str) -> bool:
+    return isinstance(value, str) and value.strip().lower().startswith(_PROMPT_REF_PREFIX)
+
+
+def normalize_prompt_reference(prompt_ref: str) -> str:
+    return normalize_prompt_reference_value(prompt_ref)
+
+
+def resolve_prompt_reference(
+    prompt_ref: str,
+    *,
+    prompt_registry: Any,
+    context_plugin: str | None = None,
+) -> Tuple[str, List[str]]:
+    if prompt_registry is None:
+        raise ValueError(f"Prompt registry is required to resolve prompt reference '{prompt_ref}'.")
+
+    reference = parse_prompt_reference(prompt_ref)
+    qualified_ref = prompt_registry.qualify(reference.target, context_plugin=context_plugin)
+    prompt_text = prompt_registry.resolve(qualified_ref, context_plugin=context_plugin)
+    return str(prompt_text).strip(), [f"prompt:{qualified_ref}"]
 
 
 def _resolve_prompt_path(
@@ -48,10 +77,27 @@ def coerce_str_list(value: Any) -> List[str]:
 def load_prompt_markdown(
     base_dir: Path,
     prompt_file: str,
-    _stack: set[Path] | None = None,
+    _stack: set[str] | None = None,
     fallback_dirs: Sequence[Path] = (),
+    prompt_registry: Any | None = None,
+    context_plugin: str | None = None,
 ) -> Tuple[str, List[str]]:
     stack = _stack if _stack is not None else set()
+
+    if is_prompt_reference(prompt_file):
+        resolved_text, resolved_sources = resolve_prompt_reference(
+            prompt_file,
+            prompt_registry=prompt_registry,
+            context_plugin=context_plugin,
+        )
+        normalized_ref = normalize_prompt_reference(prompt_file)
+        stack_key = f"prompt:{normalized_ref}"
+        if stack_key in stack:
+            cycle = " -> ".join([*stack, stack_key])
+            raise ValueError(f"Prompt include cycle detected: {cycle}")
+        stack.add(stack_key)
+        stack.remove(stack_key)
+        return resolved_text, resolved_sources
 
     prompt_path = _resolve_prompt_path(
         base_dir=base_dir,
@@ -62,11 +108,12 @@ def load_prompt_markdown(
     if not prompt_path.is_file():
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
-    if prompt_path in stack:
-        cycle = " -> ".join([*map(str, stack), str(prompt_path)])
+    stack_key = f"file:{prompt_path}"
+    if stack_key in stack:
+        cycle = " -> ".join([*stack, stack_key])
         raise ValueError(f"Prompt include cycle detected: {cycle}")
 
-    stack.add(prompt_path)
+    stack.add(stack_key)
     text = prompt_path.read_text(encoding="utf-8")
     sources: List[str] = [str(prompt_path)]
 
@@ -77,12 +124,14 @@ def load_prompt_markdown(
             prompt_file=include_target,
             _stack=stack,
             fallback_dirs=fallback_dirs,
+            prompt_registry=prompt_registry,
+            context_plugin=context_plugin,
         )
         sources.extend(included_sources)
         return included_text
 
     expanded = _INCLUDE_RE.sub(_replace_include, text)
-    stack.remove(prompt_path)
+    stack.remove(stack_key)
 
     deduped_sources = list(dict.fromkeys(sources))
     return expanded.strip(), deduped_sources
@@ -97,6 +146,8 @@ def resolve_prompt_bundle(
     files_key: str = "prompt_files",
     default_files: Iterable[str] | None = None,
     fallback_dirs: Sequence[Path] = (),
+    prompt_registry: Any | None = None,
+    context_plugin: str | None = None,
 ) -> Tuple[str, List[str]]:
     sections: List[str] = []
     sources: List[str] = []
@@ -126,6 +177,8 @@ def resolve_prompt_bundle(
             base_dir=base_dir,
             prompt_file=prompt_file,
             fallback_dirs=fallback_dirs,
+            prompt_registry=prompt_registry,
+            context_plugin=context_plugin,
         )
         if loaded_text:
             sections.append(loaded_text)

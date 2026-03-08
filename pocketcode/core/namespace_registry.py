@@ -6,6 +6,8 @@ import threading
 from collections import defaultdict
 from typing import TYPE_CHECKING, Dict, Generic, Iterator, List, Optional, TypeVar
 
+from pocketcode.core.reference_syntax import parse_reference
+
 if TYPE_CHECKING:
     # Avoid circular import at runtime; PluginManager imports NamespaceRegistry
     from pocketcode.core.plugin_manager import PluginManager  # noqa: F401
@@ -44,6 +46,9 @@ class NamespaceRegistry(Generic[T]):
         self._ns: Dict[str, Dict[str, T]] = {}
         self._flat: Dict[str, T] = {}
         self._bare: Dict[str, List[str]] = defaultdict(list)
+
+    def _normalize_ref(self, ref: str) -> str:
+        return parse_reference(ref).as_registry_key()
 
     # ── Writing API ──────────────────────────────────────────────────────────
 
@@ -90,8 +95,10 @@ class NamespaceRegistry(Generic[T]):
 
     def qualify(self, ref: str, *, context_plugin: Optional[str] = None) -> str:
         """Resolve *ref* to its qualified ``plugin.name`` form."""
-        # Normalise :: delimiter to . so manifests using either form work.
-        ref = ref.replace("::", ".")
+        ref = self._normalize_ref(ref)
+
+        if not ref:
+            raise RegistryError("Resource not found: ''")
 
         if "." in ref:
             if ref not in self._flat:
@@ -156,7 +163,7 @@ class NamespaceRegistry(Generic[T]):
         - ``"plugin::name" in registry`` → normalised to ``"plugin.name"``
         - ``"name" in registry`` → True if registered under any plugin
         """
-        ref = ref.replace("::", ".")
+        ref = self._normalize_ref(ref)
         if "." in ref:
             return ref in self._flat
         return bool(self._bare.get(ref))
