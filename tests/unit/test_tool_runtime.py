@@ -79,3 +79,33 @@ class TestScopedToolConfirmation:
         )
 
         assert shared_store["session_tool_confirmation"]["tool_policies"] == {}
+
+
+class TestFilesystemToolScoping:
+    def test_execute_tool_denies_reads_outside_runtime_root(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        inside = workspace / "allowed.txt"
+        inside.write_text("ok", encoding="utf-8")
+        outside = tmp_path / "blocked.txt"
+        outside.write_text("no", encoding="utf-8")
+
+        runtime = _build_runtime()
+
+        allowed = runtime.execute_tool(
+            "core.read_file",
+            {"path": str(inside)},
+            {"filesystem_root": str(workspace)},
+            auto_confirm=True,
+        )
+        blocked = runtime.execute_tool(
+            "core.read_file",
+            {"path": str(outside)},
+            {"filesystem_root": str(workspace)},
+            auto_confirm=True,
+        )
+
+        assert allowed["success"] is True
+        assert allowed["content"] == "ok"
+        assert blocked["success"] is False
+        assert "escapes the allowed root" in blocked["error"]

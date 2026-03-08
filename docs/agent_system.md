@@ -209,22 +209,23 @@ Current Textual agent-system controls include:
 - `F4` opens the clone picker for agent, mode, and LLM configs
 - `F6` opens the Control Center for active profile selection, mode selection, LLM override, skills, tool selection, tool policy editing, selection presets, session confirmation, and system settings
 - the inspector exposes inline `Skills` and `Allowed Tools` selection lists, each with a `Save` button that writes the current selection into the active workspace agent YAML
+- inline inspector tool and skill selections are session-scoped effective runtime overrides, not persistent `pocketcode.yml` state
+- new sessions seed those runtime overrides from the active agent profile YAML before any session-specific changes are applied
 - tool entries are grouped hierarchically and can be toggled at either the group or leaf level
 - searchable selection popups support `Ctrl+Down`, `Ctrl+Up`, and `Space`
 - tool groups are derived from the tool source path under `tools/`
-- last-used mode, profile, LLM, skill, tool, and tool-policy choices are persisted
-- active-profile skill selections are persisted under `runtime.textual.last_used.agent_profiles.<profile>.skills`
-- saving inspector skills writes `skills` in `.pocketcode/agents/<profile>.yaml` and then clears a matching per-profile Textual skill override
-- saving inspector tools writes `tools` in `.pocketcode/agents/<profile>.yaml` and then clears a matching per-profile Textual tool override
-- `Reset` clears the last-used override and `Save as Default` writes the current selection into config
+- last-used mode, profile, and LLM choices are still persisted for Textual startup convenience
+- saving inspector skills writes `skills` in `.pocketcode/agents/<profile>.yaml` and clears any matching legacy Textual override state
+- saving inspector tools writes `tools` in `.pocketcode/agents/<profile>.yaml` and clears any matching legacy Textual override state
+- `Reset` clears the current session override and `Save as Default` writes the current selection into config
 - editing a plugin or synthesised profile from the Textual UI requires cloning it to a workspace-backed profile first
 
 Current skill fallback order is:
 
-1. active profile skill override
+1. active session per-profile skill override
 2. active profile YAML `skills`
-3. global Textual last-used skills
-4. global Textual default skills
+3. active session global skill override
+4. Textual `default_skills`
 
 ## Status Display
 

@@ -15,6 +15,18 @@ from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.core.run_handle import RunHandle
 
 from .shared import INHERIT_POLICY, LOADING_OPTION, THEME_OPTIONS, TextualUIState, WORKSPACE_VIEWS
+from .store import (
+    HydrateEngineAction,
+    SetCurrentViewAction,
+    SetRightPanelVisibleAction,
+    SetThemeAction,
+    SetWorkspaceViewAction,
+    TextualCliAction,
+    TextualCliState,
+    capture_engine_snapshot,
+    make_initial_cli_state,
+    reduce_textual_cli_state,
+)
 
 
 class TextualAppBase(App[None]):
@@ -369,12 +381,6 @@ class TextualAppBase(App[None]):
         self._pending_input_request: dict[str, Any] | None = None
         self._live_run_status = "idle"
         self._live_run_events: list[str] = []
-        self._show_right_panel = True
-        self._current_view = "chat"
-        self._theme_name = str(system_settings.get("theme_name") or "ocean")
-        self._workspace_view = str(
-            system_settings.get("workspace_view") or system_settings.get("workspace_mode") or "balanced"
-        )
         self._output_lines: list[str] = []
         self._trimmed_output_line_count = 0
         self._last_assistant_response: str = ""
@@ -387,11 +393,18 @@ class TextualAppBase(App[None]):
         self._option_list_state_cache: dict[str, tuple[str, ...]] = {}
         self._selection_list_state_cache: dict[str, tuple[tuple[str, str, bool], ...]] = {}
         self._ui_state: TextualUIState | None = None
+        self._cli_state: TextualCliState = make_initial_cli_state(
+            theme_name=str(system_settings.get("theme_name") or "ocean"),
+            workspace_view=str(system_settings.get("workspace_view") or system_settings.get("workspace_mode") or "balanced"),
+            current_view="chat",
+            right_panel_visible=True,
+            engine=self._engine,
+        )
         if isinstance(self._cli_context, dict):
             self._cli_context["textual_open_view_picker"] = self._queue_open_view_picker
             self._cli_context["textual_set_view"] = self._queue_set_view
-            self._cli_context["textual_get_current_view"] = lambda: self._current_view
-        self._apply_workspace_view(self._workspace_view, announce=False)
+            self._cli_context["textual_get_current_view"] = lambda: self._cli_state.current_view
+        self._apply_workspace_view(self._cli_state.workspace_view, announce=False)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="workspace"):
@@ -407,14 +420,14 @@ class TextualAppBase(App[None]):
                             [(item["label"], key) for key, item in WORKSPACE_VIEWS.items()],
                             id="workspace-view-select",
                             allow_blank=False,
-                            value=self._workspace_view,
+                            value=self._cli_state.workspace_view,
                         )
                         yield Static("Theme Preset", classes="field-label")
                         yield Select(
                             [(label, key) for key, label in THEME_OPTIONS.items()],
                             id="theme-select",
                             allow_blank=False,
-                            value=self._theme_name,
+                            value=self._cli_state.theme_name,
                         )
                         yield Static("Active Agent", classes="field-label")
                         yield Select([("loading...", LOADING_OPTION)], id="profile-select", allow_blank=False)
@@ -492,3 +505,37 @@ class TextualAppBase(App[None]):
         words = list_command_suggestions(self._engine, interface_name=interface_name)
         self._suggestions = words
         self.query_one("#main-input", Input).suggester = SuggestFromList(words, case_sensitive=False)
+
+    def _dispatch_cli_action(self, action: TextualCliAction) -> None:
+        self._cli_state = reduce_textual_cli_state(self._cli_state, action)
+
+    def _hydrate_cli_state_from_engine(self) -> None:
+        self._dispatch_cli_action(HydrateEngineAction(snapshot=capture_engine_snapshot(self._engine)))
+
+    def _set_cli_theme_name(self, theme_name: str) -> None:
+        self._dispatch_cli_action(SetThemeAction(theme_name=str(theme_name)))
+
+    def _set_cli_workspace_view(self, workspace_view: str) -> None:
+        self._dispatch_cli_action(SetWorkspaceViewAction(workspace_view=str(workspace_view)))
+
+    def _set_cli_current_view(self, current_view: str) -> None:
+        self._dispatch_cli_action(SetCurrentViewAction(current_view=str(current_view)))
+
+    def _set_cli_right_panel_visible(self, visible: bool) -> None:
+        self._dispatch_cli_action(SetRightPanelVisibleAction(visible=bool(visible)))
+
+    @property
+    def _current_view(self) -> str:
+        return self._cli_state.current_view
+
+    @property
+    def _theme_name(self) -> str:
+        return self._cli_state.theme_name
+
+    @property
+    def _workspace_view(self) -> str:
+        return self._cli_state.workspace_view
+
+    @property
+    def _show_right_panel(self) -> bool:
+        return self._cli_state.right_panel_visible

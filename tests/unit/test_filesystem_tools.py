@@ -20,16 +20,24 @@ class TestFilesystemHelpers:
     def test_write_and_read_file_round_trip(self, tmp_path):
         target = tmp_path / "notes" / "todo.txt"
 
-        assert core_filesystem.write_file(str(target), "hello") is True
-        assert core_filesystem.read_file(str(target)) == "hello"
+        assert core_filesystem.write_file(str(target), "hello", root_path=tmp_path) is True
+        assert core_filesystem.read_file(str(target), root_path=tmp_path) == "hello"
+
+    def test_write_file_rejects_paths_outside_root(self, tmp_path):
+        root = tmp_path / "workspace"
+        root.mkdir()
+        outside = tmp_path / "outside.txt"
+
+        assert core_filesystem.write_file(str(outside), "blocked", root_path=root) is False
+        assert outside.exists() is False
 
     def test_list_directory_recursive_returns_relative_paths(self, tmp_path):
         (tmp_path / "b_dir").mkdir()
         (tmp_path / "a.txt").write_text("a", encoding="utf-8")
         (tmp_path / "b_dir" / "nested.txt").write_text("b", encoding="utf-8")
 
-        assert core_filesystem.list_directory(str(tmp_path)) == ["a.txt", "b_dir"]
-        assert core_filesystem.list_directory(str(tmp_path), recursive=True) == [
+        assert core_filesystem.list_directory(str(tmp_path), root_path=tmp_path) == ["a.txt", "b_dir"]
+        assert core_filesystem.list_directory(str(tmp_path), recursive=True, root_path=tmp_path) == [
             "a.txt",
             "b_dir",
             "b_dir/nested.txt",
@@ -40,7 +48,7 @@ class TestFilesystemHelpers:
         (tmp_path / "logs" / "app.log").write_text("log", encoding="utf-8")
         (tmp_path / "logs" / "app.txt").write_text("txt", encoding="utf-8")
 
-        assert core_filesystem.glob_files("**/*.log", str(tmp_path)) == ["logs/app.log"]
+        assert core_filesystem.glob_files("**/*.log", str(tmp_path), root_path=tmp_path) == ["logs/app.log"]
 
 
 class TestFilesystemToolCompatibility:
@@ -84,6 +92,7 @@ class TestFileOpsHelpers:
             path=str(target),
             start_line=2,
             end_line=3,
+            root_path=tmp_path,
         )
 
         assert result == {
@@ -110,7 +119,7 @@ class TestFileOpsHelpers:
     def test_stage_replace_by_match_and_apply(self, tmp_path):
         target = tmp_path / "edit.txt"
         target.write_text("hello world\nhello again\n", encoding="utf-8")
-        store: dict[str, object] = {}
+        store: dict[str, object] = {"filesystem_root": str(tmp_path)}
 
         staged = core_file_ops.stage_text_replace(
             path=str(target),
@@ -138,7 +147,7 @@ class TestFileOpsHelpers:
     def test_stage_replace_by_line_range_can_be_cancelled(self, tmp_path):
         target = tmp_path / "edit_range.txt"
         target.write_text("a\nb\nc\nd\n", encoding="utf-8")
-        store: dict[str, object] = {}
+        store: dict[str, object] = {"filesystem_root": str(tmp_path)}
 
         staged = core_file_ops.stage_text_replace(
             path=str(target),
@@ -160,3 +169,19 @@ class TestFileOpsHelpers:
         assert cancelled["success"] is True
         assert target.read_text(encoding="utf-8") == "a\nb\nc\nd\n"
         assert store["pending_file_edits"] == {}
+
+    def test_stage_replace_rejects_paths_outside_root(self, tmp_path):
+        root = tmp_path / "workspace"
+        root.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_text("hello\n", encoding="utf-8")
+
+        result = core_file_ops.stage_text_replace(
+            path=str(outside),
+            match_text="hello",
+            replacement="goodbye",
+            shared_store={"filesystem_root": str(root)},
+        )
+
+        assert result["success"] is False
+        assert "escapes the allowed root" in result["error"]

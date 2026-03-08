@@ -51,6 +51,8 @@ class PocketCodeEngine:
         self._workspace_llm_profile_manager.load()
         self.active_agent_profile = None  # type: ignore[assignment]  # AgentProfile | None
         self.active_mode: ModeDefinition | None = None
+        self.session_profile_overrides: Dict[str, Dict[str, Any]] = {}
+        self.session_global_skills_override: List[str] | None = None
         self.enabled_skills = self._configured_enabled_skills()
 
         self._llm_router = LlmRouter(config=config, plugin_llm_profiles=self._merged_llm_profiles())
@@ -117,7 +119,7 @@ class PocketCodeEngine:
         elif self.active_agent_profile is not None:
             still_exists = self._agent_profile_manager.get(self.active_agent_profile.name)
             if still_exists is not None:
-                self.active_agent_profile = self._apply_textual_profile_overrides(still_exists)
+                self.active_agent_profile = self._apply_session_profile_overrides(still_exists)
             elif self.current_agent:
                 self._activate_default_profile_for(self.current_agent)
             else:
@@ -354,7 +356,7 @@ class PocketCodeEngine:
         )
         self.active_mode = None
         self.current_agent = self._normalize_agent_name(profile.agent)
-        self.active_agent_profile = self._apply_textual_profile_overrides(profile)
+        self.active_agent_profile = self._apply_session_profile_overrides(profile)
         self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
         self._maybe_refresh_runtime_components()
 
@@ -385,7 +387,7 @@ class PocketCodeEngine:
         profile = self._resolve_mode_profile(mode)
         self.active_mode = mode
         self.current_agent = self._normalize_agent_name(profile.agent)
-        self.active_agent_profile = self._apply_textual_profile_overrides(profile)
+        self.active_agent_profile = self._apply_session_profile_overrides(profile)
         self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
         self._maybe_refresh_runtime_components()
 
@@ -445,45 +447,43 @@ class PocketCodeEngine:
         self.enabled_skills = [skill_name for skill_name in self.enabled_skills if skill_name != name]
         self._refresh_runtime_components()
 
-    def set_last_used_skills(self, skill_names: List[str]) -> Path:
+    def set_last_used_skills(self, skill_names: List[str]) -> None:
         normalized = self._normalize_skill_names(skill_names, strict=True)
-        last_used = self._textual_last_used_config(create=True)
-        last_used["skills"] = normalized
+        self.session_global_skills_override = list(normalized)
         self.enabled_skills = list(normalized)
         self._refresh_runtime_components()
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
-    def reset_last_used_skills(self) -> Path:
-        last_used = self._textual_last_used_config(create=True)
-        last_used.pop("skills", None)
-        self._cleanup_textual_last_used_config()
+    def reset_last_used_skills(self) -> None:
+        self.session_global_skills_override = None
         self.enabled_skills = self._configured_enabled_skills()
         self._refresh_runtime_components()
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
-    def set_last_used_profile_skills(self, profile_name: str, skill_names: List[str]) -> Path:
+    def set_last_used_profile_skills(self, profile_name: str, skill_names: List[str]) -> None:
         profile = self._base_agent_profile(profile_name)
         if profile is None and (self.active_agent_profile is None or self.active_agent_profile.name != profile_name):
             raise ValueError(f"Unknown agent profile '{profile_name}'.")
         normalized = self._normalize_skill_names(skill_names, strict=True)
         base_skills = self._base_skill_selection_for_profile(profile_name)
         if normalized == base_skills:
-            return self.reset_last_used_profile_skills(profile_name)
-        profile_state = self._textual_profile_state(profile_name, create=True)
+            self.reset_last_used_profile_skills(profile_name)
+            return
+        profile_state = self._session_profile_state(profile_name, create=True)
         profile_state["skills"] = normalized
         if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
             self.enabled_skills = list(normalized)
             self._maybe_refresh_runtime_components()
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
-    def reset_last_used_profile_skills(self, profile_name: str) -> Path:
-        profile_state = self._textual_profile_state(profile_name, create=True)
+    def reset_last_used_profile_skills(self, profile_name: str) -> None:
+        profile_state = self._session_profile_state(profile_name, create=True)
         profile_state.pop("skills", None)
-        self._cleanup_textual_profile_state(profile_name)
+        self._cleanup_session_profile_state(profile_name)
         if self.active_agent_profile is not None and self.active_agent_profile.name == profile_name:
             self.enabled_skills = self._configured_enabled_skills(profile_name)
             self._maybe_refresh_runtime_components()
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
     def save_default_skills(self, skill_names: List[str]) -> Path:
         normalized = self._normalize_skill_names(skill_names, strict=True)
@@ -576,9 +576,22 @@ class PocketCodeEngine:
         self.active_mode = None
         self.active_agent_profile = None
         self.global_llm_override = None
+        self.session_profile_overrides = self._normalize_session_profile_overrides(preset.get("agent_profiles", {}))
+        self.session_global_skills_override = (
+            self._normalize_skill_names(list(preset.get("skills", [])), strict=False)
+            if isinstance(preset.get("skills"), list)
+            else None
+        )
         self.clear_session_confirmation_overrides()
         self.auto_confirm_tools = bool(self._runtime_config.get("auto_confirm_tools", False))
         self._restore_textual_selection_state()
+        if self.active_agent_profile is not None and isinstance(preset.get("skills"), list):
+            active_profile_state = self._session_profile_state(self.active_agent_profile.name, create=True)
+            active_profile_state.setdefault(
+                "skills",
+                self._normalize_skill_names(list(preset.get("skills", [])), strict=False),
+            )
+            self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
         return self._write_workspace_config()
 
     def delete_textual_selection_preset(self, name: str) -> Path:
@@ -615,7 +628,7 @@ class PocketCodeEngine:
             profile = self.active_agent_profile
         if not effective or profile is None:
             return profile
-        return self._apply_textual_profile_overrides(profile)
+        return self._apply_session_profile_overrides(profile)
 
     def get_agent(self, name: Optional[str] = None) -> Any:
         return self.get_agent_profile(name)
@@ -768,7 +781,7 @@ class PocketCodeEngine:
         self._agent_profile_manager.reload(dict(self._plugins.agents))
         refreshed = self._agent_profile_manager.get(name)
         if refreshed is not None and self.active_agent_profile and self.active_agent_profile.name == name:
-            self.active_agent_profile = self._apply_textual_profile_overrides(refreshed)
+            self.active_agent_profile = self._apply_session_profile_overrides(refreshed)
         return refreshed
 
     def save_agent_profile_skills(self, profile_name: str, skill_names: List[str]) -> Any:
@@ -793,7 +806,8 @@ class PocketCodeEngine:
             ),
             skills=normalized,
         )
-        self._clear_textual_profile_skills_override(profile_name, normalized)
+        self._clear_legacy_textual_profile_skills_override(profile_name, normalized)
+        self._clear_session_profile_skills_override(profile_name, normalized)
         self._refresh_active_profile(profile_name)
         return refreshed
 
@@ -819,31 +833,33 @@ class PocketCodeEngine:
             ),
             skills=list(profile.skills) if profile.skills is not None else None,
         )
-        self._clear_textual_profile_tools_override(profile_name, normalized_tools)
+        self._clear_legacy_textual_profile_tools_override(profile_name, normalized_tools)
+        self._clear_session_profile_tools_override(profile_name, normalized_tools)
         self._refresh_active_profile(profile_name)
         return refreshed
 
-    def set_last_used_profile_tools(self, profile_name: str, tools: Optional[List[str]]) -> Path:
+    def set_last_used_profile_tools(self, profile_name: str, tools: Optional[List[str]]) -> None:
         profile = self._base_agent_profile(profile_name)
         if profile is None and (self.active_agent_profile is None or self.active_agent_profile.name != profile_name):
             raise ValueError(f"Unknown agent profile '{profile_name}'.")
         normalized_tools = self._normalize_tool_list(tools)
-        base_tools = self._normalize_tool_list(profile.tools) if profile is not None else None
+        base_tools = self._base_tool_selection_for_profile(profile_name)
         if normalized_tools == base_tools:
-            return self.reset_last_used_profile_tools(profile_name)
-        profile_state = self._textual_profile_state(profile_name, create=True)
+            self.reset_last_used_profile_tools(profile_name)
+            return
+        profile_state = self._session_profile_state(profile_name, create=True)
         profile_state["tools"] = normalized_tools
         self._refresh_active_profile(profile_name)
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
-    def reset_last_used_profile_tools(self, profile_name: str) -> Path:
-        profile_state = self._textual_profile_state(profile_name, create=True)
+    def reset_last_used_profile_tools(self, profile_name: str) -> None:
+        profile_state = self._session_profile_state(profile_name, create=True)
         profile_state.pop("tools", None)
-        self._cleanup_textual_profile_state(profile_name)
+        self._cleanup_session_profile_state(profile_name)
         self._refresh_active_profile(profile_name)
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
-    def set_last_used_profile_tool_policies(self, profile_name: str, overrides: Dict[str, Optional[str]]) -> Path:
+    def set_last_used_profile_tool_policies(self, profile_name: str, overrides: Dict[str, Optional[str]]) -> None:
         profile = self._base_agent_profile(profile_name)
         if profile is None and (self.active_agent_profile is None or self.active_agent_profile.name != profile_name):
             raise ValueError(f"Unknown agent profile '{profile_name}'.")
@@ -854,18 +870,19 @@ class PocketCodeEngine:
             else {}
         )
         if normalized_overrides == base_overrides:
-            return self.reset_last_used_profile_tool_policies(profile_name)
-        profile_state = self._textual_profile_state(profile_name, create=True)
+            self.reset_last_used_profile_tool_policies(profile_name)
+            return
+        profile_state = self._session_profile_state(profile_name, create=True)
         profile_state["tool_confirmation_overrides"] = normalized_overrides
         self._refresh_active_profile(profile_name)
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
-    def reset_last_used_profile_tool_policies(self, profile_name: str) -> Path:
-        profile_state = self._textual_profile_state(profile_name, create=True)
+    def reset_last_used_profile_tool_policies(self, profile_name: str) -> None:
+        profile_state = self._session_profile_state(profile_name, create=True)
         profile_state.pop("tool_confirmation_overrides", None)
-        self._cleanup_textual_profile_state(profile_name)
+        self._cleanup_session_profile_state(profile_name)
         self._refresh_active_profile(profile_name)
-        return self._write_workspace_config()
+        self._update_active_session_snapshot()
 
     def update_agent(
         self,
@@ -971,7 +988,7 @@ class PocketCodeEngine:
     def _activate_default_profile_for(self, agent_name: str) -> None:
         """Set active_agent_profile to the agent's default profile."""
         profile = self._get_default_profile_for(agent_name)
-        self.active_agent_profile = self._apply_textual_profile_overrides(profile)
+        self.active_agent_profile = self._apply_session_profile_overrides(profile)
 
     def _get_default_profile_for(self, agent_name: str) -> Any:
         defn = self._plugins.agents.get(agent_name)
@@ -1129,6 +1146,8 @@ class PocketCodeEngine:
         shared_store: Dict[str, Any] = {
             "run_id": uuid4().hex,
             "initial_request": user_input,
+            "workspace_root": str(self._workspace_root),
+            "filesystem_root": str(self._workspace_root),
             "cli_context": self._copy_cli_context(cli_context),
             "formatted_cli_context": self._format_cli_context(cli_context),
             "active_flow": initial_agent,
@@ -1152,6 +1171,7 @@ class PocketCodeEngine:
             "active_session_loaded_from_history": bool(getattr(self, "active_session_loaded_from_history", False)),
             "replace_session_confirmation_overrides": self.replace_session_confirmation_overrides,
             "persist_tool_confirmation": self.set_persistent_tool_confirmation,
+            "grant_session_profile_tool_access": self.grant_session_profile_tool_access,
         }
         if callable(event_handler):
             shared_store["runtime_event_handler"] = event_handler
@@ -1235,6 +1255,8 @@ class PocketCodeEngine:
             "available_skills": self.list_skills(),
             "available_llm_profiles": self.list_llm_profiles(),
             "last_run_summary": dict(self.last_run_summary),
+            "session_profile_overrides": self._copy_session_profile_overrides(),
+            "session_global_skills_override": list(getattr(self, "session_global_skills_override", None) or []),
         }
 
     def get_active_session_info(self) -> Dict[str, Any]:
@@ -1273,7 +1295,18 @@ class PocketCodeEngine:
         session_manager = getattr(self, "_session_manager", None)
         if session_manager is None:
             raise RuntimeError("Session persistence is not available.")
+        active_mode_name = self.active_mode.name if self.active_mode is not None else None
+        active_profile_name = self.active_agent_profile.name if self.active_agent_profile is not None else None
+        current_agent_name = self.current_agent
+        self.session_profile_overrides = {}
+        self.session_global_skills_override = None
         self.clear_session_confirmation_overrides()
+        if active_mode_name:
+            self.set_mode(active_mode_name)
+        elif active_profile_name:
+            self.set_active_agent_profile(active_profile_name)
+        elif current_agent_name:
+            self.set_agent(current_agent_name)
         record = session_manager.create_session(title=title, state=self._session_state_payload())
         self.active_session_id = record.session_id
         self.active_session_title = record.title
@@ -1413,11 +1446,32 @@ class PocketCodeEngine:
             "agent_policies": {},
         }
 
+    def grant_session_profile_tool_access(self, profile_name: str, tool_name: str) -> Any:
+        profile = self._base_agent_profile(profile_name)
+        if profile is None:
+            return self.active_agent_profile
+        effective_profile = self.get_agent_profile(profile_name)
+        current_tools = None if effective_profile is None else self._normalize_tool_list(effective_profile.tools)
+        if current_tools is None:
+            return effective_profile
+        if tool_name not in current_tools:
+            self.set_last_used_profile_tools(profile_name, current_tools + [tool_name])
+        return self.get_agent_profile(profile_name)
+
     def _restore_saved_session(self, record: Any) -> None:
         active_mode_name = str(getattr(record, "active_mode", "") or "").strip()
         active_profile_name = str(getattr(record, "active_profile", "") or "").strip()
         active_agent_name = str(getattr(record, "active_agent", "") or "").strip()
         llm_profile_name = str(getattr(record, "global_llm_profile", "") or "").strip()
+        self.session_profile_overrides = self._normalize_session_profile_overrides(
+            getattr(record, "session_profile_overrides", {}) or {}
+        )
+        raw_global_skills = getattr(record, "session_global_skills_override", None)
+        self.session_global_skills_override = (
+            self._normalize_skill_names(list(raw_global_skills), strict=False)
+            if isinstance(raw_global_skills, list)
+            else None
+        )
 
         self.active_mode = None
         self.active_agent_profile = None
@@ -1441,8 +1495,9 @@ class PocketCodeEngine:
             except Exception:
                 logger.warning("Saved session agent '%s' is unavailable.", active_agent_name)
 
-        normalized_skills = self._normalize_skill_names(getattr(record, "enabled_skills", []) or [], strict=False)
-        self.enabled_skills = list(normalized_skills)
+        self.enabled_skills = self._configured_enabled_skills(
+            self.active_agent_profile.name if self.active_agent_profile is not None else None
+        )
 
         try:
             self.set_global_llm_override(llm_profile_name or None)
@@ -1663,6 +1718,48 @@ class PocketCodeEngine:
             "agent_policies": copied_agent_policies,
         }
 
+    def _copy_session_profile_overrides(self) -> Dict[str, Any]:
+        copied: Dict[str, Any] = {}
+        session_profile_overrides = getattr(self, "session_profile_overrides", {})
+        for profile_name, raw_state in session_profile_overrides.items():
+            if not isinstance(raw_state, dict):
+                continue
+            state: Dict[str, Any] = {}
+            if "tools" in raw_state:
+                tools = raw_state.get("tools")
+                state["tools"] = self._normalize_tool_list(tools) if isinstance(tools, list) else None
+            if "skills" in raw_state and isinstance(raw_state.get("skills"), list):
+                state["skills"] = self._normalize_skill_names(list(raw_state.get("skills", [])), strict=False)
+            if "tool_confirmation_overrides" in raw_state:
+                state["tool_confirmation_overrides"] = self._normalized_confirmation_overrides(
+                    raw_state.get("tool_confirmation_overrides", {})
+                )
+            if state:
+                copied[profile_name] = state
+        return copied
+
+    def _normalize_session_profile_overrides(self, raw: Any) -> Dict[str, Dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return {}
+        normalized: Dict[str, Dict[str, Any]] = {}
+        for profile_name, raw_state in raw.items():
+            clean_name = str(profile_name).strip()
+            if not clean_name or not isinstance(raw_state, dict):
+                continue
+            state: Dict[str, Any] = {}
+            if "tools" in raw_state:
+                tools = raw_state.get("tools")
+                state["tools"] = self._normalize_tool_list(tools) if isinstance(tools, list) else None
+            if "skills" in raw_state and isinstance(raw_state.get("skills"), list):
+                state["skills"] = self._normalize_skill_names(list(raw_state.get("skills", [])), strict=False)
+            if "tool_confirmation_overrides" in raw_state:
+                state["tool_confirmation_overrides"] = self._normalized_confirmation_overrides(
+                    raw_state.get("tool_confirmation_overrides", {})
+                )
+            if state:
+                normalized[clean_name] = state
+        return normalized
+
     def _session_state_payload(self, shared_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
         source = shared_store or {}
         active_profile = source.get("active_agent_profile", self.active_agent_profile)
@@ -1683,6 +1780,8 @@ class PocketCodeEngine:
             "active_mode": active_mode,
             "enabled_skills": skill_names,
             "global_llm_profile": source.get("cli_llm_override") or self.global_llm_override,
+            "session_global_skills_override": list(getattr(self, "session_global_skills_override", None) or []),
+            "session_profile_overrides": self._copy_session_profile_overrides(),
             "session_confirmation_overrides": dict(
                 source.get("session_tool_confirmation")
                 if isinstance(source.get("session_tool_confirmation"), dict)
@@ -1962,16 +2061,21 @@ class PocketCodeEngine:
             snapshot["active_profile"] = self.active_agent_profile.name
         if self.global_llm_override:
             snapshot["global_llm_profile"] = self.global_llm_override
-        if self.enabled_skills:
-            snapshot["skills"] = list(self.enabled_skills)
+        session_global_skills_override = getattr(self, "session_global_skills_override", None)
+        if session_global_skills_override is not None:
+            snapshot["skills"] = list(session_global_skills_override)
         session_default = self.session_confirmation_overrides.get("default_policy")
         if session_default is not None:
             snapshot["session_confirmation_default"] = session_default
         snapshot["auto_confirm_tools"] = bool(self.auto_confirm_tools)
-        last_used = self._textual_last_used_config(create=False)
-        agent_profiles = last_used.get("agent_profiles", {})
-        if isinstance(agent_profiles, dict) and agent_profiles:
-            snapshot["agent_profiles"] = copy.deepcopy(agent_profiles)
+        agent_profiles = self._copy_session_profile_overrides()
+        if self.active_agent_profile is not None:
+            current_skills = self._normalize_skill_names(list(getattr(self, "enabled_skills", []) or []), strict=False)
+            base_skills = self._base_skill_selection_for_profile(self.active_agent_profile.name)
+            if current_skills and current_skills != base_skills:
+                agent_profiles.setdefault(self.active_agent_profile.name, {})["skills"] = current_skills
+        if agent_profiles:
+            snapshot["agent_profiles"] = agent_profiles
         return snapshot
 
     def _normalize_textual_selection_snapshot(self, raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -2111,9 +2215,6 @@ class PocketCodeEngine:
         if not hasattr(self, "_skill_manager"):
             return []
         textual = self._textual_config(create=False)
-        last_used = textual.get("last_used", {}) if isinstance(textual, dict) else {}
-        if isinstance(last_used, dict) and isinstance(last_used.get("skills"), list):
-            return self._normalize_skill_names(last_used.get("skills", []), strict=False)
         default_skills = textual.get("default_skills", []) if isinstance(textual, dict) else []
         return self._normalize_skill_names(default_skills, strict=False)
 
@@ -2130,20 +2231,20 @@ class PocketCodeEngine:
         return self._configured_global_skills()
 
     def _configured_enabled_skills(self, profile_name: str | None = None) -> List[str]:
-        textual = self._textual_config(create=False)
-        last_used = textual.get("last_used", {}) if isinstance(textual, dict) else {}
         target_profile = str(
             profile_name
             or getattr(getattr(self, "active_agent_profile", None), "name", "")
             or ""
         ).strip()
-        if target_profile and isinstance(last_used, dict):
-            agent_profiles = last_used.get("agent_profiles", {})
-            if isinstance(agent_profiles, dict):
-                profile_state = agent_profiles.get(target_profile, {})
-                if isinstance(profile_state, dict) and isinstance(profile_state.get("skills"), list):
-                    return self._normalize_skill_names(profile_state.get("skills", []), strict=False)
-        return self._base_skill_selection_for_profile(target_profile)
+        if target_profile:
+            profile_state = self._session_profile_state(target_profile, create=False)
+            if isinstance(profile_state.get("skills"), list):
+                return self._normalize_skill_names(profile_state.get("skills", []), strict=False)
+            return self._base_skill_selection_for_profile(target_profile)
+        session_global_skills_override = getattr(self, "session_global_skills_override", None)
+        if session_global_skills_override is not None:
+            return list(session_global_skills_override)
+        return self._configured_global_skills()
 
     def _normalize_skill_names(self, skill_names: List[str], *, strict: bool) -> List[str]:
         normalized: list[str] = []
@@ -2183,12 +2284,46 @@ class PocketCodeEngine:
         return normalized
 
     def _base_agent_profile(self, name: str) -> Any:
-        return self._agent_profile_manager.get(name)
+        manager = getattr(self, "_agent_profile_manager", None)
+        if manager is not None:
+            profile = manager.get(name)
+            if profile is not None:
+                return profile
+        active_profile = getattr(self, "active_agent_profile", None)
+        if active_profile is not None and getattr(active_profile, "name", None) == name:
+            return active_profile
+        return None
 
-    def _apply_textual_profile_overrides(self, profile: AgentProfile | None) -> AgentProfile | None:
+    def _base_tool_selection_for_profile(self, profile_name: str) -> Optional[List[str]]:
+        profile = self._base_agent_profile(profile_name)
         if profile is None:
             return None
-        profile_state = self._textual_profile_state(profile.name, create=False)
+        return self._normalize_tool_list(profile.tools)
+
+    def _session_profile_state(self, profile_name: str, *, create: bool) -> Dict[str, Any]:
+        session_profile_overrides = getattr(self, "session_profile_overrides", None)
+        if not isinstance(session_profile_overrides, dict):
+            session_profile_overrides = {}
+            setattr(self, "session_profile_overrides", session_profile_overrides)
+        profile_state = session_profile_overrides.get(profile_name, {})
+        if not isinstance(profile_state, dict):
+            profile_state = {}
+        if create:
+            session_profile_overrides[profile_name] = profile_state
+        return profile_state
+
+    def _cleanup_session_profile_state(self, profile_name: str) -> None:
+        session_profile_overrides = getattr(self, "session_profile_overrides", None)
+        if not isinstance(session_profile_overrides, dict):
+            return
+        profile_state = session_profile_overrides.get(profile_name)
+        if isinstance(profile_state, dict) and not profile_state:
+            session_profile_overrides.pop(profile_name, None)
+
+    def _apply_session_profile_overrides(self, profile: AgentProfile | None) -> AgentProfile | None:
+        if profile is None:
+            return None
+        profile_state = self._session_profile_state(profile.name, create=False)
         if not profile_state:
             return profile
 
@@ -2218,11 +2353,33 @@ class PocketCodeEngine:
         raw_profile = self._base_agent_profile(profile_name)
         if raw_profile is None:
             return
-        self.active_agent_profile = self._apply_textual_profile_overrides(raw_profile)
+        self.active_agent_profile = self._apply_session_profile_overrides(raw_profile)
         self.enabled_skills = self._configured_enabled_skills(profile_name)
         self._maybe_refresh_runtime_components()
 
-    def _clear_textual_profile_skills_override(self, profile_name: str, skill_names: List[str]) -> None:
+    def _clear_session_profile_skills_override(self, profile_name: str, skill_names: List[str]) -> None:
+        profile_state = self._session_profile_state(profile_name, create=False)
+        if not profile_state:
+            return
+        if self._normalize_skill_names(profile_state.get("skills", []), strict=False) != list(skill_names):
+            return
+        profile_state.pop("skills", None)
+        self._cleanup_session_profile_state(profile_name)
+        self._update_active_session_snapshot()
+
+    def _clear_session_profile_tools_override(self, profile_name: str, tools: Optional[List[str]]) -> None:
+        profile_state = self._session_profile_state(profile_name, create=False)
+        if not profile_state or "tools" not in profile_state:
+            return
+        raw_tools = profile_state.get("tools")
+        profile_tools = self._normalize_tool_list(raw_tools) if isinstance(raw_tools, list) else None
+        if profile_tools != self._normalize_tool_list(tools):
+            return
+        profile_state.pop("tools", None)
+        self._cleanup_session_profile_state(profile_name)
+        self._update_active_session_snapshot()
+
+    def _clear_legacy_textual_profile_skills_override(self, profile_name: str, skill_names: List[str]) -> None:
         profile_state = self._textual_profile_state(profile_name, create=False)
         if not profile_state:
             return
@@ -2230,9 +2387,8 @@ class PocketCodeEngine:
             return
         profile_state.pop("skills", None)
         self._cleanup_textual_profile_state(profile_name)
-        self._write_workspace_config()
 
-    def _clear_textual_profile_tools_override(self, profile_name: str, tools: Optional[List[str]]) -> None:
+    def _clear_legacy_textual_profile_tools_override(self, profile_name: str, tools: Optional[List[str]]) -> None:
         profile_state = self._textual_profile_state(profile_name, create=False)
         if not profile_state or "tools" not in profile_state:
             return
@@ -2242,7 +2398,6 @@ class PocketCodeEngine:
             return
         profile_state.pop("tools", None)
         self._cleanup_textual_profile_state(profile_name)
-        self._write_workspace_config()
 
     def _build_agent_path(self, shared_store: Dict[str, Any]) -> List[str]:
         trace = shared_store.get("agent_trace", [])

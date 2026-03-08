@@ -125,18 +125,14 @@ class TextualAppRenderingMixin:
         return available_tools, picker_options, grouped_values, initial_selected_values
 
     def _build_ui_state(self) -> TextualUIState:
-        status = self._engine.status()
-        current_agent = self._engine.get_current_agent()
-        active_profile = self._engine.active_agent_profile
+        snapshot = self._cli_state.engine
+        status = snapshot.status
+        current_agent = snapshot.current_agent
+        active_profile = snapshot.active_profile
         all_profile_names = tuple(dict.fromkeys(self._profile_cycle()))
         prompt_sources = tuple(self._engine.get_agent_prompt_sources(current_agent)) if current_agent else ()
         active_profile_name = active_profile.name if active_profile else None
-        active_skill_names = tuple(
-            str(getattr(skill, "name", skill))
-            for skill in (
-                self._engine.get_active_skills() if hasattr(self._engine, "get_active_skills") else []
-            )
-        )
+        active_skill_names = snapshot.active_skill_names
         skill_picker_options, _, selected_skill_values = self._build_skill_picker_options(
             status.get("available_skills", []) or [],
             selected_skills=set(active_skill_names),
@@ -199,20 +195,20 @@ class TextualAppRenderingMixin:
         )
 
         return TextualUIState(
-            theme_name=self._theme_name,
-            current_view=self._current_view,
-            right_panel_visible=self._show_right_panel,
+            theme_name=self._cli_state.theme_name,
+            current_view=self._cli_state.current_view,
+            right_panel_visible=self._cli_state.right_panel_visible,
             status_text="",
             header_agent_text=_build_header_agent_text(status_for_display),
             header_llm_text=_build_header_llm_text(status_for_display),
-            view_title_text=_build_view_title_text(self._current_view),
+            view_title_text=_build_view_title_text(self._cli_state.current_view),
             workspace_view_select=SelectViewState(
                 options=tuple((item["label"], key) for key, item in WORKSPACE_VIEWS.items()),
-                value=self._workspace_view,
+                value=self._cli_state.workspace_view,
             ),
             theme_select=SelectViewState(
                 options=tuple((label, key) for key, label in THEME_OPTIONS.items()),
-                value=self._theme_name,
+                value=self._cli_state.theme_name,
             ),
             profile_select=SelectViewState(
                 options=profile_select_options,
@@ -348,9 +344,9 @@ class TextualAppRenderingMixin:
     def _set_current_view(self, view_name: str, *, announce: bool = False, refresh: bool = True) -> None:
         if view_name not in TEXTUAL_VIEWS:
             raise ValueError(f"Unknown view '{view_name}'. Available: {sorted(TEXTUAL_VIEWS)}")
-        if view_name == self._current_view:
+        if view_name == self._cli_state.current_view:
             return
-        self._current_view = view_name
+        self._set_cli_current_view(view_name)
         if announce:
             self._write_info(f"View: {TEXTUAL_VIEWS[view_name]['label']}.")
         if refresh:
@@ -360,8 +356,8 @@ class TextualAppRenderingMixin:
         config = WORKSPACE_VIEWS.get(view_name)
         if config is None:
             return
-        self._workspace_view = view_name
-        self._show_right_panel = bool(config["right"])
+        self._set_cli_workspace_view(view_name)
+        self._set_cli_right_panel_visible(bool(config["right"]))
         self._set_current_view(str(config["view"]), refresh=False)
         if announce:
             self._write_info(f"Workspace View: {config['label']}.")
@@ -604,6 +600,7 @@ class TextualAppRenderingMixin:
         self._selection_list_state_cache[cache_key] = option_tuple
 
     def _sync_ui_from_engine(self) -> None:
+        self._hydrate_cli_state_from_engine()
         self._refresh_ui()
 
     def _set_main_input_placeholder(self, prompt: str | None = None) -> None:

@@ -12,6 +12,8 @@ PocketCoder requires a workspace-root `pocketcode.yml`.
 
 If that file is missing, startup fails.
 
+The same workspace root also acts as the default filesystem safety boundary for built-in file and directory tools during runtime. Paths that resolve outside the startup working directory are rejected.
+
 ## Environment Variable Resolution
 
 `load_settings()` performs recursive `${VAR_NAME}` expansion across the loaded YAML.
@@ -121,32 +123,19 @@ The engine still reads legacy `workspace_mode` values from older configs, but `w
 - active profile
 - active mode
 - global LLM override
-- enabled skills
 - session confirmation default
 - `auto_confirm_tools`
-- per-profile tool allowlists
-- per-profile skill selections
-- per-profile tool confirmation overrides
+
+Session-only inspector selections are not written into `runtime.textual.last_used`. They live in the active saved session under `.pocketcode/state/sessions/*.json`.
 
 Current skill persistence order inside `runtime.textual` is:
 
-1. `last_used.agent_profiles.<profile>.skills`
+1. active saved-session per-profile override
 2. `.pocketcode/agents/<profile>.yaml -> skills`
-3. `last_used.skills`
+3. active saved-session global override
 4. `default_skills`
 
-Profile-scoped skill selections are stored alongside other per-profile Textual overrides, for example:
-
-```yaml
-runtime:
-  textual:
-    last_used:
-      agent_profiles:
-        my-agent:
-          skills:
-            - python-testing
-            - azure-prepare
-```
+`runtime.textual.selection_presets` can still store reusable snapshot data, including per-profile tool and skill selections, but applying a preset hydrates the current session state rather than creating new persistent `last_used` overrides.
 
 ## Workspace Resource Layout
 
@@ -175,6 +164,8 @@ Purpose of each directory:
 - `state/sessions/`: runtime-managed saved session JSON files
 - `skills/`: skill packs with `SKILL.md` and optional assets
 - `tools/`: shared workspace Python tools auto-registered under `workspace`
+
+Built-in core filesystem tools are not allowed to operate outside the workspace root itself. Workspace-local tools under `.pocketcode/tools/` can implement their own path rules, but the package-owned `core.read_file`, `core.write_to_file`, `core.create_directory`, `core.list_files`, `core.glob_files`, and staged file-edit helpers are rooted to the current workspace directory.
 
 ## Workspace LLM Profiles
 

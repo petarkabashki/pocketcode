@@ -19,6 +19,8 @@ Built-in core tools have a single canonical package location:
 - `pocketcode/tools/` is a compatibility facade for older imports plus workspace-owned shim exports.
 - `.pocketcode/tools/` remains the workspace-local tool surface registered under `workspace`.
 
+Core filesystem-style tools in `pocketcode/plugins/core/tools/filesystem.py` and staged file-edit helpers in `pocketcode/plugins/core/tools/file_ops.py` are constrained to the current workspace root. The engine publishes that root into each request's shared store, and any path that resolves outside it is rejected before read, write, mkdir, glob, selection, extract, or staged-apply work is performed.
+
 Workspace-owned compatibility shims are loaded through the shared helper in `pocketcode/core/workspace_module_loader.py`.
 
 ## Startup Sequence
@@ -169,14 +171,18 @@ Common runtime-managed keys include:
 - `active_session_id`
 - `active_session_title`
 - `dynamic_llm_overrides`
+- `filesystem_root`
 - `pending_tool`
 - `pending_handoff_agent`
 - `run_id`
+- `workspace_root`
 - `_handoff_stack`
 - `agent_trace`
 - `llm_usage_totals`
 - `llm_cost_usd_total`
 - `_registry`
+
+`workspace_root` and `filesystem_root` currently resolve to the same absolute directory: the process working directory used to start PocketCoder. Core filesystem and staged-edit tools use `filesystem_root` as their allowlisted boundary.
 
 Programmatic PocketFlow flows also receive runtime helpers such as `_llm_router`, `_tool_runtime`, `_agent_llm_profile`, `_agent_system_prompt`, and `_agent_tool_definitions`.
 
@@ -211,10 +217,10 @@ Prompt file includes are expanded before the flow `system_prompt` is stored.
 
 Current enabled-skill resolution order is:
 
-1. Textual per-profile last-used override
+1. active session per-profile skill override
 2. active profile YAML `skills`
-3. Textual global last-used skills
-4. Textual global `default_skills`
+3. active session global skill override
+4. Textual `default_skills`
 
 ### Tool availability
 
@@ -257,8 +263,9 @@ Current behavior:
 
 - each request gets a generated `run_id` in the shared store
 - request lifecycle hooks append user and assistant or system transcript entries to the active saved session after each run
-- session snapshots persist active agent, active profile, active mode, enabled skills, global LLM override, and session confirmation overrides
+- session snapshots persist active agent, active profile, active mode, enabled skills, global LLM override, session-scoped profile tool/skill overrides, and session confirmation overrides
 - starting a new session creates a new saved-session file and switches the active session pointer
+- starting a new session clears prior session-only tool and skill overrides, then reseeds the new session from the active agent/profile YAML state
 - resuming a session restores runtime selections from the saved snapshot and marks the active session as history-backed
 - deleting a session is blocked when the target matches the active session id
 - clearing saved sessions removes only non-active saved sessions

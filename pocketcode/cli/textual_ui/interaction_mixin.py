@@ -295,9 +295,10 @@ class TextualAppInteractionMixin:
         self._open_asset_picker()
 
     def action_toggle_right_panel(self) -> None:
-        self._show_right_panel = not self._show_right_panel
-        self._workspace_view = "balanced"
-        self._write_info(f"Inspector panel {'shown' if self._show_right_panel else 'hidden'}.")
+        next_visible = not self._cli_state.right_panel_visible
+        self._set_cli_workspace_view("balanced")
+        self._set_cli_right_panel_visible(next_visible)
+        self._write_info(f"Inspector panel {'shown' if next_visible else 'hidden'}.")
         self._refresh_ui()
 
     def action_reload_runtime(self) -> None:

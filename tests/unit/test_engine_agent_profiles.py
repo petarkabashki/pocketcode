@@ -571,7 +571,7 @@ class TestEngineAgentProfiles:
         saved = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
         assert saved["runtime"]["default_agent"] == "core.react"
 
-    def test_configured_enabled_skills_prefers_last_used_selection(self):
+    def test_configured_enabled_skills_uses_default_skills_without_session_override(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._config = {
             "runtime": {
@@ -588,9 +588,9 @@ class TestEngineAgentProfiles:
             }
         )
 
-        assert engine._configured_enabled_skills() == ["python-testing"]
+        assert engine._configured_enabled_skills() == ["python-lint"]
 
-    def test_set_last_used_profile_tools_persists_textual_override(self, tmp_path):
+    def test_set_last_used_profile_tools_updates_session_override(self, tmp_path):
         profile = AgentProfile(name="coder.safe", flow="coder::coder", tools=["tool.read"])
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._workspace_root = tmp_path
@@ -600,12 +600,12 @@ class TestEngineAgentProfiles:
 
         engine.set_last_used_profile_tools("coder.safe", ["tool.write"])
 
-        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
-        assert saved["runtime"]["textual"]["last_used"]["agent_profiles"]["coder.safe"]["tools"] == ["tool.write"]
         assert engine.active_agent_profile is not None
         assert engine.active_agent_profile.tools == ["tool.write"]
+        assert engine.session_profile_overrides["coder.safe"]["tools"] == ["tool.write"]
+        assert not (tmp_path / "pocketcode.yml").exists()
 
-    def test_set_last_used_profile_skills_persists_textual_override(self, tmp_path):
+    def test_set_last_used_profile_skills_updates_session_override(self, tmp_path):
         profile = AgentProfile(name="coder.safe", flow="coder::coder", tools=["tool.read"])
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._workspace_root = tmp_path
@@ -623,9 +623,9 @@ class TestEngineAgentProfiles:
 
         engine.set_last_used_profile_skills("coder.safe", ["python-testing"])
 
-        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
-        assert saved["runtime"]["textual"]["last_used"]["agent_profiles"]["coder.safe"]["skills"] == ["python-testing"]
         assert engine.enabled_skills == ["python-testing"]
+        assert engine.session_profile_overrides["coder.safe"]["skills"] == ["python-testing"]
+        assert not (tmp_path / "pocketcode.yml").exists()
 
     def test_reset_last_used_skills_restores_default_skill_config(self, tmp_path):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -646,15 +646,15 @@ class TestEngineAgentProfiles:
         )
         engine.enabled_skills = ["python-testing"]
         engine._refresh_runtime_components = lambda: None
+        engine.session_global_skills_override = ["python-testing"]
 
         engine.reset_last_used_skills()
 
-        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
         assert engine.enabled_skills == ["python-lint"]
-        assert saved["runtime"]["textual"]["default_skills"] == ["python-lint"]
-        assert "last_used" not in saved["runtime"]["textual"]
+        assert engine.session_global_skills_override is None
+        assert not (tmp_path / "pocketcode.yml").exists()
 
-    def test_configured_enabled_skills_prefers_active_profile_skill_override(self):
+    def test_configured_enabled_skills_prefers_session_profile_skill_override(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._config = {
             "runtime": {
@@ -672,6 +672,7 @@ class TestEngineAgentProfiles:
             }
         }
         engine.active_agent_profile = AgentProfile(name="coder.safe", flow="coder::coder")
+        engine.session_profile_overrides = {"coder.safe": {"skills": ["azure-prepare", "missing-skill"]}}
         engine._skill_manager = _SkillManagerStub(
             {
                 "python-lint": SkillDefinition(name="python-lint"),

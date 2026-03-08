@@ -1,7 +1,7 @@
 llm:
   providers:
     gemini:
-      api_key: AIzaSyAnm5RBw5MGgQ7svMzZP8qMadTnMAeE4cI
+      api_key: ${GEMINI_API_KEY}
       use_vertexai: false
     openai: ''
     openrouter: ''

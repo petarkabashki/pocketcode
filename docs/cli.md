@@ -514,8 +514,9 @@ The right inspector panel shows:
 
 Inspector selector behavior:
 
-- the `Skills` list persists the last-used skill selection immediately when toggled
-- the `Allowed Tools` list persists the active profile's last-used tool allowlist immediately when toggled
+- the `Skills` list applies a session-scoped skill selection immediately when toggled
+- the `Allowed Tools` list applies a session-scoped tool selection immediately when toggled
+- fresh sessions seed those session-scoped skill and tool selections from the active agent profile YAML
 - the `Skills` header `Save` button writes the current selection into the active workspace agent's `skills` field
 - the `Allowed Tools` header `Save` button writes the current effective tool scope into the active workspace agent's `tools` field
 - tool groups and subgroups are derived from tool metadata, preferring the tool source path under `tools/`
@@ -611,11 +612,11 @@ Current capabilities implemented across `pocketcode/cli/textual_ui/` include:
 - saving, loading, and deleting selection presets
 - editing and saving system settings
 
-These are UI conveniences over engine methods. They do not define different runtime semantics than the slash-command layer.
+These are UI conveniences over engine methods. The Textual app maintains a reducer-backed CLI state snapshot, hydrates it from engine/session state, and renders widgets from that snapshot via one-way data flow.
 
 ## Textual Persistence Model
 
-The Textual UI persists both defaults and last-used selections into `runtime.textual` in `pocketcode.yml` through engine helper methods.
+The Textual UI persists defaults and reusable presets into `runtime.textual` in `pocketcode.yml`, but live inspector tool and skill selections are session-scoped and are stored in the active saved-session snapshot instead.
 
 Persisted settings currently include:
 
@@ -626,18 +627,14 @@ Persisted settings currently include:
 - `last_used.active_profile`
 - `last_used.active_mode`
 - `last_used.global_llm_profile`
-- `last_used.skills`
 - `last_used.session_confirmation_default`
 - `last_used.auto_confirm_tools`
-- `last_used.agent_profiles.<profile>.skills`
-- `last_used.agent_profiles.<profile>.tools`
-- `last_used.agent_profiles.<profile>.tool_confirmation_overrides`
 
 Important behavior:
 
-- last-used selections are normalized and cleaned when values are reset
 - empty `last_used` sections are removed from config
 - preset snapshots are normalized before save and when loaded back
+- session files hold live skill selections, tool selections, and session confirmation overrides for the active session
 - deleting a workspace asset also cleans invalid references from selection presets and last-used state
 
 ## System Settings

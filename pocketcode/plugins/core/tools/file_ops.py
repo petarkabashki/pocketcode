@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable
 
 from pocketcode.core.interfaces import BaseTool
-from pocketcode.plugins.core.tools.filesystem import read_file, write_file
+from pocketcode.plugins.core.tools.filesystem import _resolve_scoped_path, read_file, write_file
 from pocketcode.plugins.core.tools.user_input import (
     ask_user_checklist,
     ask_user_radio_group,
@@ -65,12 +65,19 @@ def _normalize_selection_mode(selection_mode: str) -> str:
     return normalized
 
 
-def _resolve_content(path: str | None, text: str | None) -> tuple[str, str | None]:
+def _resolve_content(
+    path: str | None,
+    text: str | None,
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> tuple[str, str | None]:
     if path:
-        content = read_file(path)
+        resolved_path = _resolve_scoped_path(path, shared_store=shared_store, root_path=root_path)
+        content = read_file(path, shared_store=shared_store, root_path=root_path)
         if content is None:
             raise ValueError(f"Failed to read file '{path}'.")
-        return content, path
+        return content, str(resolved_path)
     if text is None:
         raise ValueError("Either 'path' or 'text' is required.")
     return text, None
@@ -186,10 +193,11 @@ def select_filesystem_entry(
     multi: bool = False,
     limit: int = 100,
     shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     try:
         normalized_mode = _normalize_selection_mode(selection_mode)
-        root = _coerce_path(base_path)
+        root = _resolve_scoped_path(base_path, shared_store=shared_store, root_path=root_path)
         if not root.is_dir():
             return {"success": False, "error": f"Base path '{base_path}' is not a directory."}
 
@@ -261,9 +269,16 @@ def extract_text(
     include_boundaries: bool = True,
     occurrence: int = 1,
     regex: bool = False,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     try:
-        content, resolved_path = _resolve_content(path, text)
+        content, resolved_path = _resolve_content(
+            path,
+            text,
+            shared_store=shared_store,
+            root_path=root_path,
+        )
         start_index, end_index = _line_bounds_from_spec(
             content,
             start_line=start_line,
@@ -334,9 +349,15 @@ def stage_text_replace(
     regex: bool = False,
     count: int = 1,
     shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     try:
-        content, resolved_path = _resolve_content(path, text)
+        content, resolved_path = _resolve_content(
+            path,
+            text,
+            shared_store=shared_store,
+            root_path=root_path,
+        )
         updated = content
         changed = 0
         change_start_line: int | None = None
@@ -415,7 +436,11 @@ def apply_staged_edit(
     edit = pending[edit_id]
     path = str(edit["path"])
     updated_text = str(edit["updated_text"])
-    if not write_file(path, updated_text):
+    try:
+        _resolve_scoped_path(path, shared_store=shared_store)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    if not write_file(path, updated_text, shared_store=shared_store):
         return {"success": False, "error": f"Failed to write staged edit to '{path}'."}
 
     pending.pop(edit_id, None)
@@ -529,6 +554,7 @@ class ExtractTextTool(BaseTool):
             include_boundaries=bool(kwargs.get("include_boundaries", True)),
             occurrence=int(kwargs.get("occurrence", 1)),
             regex=bool(kwargs.get("regex", False)),
+            shared_store=kwargs.get("shared_store"),
         )
 
 

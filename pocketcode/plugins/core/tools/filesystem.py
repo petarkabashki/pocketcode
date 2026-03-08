@@ -8,6 +8,8 @@ from pocketcode.core.interfaces import BaseTool
 
 logger = logging.getLogger(__name__)
 
+_FILESYSTEM_ROOT_KEY = "filesystem_root"
+
 __all__ = [
     "ReadFileTool",
     "WriteFileTool",
@@ -27,11 +29,45 @@ def _coerce_path(path: str) -> Path:
     return Path(path).expanduser()
 
 
-def read_file(path: str) -> Optional[str]:
+def _resolve_filesystem_root(
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> Path:
+    configured_root = root_path
+    if configured_root is None and isinstance(shared_store, dict):
+        configured_root = shared_store.get(_FILESYSTEM_ROOT_KEY) or shared_store.get("workspace_root")
+    base_root = Path(configured_root).expanduser() if configured_root is not None else Path.cwd()
+    return base_root.resolve()
+
+
+def _resolve_scoped_path(
+    path: str,
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> Path:
+    root = _resolve_filesystem_root(shared_store=shared_store, root_path=root_path)
+    raw_path = _coerce_path(path)
+    candidate = raw_path if raw_path.is_absolute() else root / raw_path
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Path '{path}' escapes the allowed root '{root}'.") from exc
+    return resolved
+
+
+def read_file(
+    path: str,
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> Optional[str]:
     """Read a UTF-8 text file and return its content."""
     logger.info("Reading file: %s", path)
     try:
-        file_path = _coerce_path(path)
+        file_path = _resolve_scoped_path(path, shared_store=shared_store, root_path=root_path)
         if not file_path.is_file():
             logger.error("File not found or is not a regular file: %s", path)
             return None
@@ -46,11 +82,17 @@ def read_file(path: str) -> Optional[str]:
         return None
 
 
-def write_file(path: str, content: str) -> bool:
+def write_file(
+    path: str,
+    content: str,
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> bool:
     """Write UTF-8 text to a file, creating parent directories as needed."""
     logger.info("Writing to file: %s (%s characters)", path, len(content))
     try:
-        file_path = _coerce_path(path)
+        file_path = _resolve_scoped_path(path, shared_store=shared_store, root_path=root_path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
         logger.info("Successfully wrote to %s", path)
@@ -60,11 +102,16 @@ def write_file(path: str, content: str) -> bool:
         return False
 
 
-def create_directory(path: str) -> bool:
+def create_directory(
+    path: str,
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> bool:
     """Create a directory and any missing parents."""
     logger.info("Creating directory: %s", path)
     try:
-        dir_path = _coerce_path(path)
+        dir_path = _resolve_scoped_path(path, shared_store=shared_store, root_path=root_path)
         dir_path.mkdir(parents=True, exist_ok=True)
         logger.info("Directory ensured: %s", path)
         return True
@@ -73,11 +120,17 @@ def create_directory(path: str) -> bool:
         return False
 
 
-def list_directory(path: str = ".", recursive: bool = False) -> Optional[List[str]]:
+def list_directory(
+    path: str = ".",
+    recursive: bool = False,
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> Optional[List[str]]:
     """List directory entries, returning stable relative paths."""
     logger.info("Listing directory: %s (recursive=%s)", path, recursive)
     try:
-        dir_path = _coerce_path(path)
+        dir_path = _resolve_scoped_path(path, shared_store=shared_store, root_path=root_path)
         if not dir_path.is_dir():
             logger.error("Path is not a valid directory: %s", path)
             return None
@@ -97,11 +150,17 @@ def list_directory(path: str = ".", recursive: bool = False) -> Optional[List[st
         return None
 
 
-def glob_files(pattern: str, base_path: str = ".") -> Optional[List[str]]:
+def glob_files(
+    pattern: str,
+    base_path: str = ".",
+    *,
+    shared_store: Dict[str, Any] | None = None,
+    root_path: str | Path | None = None,
+) -> Optional[List[str]]:
     """Return glob matches relative to the requested base directory."""
     logger.info("Globbing pattern '%s' in base path '%s'", pattern, base_path)
     try:
-        base = _coerce_path(base_path)
+        base = _resolve_scoped_path(base_path, shared_store=shared_store, root_path=root_path)
         if not base.is_dir():
             logger.error("Base path is not a valid directory: %s", base_path)
             return None
@@ -147,7 +206,12 @@ class ReadFileTool(BaseTool):
             logger.error(f"{self.name}: Missing required argument 'path'.")
             return {"success": False, "error": "Missing required argument 'path'."}
 
-        content = read_file(path=path)
+        try:
+            _resolve_scoped_path(str(path), shared_store=kwargs.get("shared_store"))
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+
+        content = read_file(path=path, shared_store=kwargs.get("shared_store"))
 
         if content is not None:
             return {"success": True, "content": content}
@@ -185,7 +249,12 @@ class WriteToFileTool(BaseTool):
             logger.error(f"{self.name}: Missing required arguments 'path' or 'content'.")
             return {"success": False, "error": "Missing required arguments 'path' or 'content'."}
 
-        success = write_file(path=path, content=content)
+        try:
+            _resolve_scoped_path(str(path), shared_store=kwargs.get("shared_store"))
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+
+        success = write_file(path=path, content=content, shared_store=kwargs.get("shared_store"))
         if success:
             return {"success": True, "message": f"Successfully wrote to {path}."}
         else:
@@ -223,7 +292,16 @@ class ListFilesTool(BaseTool):
         path = kwargs.get("path", ".") # Default to current directory
         recursive = kwargs.get("recursive", False) # Default to non-recursive
 
-        items = list_directory(path=path, recursive=recursive)
+        try:
+            _resolve_scoped_path(str(path), shared_store=kwargs.get("shared_store"))
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+
+        items = list_directory(
+            path=path,
+            recursive=recursive,
+            shared_store=kwargs.get("shared_store"),
+        )
 
         if items is not None:
             return {"success": True, "items": items}
@@ -259,7 +337,12 @@ class CreateDirectoryTool(BaseTool):
             logger.error(f"{self.name}: Missing required argument 'path'.")
             return {"success": False, "error": "Missing required argument 'path'."}
 
-        success = create_directory(path=path)
+        try:
+            _resolve_scoped_path(str(path), shared_store=kwargs.get("shared_store"))
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+
+        success = create_directory(path=path, shared_store=kwargs.get("shared_store"))
         if success:
             return {"success": True, "message": f"Directory ensured: {path}."}
         else:
@@ -297,7 +380,16 @@ class GlobFilesTool(BaseTool):
             logger.error(f"{self.name}: Missing required argument 'pattern'.")
             return {"success": False, "error": "Missing required argument 'pattern'."}
 
-        matches = glob_files(pattern=pattern, base_path=base_path)
+        try:
+            _resolve_scoped_path(str(base_path), shared_store=kwargs.get("shared_store"))
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+
+        matches = glob_files(
+            pattern=pattern,
+            base_path=base_path,
+            shared_store=kwargs.get("shared_store"),
+        )
 
         if matches is not None:
             return {"success": True, "matches": matches}

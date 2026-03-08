@@ -62,6 +62,8 @@ class SavedSession:
     active_mode: str | None = None
     enabled_skills: list[str] = field(default_factory=list)
     global_llm_profile: str | None = None
+    session_global_skills_override: list[str] = field(default_factory=list)
+    session_profile_overrides: dict[str, Any] = field(default_factory=dict)
     session_confirmation_overrides: dict[str, Any] = field(default_factory=dict)
     transcript: list[SessionTranscriptEntry] = field(default_factory=list)
 
@@ -77,6 +79,8 @@ class SavedSession:
             "active_mode": self.active_mode,
             "enabled_skills": list(self.enabled_skills),
             "global_llm_profile": self.global_llm_profile,
+            "session_global_skills_override": list(self.session_global_skills_override),
+            "session_profile_overrides": dict(self.session_profile_overrides),
             "session_confirmation_overrides": dict(self.session_confirmation_overrides),
             "transcript": [entry.as_dict() for entry in self.transcript],
         }
@@ -104,6 +108,8 @@ class SavedSession:
                 if raw.get("global_llm_profile")
                 else None
             ),
+            session_global_skills_override=[str(item) for item in raw.get("session_global_skills_override") or []],
+            session_profile_overrides=dict(raw.get("session_profile_overrides") or {}),
             session_confirmation_overrides=dict(raw.get("session_confirmation_overrides") or {}),
             transcript=transcript,
         )
@@ -150,6 +156,8 @@ class SessionManager:
             active_mode=payload.get("active_mode"),
             enabled_skills=[str(item) for item in payload.get("enabled_skills") or []],
             global_llm_profile=payload.get("global_llm_profile"),
+            session_global_skills_override=[str(item) for item in payload.get("session_global_skills_override") or []],
+            session_profile_overrides=dict(payload.get("session_profile_overrides") or {}),
             session_confirmation_overrides=dict(payload.get("session_confirmation_overrides") or {}),
             transcript=[
                 SessionTranscriptEntry.from_raw(item)

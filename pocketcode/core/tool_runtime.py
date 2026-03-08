@@ -575,6 +575,13 @@ class ToolRuntime:
             replacer = shared_store.get("replace_session_confirmation_overrides")
             if callable(replacer):
                 replacer(session)
+            profile = shared_store.get("active_agent_profile")
+            profile_name = getattr(profile, "name", None)
+            granter = shared_store.get("grant_session_profile_tool_access")
+            if callable(granter) and isinstance(profile_name, str) and profile_name:
+                refreshed_profile = granter(profile_name, tool_name)
+                if refreshed_profile is not None:
+                    shared_store["active_agent_profile"] = refreshed_profile
             return
 
         if normalized_scope == "always":

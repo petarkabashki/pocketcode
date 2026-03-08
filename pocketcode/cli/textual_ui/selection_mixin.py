@@ -14,7 +14,7 @@ class TextualAppSelectionMixin:
                 PickerOption(view_name, config["label"], config["description"])
                 for view_name, config in TEXTUAL_VIEWS.items()
             ),
-            current_value=self._current_view,
+            current_value=self._cli_state.current_view,
             on_select=self._apply_view_selection,
             help_text="Choose the active Textual view.",
         )
@@ -85,7 +85,7 @@ class TextualAppSelectionMixin:
                 PickerOption(mode_name, config["label"], f"View: {config['view']}")
                 for mode_name, config in WORKSPACE_VIEWS.items()
             ),
-            current_value=self._workspace_view,
+            current_value=self._cli_state.workspace_view,
             on_select=self._apply_workspace_view_selection,
             help_text="Choose a layout preset for the Textual workspace.",
         )
@@ -94,7 +94,7 @@ class TextualAppSelectionMixin:
         self._show_picker(
             title="Select Theme",
             options=tuple(PickerOption(theme_name, theme_label) for theme_name, theme_label in THEME_OPTIONS.items()),
-            current_value=self._theme_name,
+            current_value=self._cli_state.theme_name,
             on_select=self._apply_theme_selection,
             help_text="Choose a theme preset for the Textual workspace.",
         )
@@ -148,14 +148,14 @@ class TextualAppSelectionMixin:
         self._write_info(f"Global LLM override: {self._engine.global_llm_override or 'inherit'}")
 
     def _apply_workspace_view_selection(self, selected_value: str) -> None:
-        if selected_value == self._workspace_view:
+        if selected_value == self._cli_state.workspace_view:
             return
         self._apply_workspace_view(selected_value, announce=True)
 
     def _apply_theme_selection(self, selected_value: str) -> None:
-        if selected_value == self._theme_name:
+        if selected_value == self._cli_state.theme_name:
             return
-        self._theme_name = selected_value
+        self._set_cli_theme_name(selected_value)
         self._write_info(f"Theme preset: {THEME_OPTIONS.get(selected_value, selected_value)}.")
 
     def _apply_session_confirmation_selection(self, selected_value: str) -> None:
@@ -177,8 +177,8 @@ class TextualAppSelectionMixin:
             self._engine.get_system_settings()
             if hasattr(self._engine, "get_system_settings")
             else {
-                "theme_name": self._theme_name,
-                "workspace_view": self._workspace_view,
+                "theme_name": self._cli_state.theme_name,
+                "workspace_view": self._cli_state.workspace_view,
                 "default_agent": None,
                 "default_llm_profile": None,
             }
@@ -196,9 +196,9 @@ class TextualAppSelectionMixin:
 
         self.push_screen(
             SystemSettingsScreen(
-                theme_name=str(settings.get("theme_name") or self._theme_name),
+                theme_name=str(settings.get("theme_name") or self._cli_state.theme_name),
                 workspace_view=str(
-                    settings.get("workspace_view") or settings.get("workspace_mode") or self._workspace_view
+                    settings.get("workspace_view") or settings.get("workspace_mode") or self._cli_state.workspace_view
                 ),
                 default_agent=str(settings.get("default_agent")) if settings.get("default_agent") else None,
                 default_llm_profile=(
@@ -211,8 +211,10 @@ class TextualAppSelectionMixin:
         )
 
     def _apply_system_settings(self, payload: dict[str, str | None]) -> None:
-        theme_name = str(payload.get("theme_name") or self._theme_name)
-        workspace_view = str(payload.get("workspace_view") or payload.get("workspace_mode") or self._workspace_view)
+        theme_name = str(payload.get("theme_name") or self._cli_state.theme_name)
+        workspace_view = str(
+            payload.get("workspace_view") or payload.get("workspace_mode") or self._cli_state.workspace_view
+        )
         default_agent = str(payload.get("default_agent")) if payload.get("default_agent") else None
         default_llm_profile = str(payload.get("default_llm_profile")) if payload.get("default_llm_profile") else None
 
@@ -225,7 +227,7 @@ class TextualAppSelectionMixin:
             default_agent=default_agent,
             default_llm_profile=default_llm_profile,
         )
-        self._theme_name = theme_name
+        self._set_cli_theme_name(theme_name)
         self._apply_workspace_view(workspace_view, announce=False)
         if default_agent:
             self._engine.set_agent(default_agent)
