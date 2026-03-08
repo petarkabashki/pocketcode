@@ -43,7 +43,10 @@ class CompositeAgentManager:
         """Rebuild the agent registry from flow definitions + workspace files."""
         from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
 
-        self._flow_definitions = dict(flow_definitions)
+        self._flow_definitions = {
+            str(name).replace("::", "."): definition
+            for name, definition in flow_definitions.items()
+        }
         self._agents = {}
         self._workspace_filter = DiscoveryFilter.from_root(
             self._workspace_pocketcode_root,
@@ -54,7 +57,7 @@ class CompositeAgentManager:
             ignore_dir=self._workspace_root,
         )
 
-        for qname, defn in flow_definitions.items():
+        for qname, defn in self._flow_definitions.items():
             explicit: Optional[Agent] = (
                 getattr(defn, "default_agent", None)
                 or getattr(defn, "default_agent_profile", None)
@@ -242,7 +245,7 @@ class CompositeAgentManager:
                 )
                 return
 
-            flow_name = str(flow_name)
+            flow_name = str(flow_name).replace("::", ".")
             flow_def = self._flow_definitions.get(flow_name)
 
             tool_confirmation_raw = raw.get("tool_confirmation", {})

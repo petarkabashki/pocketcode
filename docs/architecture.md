@@ -146,6 +146,8 @@ Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/
 
 Programmatic PocketFlow flows are loaded from manifest `module` plus `entry_fn` and stored as `flow_instance`.
 
+LLM decision parsing uses a shared YAML-mapping parser. It accepts fenced YAML blocks and also trims leading prose before the first YAML key so responses like `Here is the YAML:` followed by a valid mapping do not abort the run.
+
 ## Shared Store
 
 The shared store is the runtime session state passed through a request.

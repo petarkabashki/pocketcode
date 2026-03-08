@@ -4,7 +4,6 @@ import importlib
 import importlib.util
 import inspect
 import logging
-import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -13,6 +12,7 @@ from typing import Any, Callable, Dict, List
 import yaml
 from pocketflow import Flow
 
+from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.core.run_handle import RunCancelledError
@@ -21,8 +21,6 @@ from pocketcode.core.runtime_models import WorkflowDefinition, WorkflowNodeDefin
 from pocketcode.core.tool_runtime import ToolRuntime
 
 logger = logging.getLogger(__name__)
-
-_YAML_BLOCK_RE = re.compile(r"```(?:yaml)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 class BaseWorkflowRuntime:
@@ -280,10 +278,7 @@ class BaseWorkflowRuntime:
         return handler(**kwargs)
 
     def _parse_yaml_mapping(self, text: str) -> Dict[str, Any]:
-        match = _YAML_BLOCK_RE.search(text)
-        candidate = match.group(1) if match else text
-
-        parsed = yaml.safe_load(candidate)
+        parsed = parse_llm_yaml_mapping(text)
         if not isinstance(parsed, dict):
             raise ValueError(f"Expected YAML mapping from LLM, got: {type(parsed)}")
         return parsed

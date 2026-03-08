@@ -97,6 +97,18 @@ class _PluginsWithQualifiedTools:
 
 
 class TestEngineAgentProfiles:
+    def test_get_system_settings_normalizes_legacy_default_agent(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._runtime_config = {"default_agent": "core::react", "textual": {}}
+        engine._llm_config = {"default_profile": "fast"}
+        registry = NamespaceRegistry()
+        registry.register("core", "react", object())
+        engine._plugins = type("Plugins", (), {"agents": registry})()
+
+        settings = engine.get_system_settings()
+
+        assert settings["default_agent"] == "core.react"
+
     def test_set_active_agent_profile_switches_current_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(name="coder.safe", flow="coder::coder", source="workspace")
@@ -402,6 +414,54 @@ class TestEngineAgentProfiles:
             "workspace_mode": "review",
         }
         assert saved["llm"]["default_profile"] == "fast"
+
+    def test_save_system_settings_persists_canonical_default_agent_for_registry(self, tmp_path):
+        config_path = tmp_path / "pocketcode.yml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "llm": {
+                        "providers": {"gemini": {"api_key": "${GEMINI_API_KEY}"}},
+                        "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
+                        "default_profile": "fast",
+                    },
+                    "runtime": {"default_agent": "core::react"},
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {
+            "llm": {
+                "providers": {"gemini": {"api_key": "${GEMINI_API_KEY}"}},
+                "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
+                "default_profile": "fast",
+            },
+            "runtime": {"default_agent": "core::react"},
+        }
+        engine._runtime_config = engine._config["runtime"]
+        engine._llm_config = engine._config["llm"]
+        registry = NamespaceRegistry()
+        registry.register("core", "react", object())
+        engine._plugins = type("Plugins", (), {"agents": registry})()
+        engine._llm_router = type(
+            "Router",
+            (),
+            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name}), "default_profile_name": "fast"},
+        )()
+        engine._reload_llm_runtime = lambda: None
+
+        saved_path = engine.save_system_settings(
+            theme_name="forest",
+            workspace_mode="review",
+            default_agent="core::react",
+            default_llm_profile="fast",
+        )
+
+        saved = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
+        assert saved["runtime"]["default_agent"] == "core.react"
 
     def test_configured_enabled_skills_prefers_last_used_selection(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)

@@ -21,6 +21,7 @@ from pocketcode.cli.textual_app import (
     _build_view_title_text,
     _trim_output_lines,
 )
+from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
 from textual.widgets import Input, Select, SelectionList, Static, TextArea
 
 
@@ -1047,6 +1048,16 @@ class TestTextualSelectStability:
                 assert app.screen.query_one("#system-default-agent-select", Select).value == "core.react"
 
         asyncio.run(exercise())
+
+
+class TestLlmYamlParsing:
+    def test_parse_llm_yaml_mapping_skips_leading_prose(self):
+        parsed = parse_llm_yaml_mapping(
+            "Here is the YAML you requested:\naction: call_tool\ntool: core.read_file\narguments:\n  path: pocketcode.log\n"
+        )
+
+        assert parsed["action"] == "call_tool"
+        assert parsed["tool"] == "core.read_file"
 
 
 class TestToolSelectionPopup:

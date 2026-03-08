@@ -645,6 +645,8 @@ Current values returned are:
 
 When the Textual system-settings editor opens, it normalizes legacy `plugin::resource` agent ids from config to the registry's canonical `plugin.resource` form so older saved defaults continue to load without crashing the agent select widget.
 
+The same normalization also happens inside `PocketCodeEngine` when system settings are read, applied, and saved, so `runtime.default_agent` cannot drift back to an incompatible form after startup.
+
 ## Output Model
 
 The basic CLI writes directly to stdout.

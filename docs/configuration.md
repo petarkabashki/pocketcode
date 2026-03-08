@@ -75,6 +75,8 @@ Common runtime keys used by the current engine include:
 - `llm_overrides`: config-level flow and handoff LLM overrides
 - `textual`: Textual UI settings and persisted selection state
 
+`runtime.default_agent` is normalized against the loaded flow registry during engine startup and when saved from the Textual system-settings editor. Legacy values such as `core::react` are accepted, but when the backing registry can qualify them they are persisted in canonical `plugin.resource` form such as `core.react`.
+
 Saved session history is not configured inside `pocketcode.yml`. It is runtime state stored separately under `.pocketcode/state/sessions/`.
 
 ### Tool confirmation config shape

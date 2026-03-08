@@ -53,21 +53,21 @@ runtime:
     agent_policies: {}
   textual:
     last_used:
-      agent_profiles:
-        my-react:
-          tools:
-          - core.ask_user_buttons
-          - core.ask_user_checklist
-          - core.ask_user_input
-          - core.ask_user_radio_group
-          - core.confirm_user_input
-          - core.glob_files
-          - core.list_files
-          - core.read_file
-          - core.search_code
-          - core.select_filesystem_entry
-          - core.stage_text_replace
       active_profile: my-react
       global_llm_profile: gemini-3-flash-preview
+      skills:
+      - pocketcode-plugin-authoring
+      - pocketcode-profiles-prompts
+      - pocketcode-tools-runtime
+      - pocketcode-workspace-assets
+      - pocketcode-workspace-builder
+      - pocketflow-graph-authoring
     theme_name: forest
     workspace_mode: control_desk
+    default_skills:
+    - pocketcode-plugin-authoring
+    - pocketcode-profiles-prompts
+    - pocketcode-tools-runtime
+    - pocketcode-workspace-assets
+    - pocketcode-workspace-builder
+    - pocketflow-graph-authoring

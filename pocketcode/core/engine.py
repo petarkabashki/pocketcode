@@ -68,7 +68,7 @@ class PocketCodeEngine:
         )
         self.config_llm_overrides = self._build_llm_overrides_config()
 
-        self.current_agent = self._runtime_config.get("default_agent")
+        self.current_agent = self._normalize_agent_name(self._runtime_config.get("default_agent"))
         self.global_llm_override = None  # type: ignore[assignment]
         self.agent_llm_overrides: Dict[str, str] = {}
         self.handoff_llm_overrides: Dict[str, str] = {}
@@ -229,7 +229,7 @@ class PocketCodeEngine:
         return {
             "theme_name": str(textual_config.get("theme_name") or "ocean"),
             "workspace_mode": str(textual_config.get("workspace_mode") or "balanced"),
-            "default_agent": self._runtime_config.get("default_agent"),
+            "default_agent": self._normalize_agent_name(self._runtime_config.get("default_agent")),
             "default_llm_profile": self._llm_config.get("default_profile"),
         }
 
@@ -266,8 +266,9 @@ class PocketCodeEngine:
         default_agent: Optional[str],
         default_llm_profile: Optional[str],
     ) -> Path:
-        if default_agent:
-            if default_agent not in self._plugins.agents:
+        normalized_default_agent = self._normalize_agent_name(default_agent)
+        if normalized_default_agent:
+            if normalized_default_agent not in self._plugins.agents:
                 raise KeyError(f"Unknown agent '{default_agent}'.")
         if default_llm_profile:
             self._llm_router.resolve_profile_config(default_llm_profile)
@@ -281,8 +282,8 @@ class PocketCodeEngine:
             llm_section = {}
             self._config["llm"] = llm_section
 
-        if default_agent:
-            runtime_section["default_agent"] = str(default_agent)
+        if normalized_default_agent:
+            runtime_section["default_agent"] = str(normalized_default_agent)
         else:
             runtime_section.pop("default_agent", None)
 
@@ -314,17 +315,18 @@ class PocketCodeEngine:
 
     def set_agent(self, agent_name: Optional[str]) -> None:
         """Backward-compatible alias for selecting the current flow."""
-        if not agent_name:
+        normalized_agent_name = self._normalize_agent_name(agent_name)
+        if not normalized_agent_name:
             self.current_agent = None
             self.active_agent_profile = None
             self.active_mode = None
             return
-        if agent_name not in self._plugins.agents:
+        if normalized_agent_name not in self._plugins.agents:
             raise KeyError(f"Unknown agent '{agent_name}'.")
         self.active_mode = None
-        self.current_agent = agent_name
+        self.current_agent = normalized_agent_name
         # T012: auto-activate the agent's default profile.
-        self._activate_default_profile_for(agent_name)
+        self._activate_default_profile_for(normalized_agent_name)
 
     def set_flow(self, flow_name: Optional[str]) -> None:
         self.set_agent(flow_name)
@@ -347,7 +349,7 @@ class PocketCodeEngine:
                 f"Agent profile '{name}' targets unknown agent '{profile.agent}'."
         )
         self.active_mode = None
-        self.current_agent = profile.agent
+        self.current_agent = self._normalize_agent_name(profile.agent)
         self.active_agent_profile = self._apply_textual_profile_overrides(profile)
 
     def set_active_agent(self, name: Optional[str]) -> None:
@@ -376,8 +378,37 @@ class PocketCodeEngine:
 
         profile = self._resolve_mode_profile(mode)
         self.active_mode = mode
-        self.current_agent = profile.agent
+        self.current_agent = self._normalize_agent_name(profile.agent)
         self.active_agent_profile = self._apply_textual_profile_overrides(profile)
+
+    def _normalize_agent_name(self, agent_name: Any) -> Optional[str]:
+        cleaned = str(agent_name or "").strip()
+        if not cleaned:
+            return None
+
+        agents_registry = getattr(self._plugins, "agents", None)
+        if agents_registry is None:
+            return cleaned.replace("::", ".")
+
+        qualify = getattr(agents_registry, "qualify", None)
+        if callable(qualify):
+            try:
+                return str(qualify(cleaned))
+            except Exception:  # noqa: BLE001
+                pass
+
+        if cleaned in agents_registry:
+            return cleaned
+
+        canonical = cleaned.replace("::", ".")
+        if canonical in agents_registry:
+            return canonical
+
+        legacy = cleaned.replace(".", "::")
+        if legacy in agents_registry:
+            return legacy
+
+        return canonical
 
     def list_skills(self) -> List[str]:
         return [skill.name for skill in self._skill_manager.list()]

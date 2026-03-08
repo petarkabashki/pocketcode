@@ -141,9 +141,33 @@ class TestPluginDeclaredProfile:
         profile = apm.get("plug::agent")
         assert profile is not None
         assert profile.source == "plugin"
-        assert profile.flow == qname
+        assert profile.flow == qname.replace("::", ".")
         assert profile.llm_profile == "gemini_fast"
         assert profile.tools == ["tool.read", "tool.write"]
+
+    def test_plugin_local_agent_yaml_normalizes_legacy_flow_reference(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        plugin_root = tmp_path / "plugins" / "plug"
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        (agents_dir / "agent.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "plug::agent",
+                    "flow": qname,
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        defn.metadata = {"plugin_root": str(plugin_root)}
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname.replace("::", "."): defn})
+
+        profile = apm.get("plug::agent")
+        assert profile is not None
+        assert profile.flow == "plug.agent"
 
     def test_plugin_agent_yaml_respects_plugin_ignore_rules(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")

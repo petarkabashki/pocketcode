@@ -29,26 +29,23 @@ State written to shared store:
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Dict
 
 import yaml
 from pocketflow import Flow, Node
+from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_STEPS = 64
-_YAML_BLOCK_RE = re.compile(r"```(?:yaml)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 def _parse_yaml_response(text: str) -> Dict[str, Any]:
-    """Extract and parse the first YAML block (or the whole text) from *text*."""
-    match = _YAML_BLOCK_RE.search(text)
-    candidate = match.group(1) if match else text
-    parsed = yaml.safe_load(candidate)
-    if not isinstance(parsed, dict):
+    """Extract and parse an LLM YAML mapping from *text*."""
+    try:
+        return parse_llm_yaml_mapping(text)
+    except (ValueError, yaml.YAMLError):
         return {}
-    return parsed
 
 
 def _to_yaml(obj: Any) -> str:
