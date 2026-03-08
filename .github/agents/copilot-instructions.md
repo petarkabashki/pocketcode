@@ -14,6 +14,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-05
 - Files — `.pocketcode/agent-profiles/*.yaml` (workspace-local, created on demand) (001-agent-default-profiles)
 - Python 3.10+ (repo currently exercised on Python 3.12) + pocketflow, PyYAML, prompt_toolkit, textual, python-dotenv, pytest (005-cleanup-cli-consistency)
 - File-based source tree and documentation artifacts; no new persistent storage (005-cleanup-cli-consistency)
+- Python 3.10+ (repo currently exercised on Python 3.12) + pocketflow, PyYAML, textual, python-dotenv, pytest (006-session-history-controls)
+- Workspace-local file storage for saved sessions under `.pocketcode/state/sessions/`; existing `pocketcode.yml` `runtime.tool_confirmation` remains the persistent store for always approvals (006-session-history-controls)
 
 ## Core Patterns
 
@@ -54,9 +56,9 @@ ruff check .
 Python 3.10+: Follow standard conventions, use `pocketflow` for complex agent logic.
 
 ## Recent Changes
+- 006-session-history-controls: Added Python 3.10+ (repo currently exercised on Python 3.12) + pocketflow, PyYAML, textual, python-dotenv, pytest
 - 005-cleanup-cli-consistency: Added Python 3.10+ (repo currently exercised on Python 3.12) + pocketflow, PyYAML, prompt_toolkit, textual, python-dotenv, pytest
 - 001-agent-default-profiles: Added Python ≥3.10 + `pocketflow` (Flow/Node), `pyyaml`, `textual`, `prompt_toolkit`
-- 004-agents-to-plugins: Added Python 3.12 + pocketflow (custom Flow/Node framework), PyYAML, pytest
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

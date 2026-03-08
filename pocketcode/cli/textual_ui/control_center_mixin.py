@@ -20,6 +20,8 @@ class TextualAppControlCenterMixin:
         preset_count = len(self._engine.list_textual_selection_presets()) if hasattr(
             self._engine, "list_textual_selection_presets"
         ) else 0
+        saved_sessions = self._engine.list_saved_sessions() if hasattr(self._engine, "list_saved_sessions") else []
+        active_session = self._engine.get_active_session_info() if hasattr(self._engine, "get_active_session_info") else {}
         return (
             PickerOption(
                 value="profile",
@@ -72,6 +74,16 @@ class TextualAppControlCenterMixin:
                 label=f"Session confirmation: {session_default}",
                 description="Set the default session confirmation policy",
                 search_text="session confirm tool policy",
+            ),
+            PickerOption(
+                value="sessions",
+                label=(
+                    f"Sessions: {active_session.get('title')}"
+                    if isinstance(active_session, dict) and active_session.get("title")
+                    else f"Sessions: {len(saved_sessions)} saved"
+                ),
+                description="Start a new session or resume saved workspace history",
+                search_text="sessions history resume new",
             ),
             PickerOption(
                 value="system_settings",
@@ -137,6 +149,13 @@ class TextualAppControlCenterMixin:
             )
         if category == "session_confirm":
             return (PickerOption("select", "Set Session Confirmation", search_text="session confirmation"),)
+        if category == "sessions":
+            return (
+                PickerOption("new", "Start New Session", search_text="start new session"),
+                PickerOption("resume", "Resume Saved Session", search_text="resume saved session history"),
+                PickerOption("delete", "Delete Saved Session", search_text="delete saved session history"),
+                PickerOption("clear_all", "Clear Previous Sessions", search_text="clear previous saved sessions"),
+            )
         if category == "system_settings":
             return (PickerOption("open", "Open System Settings", search_text="system settings"),)
         return ()
@@ -240,7 +259,101 @@ class TextualAppControlCenterMixin:
         if category == "session_confirm" and action == "select":
             self._open_session_confirmation_picker()
             return
+        if category == "sessions":
+            if action == "new":
+                if not hasattr(self._engine, "start_new_session"):
+                    self._write_error("This runtime does not support saved sessions.")
+                    return
+                session = self._engine.start_new_session()
+                self._write_info(f"Started new session: {session.get('session_id')}")
+                self._sync_ui_from_engine()
+                return
+            if action == "resume":
+                self._open_saved_session_picker()
+                return
+            if action == "delete":
+                self._open_saved_session_picker(action="delete")
+                return
+            if action == "clear_all":
+                self._confirm_clear_saved_sessions()
+                return
         if category == "system_settings" and action == "open":
             self._open_system_settings_screen()
             return
         self._write_error(f"Unsupported {category} action: {action}")
+
+    def _open_saved_session_picker(self, action: str = "resume") -> None:
+        if not hasattr(self._engine, "list_saved_sessions"):
+            self._write_error("This runtime does not support saved sessions.")
+            return
+        sessions = self._engine.list_saved_sessions()
+        resumable = [item for item in sessions if item.get("is_resumable")]
+        if not resumable:
+            self._write_error("No saved sessions are available to resume.")
+            return
+        options = tuple(
+            PickerOption(
+                str(item.get("session_id") or ""),
+                str(item.get("title") or item.get("session_id") or "Unnamed session"),
+                description=str(item.get("updated_at") or ""),
+                search_text="saved session history",
+            )
+            for item in resumable
+        )
+        self._show_picker(
+            title="Resume Saved Session" if action == "resume" else "Delete Saved Session",
+            options=options,
+            current_value=None,
+            on_select=self._resume_saved_session if action == "resume" else self._confirm_delete_saved_session,
+            help_text=(
+                "Choose a saved session to resume."
+                if action == "resume"
+                else "Choose a saved session to delete."
+            ),
+            empty_message="No saved sessions are available.",
+        )
+
+    def _resume_saved_session(self, session_id: str) -> None:
+        if not hasattr(self._engine, "resume_session"):
+            self._write_error("This runtime does not support saved sessions.")
+            return
+        session = self._engine.resume_session(session_id)
+        self._write_info(f"Resumed session: {session.get('session_id')}")
+
+    def _confirm_delete_saved_session(self, session_id: str) -> None:
+        self._show_picker(
+            title="Delete Saved Session",
+            options=(
+                PickerOption("delete", f"Delete {session_id}", search_text="confirm delete"),
+                PickerOption("cancel", "Cancel"),
+            ),
+            current_value=None,
+            on_select=lambda value: self._delete_saved_session(session_id) if value == "delete" else None,
+            help_text="Delete the selected saved session. The active session is protected.",
+        )
+
+    def _delete_saved_session(self, session_id: str) -> None:
+        if not hasattr(self._engine, "delete_session"):
+            self._write_error("This runtime does not support saved sessions.")
+            return
+        deleted = self._engine.delete_session(session_id)
+        self._write_info(f"Deleted session: {deleted.get('session_id')}")
+
+    def _confirm_clear_saved_sessions(self) -> None:
+        self._show_picker(
+            title="Clear Previous Sessions",
+            options=(
+                PickerOption("clear", "Clear previous sessions", search_text="confirm clear sessions"),
+                PickerOption("cancel", "Cancel"),
+            ),
+            current_value=None,
+            on_select=lambda value: self._clear_saved_sessions() if value == "clear" else None,
+            help_text="Remove all saved sessions except the active one.",
+        )
+
+    def _clear_saved_sessions(self) -> None:
+        if not hasattr(self._engine, "clear_saved_sessions"):
+            self._write_error("This runtime does not support saved sessions.")
+            return
+        removed = self._engine.clear_saved_sessions()
+        self._write_info(f"Cleared {removed} saved session{'s' if removed != 1 else ''}.")

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from pocketcode.cli.runtime_events import format_runtime_event
 from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.core.run_handle import RunCancelledError
+from pocketcode.core.session_manager import SessionManager
 
 
 class _ImmediateRuntime:
@@ -62,6 +64,7 @@ class _CancellableRuntime:
 def _build_engine(runtime) -> PocketCodeEngine:
     engine = PocketCodeEngine.__new__(PocketCodeEngine)
     engine._runtime_config = {}
+    engine._workspace_root = Path("/tmp/test-workspace")
     engine.default_llm_profile = "default"
     engine.current_agent = None
     engine.global_llm_override = None
@@ -77,7 +80,12 @@ def _build_engine(runtime) -> PocketCodeEngine:
     engine.active_agent_profile = None
     engine.last_run_summary = {}
     engine._agent_runtime = runtime
+    engine._session_manager = None
+    engine.active_session_id = None
+    engine.active_session_title = None
+    engine.active_session_loaded_from_history = False
     engine.list_agents = lambda: ["core::agent"]
+    engine.get_active_skills = lambda: []
     return engine
 
 
@@ -194,3 +202,34 @@ class TestEngineRunHandle:
         assert format_runtime_event({"type": "run_cancelled", "reason": "Please stop"}) == (
             "Run cancelled: Please stop."
         )
+
+    def test_start_request_persists_transcript_when_session_manager_is_available(self, tmp_path):
+        engine = _build_engine(_ImmediateRuntime())
+        engine._workspace_root = tmp_path
+        engine._session_manager = SessionManager(tmp_path)
+
+        handle = engine.start_request("hello", {"files": set(), "folders": set(), "urls": set(), "snippets": {}})
+        assert handle.wait(timeout=1.0) == "ready"
+
+        assert engine.active_session_id is not None
+        saved = engine._session_manager.load_session(engine.active_session_id)
+        assert [entry.role for entry in saved.transcript] == ["user", "assistant"]
+        assert saved.transcript[0].content == "hello"
+        assert saved.transcript[1].content == "ready"
+        assert format_runtime_event(
+            {"type": "session_saved", "session_id": saved.session_id, "title": saved.title, "transcript_entries": 2}
+        ).startswith("Session saved:")
+
+    def test_replace_session_confirmation_overrides_updates_engine_and_session(self, tmp_path):
+        engine = _build_engine(_ImmediateRuntime())
+        engine._workspace_root = tmp_path
+        engine._session_manager = SessionManager(tmp_path)
+        engine._ensure_active_session()
+
+        engine.replace_session_confirmation_overrides(
+            {"default_policy": None, "tool_policies": {"core.read_file": "allow"}, "agent_policies": {}}
+        )
+
+        saved = engine._session_manager.load_session(engine.active_session_id)
+        assert engine.session_confirmation_overrides["tool_policies"] == {"core.read_file": "allow"}
+        assert saved.session_confirmation_overrides["tool_policies"] == {"core.read_file": "allow"}

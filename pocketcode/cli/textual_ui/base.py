@@ -432,6 +432,8 @@ class TextualAppBase(App[None]):
                 yield Static("", id="inspector-summary", classes="card")
                 yield Static("Session Context", classes="section-title")
                 yield TextArea("", id="inspector-context", read_only=True)
+                yield Static("Saved Sessions", classes="section-title")
+                yield TextArea("", id="inspector-sessions", read_only=True)
                 yield Static("Available Agent Profiles", classes="section-title")
                 yield OptionList(id="profile-list")
                 yield Static("Skills", classes="section-title")

@@ -145,6 +145,7 @@ The shared command layer exposes these primary command groups:
 - `/skill`
 - `/context`
 - `/confirm`
+- `/session`
 - `/reload`
 - `/stop`
 - `/cancel`
@@ -389,6 +390,32 @@ Behavior:
 - they layer on top of persisted config and active profile policy
 - `reset`, `none`, and `default` all normalize to clearing the override
 - `/confirm clear` removes all session-level overrides
+- interactive confirmation prompts can return `once`, `session`, `always`, or `deny`
+- `once` applies only to the current tool invocation, `session` writes a session override, and `always` persists the tool policy into `pocketcode.yml`
+
+## Session Commands
+
+Current subcommands are:
+
+```text
+/session show
+/session list
+/session new [title...]
+/session resume <session_id>
+/session delete <session_id> --yes
+/session clear-all --yes
+/session help
+```
+
+Behavior:
+
+- saved sessions are workspace-local and backed by JSON files under `.pocketcode/state/sessions/`
+- `/session show` prints the active session id, title, and whether it was resumed from history
+- `/session list` prints saved sessions with id, title, and last-updated timestamp, marking the active session
+- `/session new` creates a fresh active session without deleting earlier history
+- `/session resume` restores the saved agent, mode, enabled skills, global LLM override, and session-scoped confirmation overrides
+- `/session delete` requires `--yes`, refuses to delete the active session, and removes only the targeted saved session
+- `/session clear-all` requires `--yes`, preserves the active session, and reports how many prior saved sessions were removed
 
 ## Runtime Control Commands
 
@@ -419,6 +446,7 @@ The event formatter currently emits human-readable lines for:
 - tool confirmation requests
 - tool start, finish, timeout, and subprocess lifecycle
 - handoffs and handoff returns
+- session start, resume, save, delete, and clear events
 - user-input and interaction prompts
 - runtime errors and cancellation
 
@@ -476,10 +504,13 @@ The right inspector panel shows:
 
 - a summary card
 - current session context
+- saved session history
 - available agent profiles
 - skills
 - active tools
 - prompt sources
+
+The F6 Control Center includes a `Sessions` category that can start a fresh session, resume saved history, delete a saved non-active session, or clear all previous sessions while keeping the active session.
 
 ### Themes And Workspace Modes
 

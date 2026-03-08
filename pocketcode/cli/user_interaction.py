@@ -19,12 +19,16 @@ def describe_interaction_request(raw_request: dict[str, Any]) -> str:
             if option.id in defaults or str(option.value) in defaults:
                 suffix = " [default]"
             detail = f" - {option.description}" if option.description else ""
-            lines.append(f"  {index}. {option.label}{suffix}{detail}")
+            value_hint = ""
+            normalized_value = str(option.value).strip()
+            if normalized_value and normalized_value not in {option.id, option.label}:
+                value_hint = f" (value: {normalized_value})"
+            lines.append(f"  {index}. {option.label}{value_hint}{suffix}{detail}")
 
     if request.kind == "checklist":
         lines.append("Enter comma-separated numbers or ids.")
     elif request.kind in {"buttons", "radio"}:
-        lines.append("Enter a number, id, or option label.")
+        lines.append("Enter a number, id, option value, or option label.")
 
     return "\n".join(lines)
 
@@ -153,7 +157,8 @@ def _resolve_single_option(options: tuple[InteractionOption, ...], token: str) -
         if option.label.strip().lower() == normalized:
             return option
 
-    raise ValueError(f"Unknown option: {token}")
+    available = ", ".join(option.id for option in options)
+    raise ValueError(f"Unknown option: {token}. Available ids: {available}")
 
 
 def _default_token(default: Any) -> str:

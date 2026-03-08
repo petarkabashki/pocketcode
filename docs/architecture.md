@@ -121,8 +121,11 @@ The workspace-local extension surface is:
 - `.pocketcode/skills/`
 - `.pocketcode/tools/`
 - `.pocketcode/prompts/`
+- `.pocketcode/state/sessions/`
 
 Workspace prompts are registered under the `workspace` namespace. Workspace tools are auto-discovered from public exports and are also registered under `workspace`.
+
+Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/session_manager.py` and scoped to the current workspace root.
 
 ## Execution Loop
 
@@ -152,9 +155,12 @@ Common runtime-managed keys include:
 - `active_agent`
 - `active_agent_profile`
 - `active_skills`
+- `active_session_id`
+- `active_session_title`
 - `dynamic_llm_overrides`
 - `pending_tool`
 - `pending_handoff_agent`
+- `run_id`
 - `_handoff_stack`
 - `agent_trace`
 - `llm_usage_totals`
@@ -215,6 +221,27 @@ Current order in `ToolRuntime._resolve_confirmation_policy()` is:
 10. config global default
 
 Before confirmation is evaluated, the runtime denies any tool outside the active allowlist.
+
+When a confirmation prompt returns a scope choice, `ToolRuntime.execute_tool()` applies it as follows:
+
+1. `once`: approve only the current tool call
+2. `session`: update the engine's session confirmation overrides and persist them into the active saved session snapshot
+3. `always`: update persisted `runtime.tool_confirmation.tool_policies` in `pocketcode.yml`
+4. `deny`: fail closed for the current call
+
+## Session Persistence
+
+`PocketCodeEngine` creates an active saved session during initialization if none exists for the workspace.
+
+Current behavior:
+
+- each request gets a generated `run_id` in the shared store
+- request lifecycle hooks append user and assistant or system transcript entries to the active saved session after each run
+- session snapshots persist active agent, active profile, active mode, enabled skills, global LLM override, and session confirmation overrides
+- starting a new session creates a new saved-session file and switches the active session pointer
+- resuming a session restores runtime selections from the saved snapshot and marks the active session as history-backed
+- deleting a session is blocked when the target matches the active session id
+- clearing saved sessions removes only non-active saved sessions
 
 ## Agent Profile Precedence
 

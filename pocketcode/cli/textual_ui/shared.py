@@ -46,11 +46,16 @@ def _build_stats_text(status: Dict[str, Any]) -> str:
     llm_usage = run_summary.get("llm_usage", {}) if isinstance(run_summary, dict) else {}
     cost = run_summary.get("llm_cost_usd", 0.0) if isinstance(run_summary, dict) else 0.0
     session_confirm = status.get("session_tool_confirmation_overrides", {}).get("default_policy") or "inherit"
-    return (
+    text = (
         f"Tokens in={llm_usage.get('prompt_tokens', 0)} "
         f"out={llm_usage.get('completion_tokens', 0)} total={llm_usage.get('total_tokens', 0)} | "
         f"Cost=${float(cost):.6f} | Session confirm={session_confirm}"
     )
+    active_session = status.get("active_session", {}) if isinstance(status, dict) else {}
+    session_title = active_session.get("title") if isinstance(active_session, dict) else None
+    if session_title:
+        text = f"{text} | Session={session_title}"
+    return text
 
 
 def _resolve_status_display_parts(status: Dict[str, Any]) -> tuple[str, str, str, str]:
@@ -164,6 +169,7 @@ class TextualUIState:
     auto_confirm_tools: bool
     inspector_summary_text: str
     inspector_context_text: str
+    inspector_sessions_text: str
     skill_list_options: tuple[tuple[str, str, bool], ...]
     inspector_tools_text: str
     inspector_prompts_text: str

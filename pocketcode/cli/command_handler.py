@@ -35,6 +35,11 @@ BASE_COMMAND_SUGGESTIONS = [
     "/status",
     "/context",
     "/confirm",
+    "/session",
+    "/session show",
+    "/session list",
+    "/session new",
+    "/session resume",
     "/agent list",
     "/agent show",
     "/agent switch",
@@ -257,6 +262,9 @@ def handle_command(
 
     if command == "/confirm":
         return _handle_confirm_command(args, engine)
+
+    if command == "/session":
+        return _handle_session_command(args, engine)
 
     if command == "/agent":
         return _handle_agent_command(args, engine)
@@ -798,7 +806,8 @@ Pocketcode Commands:
   /stop, /cancel                 Request cancellation of the active run.
   /status                        Show runtime status.
   /context <cmd> [opts]          Manage context. Run '/context help'.
-  /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
+    /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
+    /session <cmd> [opts]          Manage saved sessions. Run '/session help'.
   /agent <cmd> [opts]            Manage agents. Run '/agent help'.
   /exit, /quit                   Exit Pocketcode.
 
@@ -969,6 +978,116 @@ def print_confirm_help() -> None:
   /confirm help
 """
     print(confirm_help)
+
+
+def _handle_session_command(args: list[str], engine: PocketCodeEngine) -> Optional[str]:
+    if not args:
+        print("Usage: /session <show|list|new|resume|delete|clear-all|help> ...")
+        return None
+
+    subcommand = args[0].lower()
+    sub_args = args[1:]
+
+    if subcommand == "help":
+        print_session_help()
+        return None
+
+    if subcommand == "show":
+        session = engine.get_active_session_info() if hasattr(engine, "get_active_session_info") else {}
+        if not session or not session.get("session_id"):
+            print("No active session.")
+            return None
+        print("Active session:")
+        print(f"  Id: {session.get('session_id')}")
+        print(f"  Title: {session.get('title') or '-'}")
+        print(f"  Updated: {session.get('updated_at') or '-'}")
+        print(f"  Resumed: {'yes' if session.get('loaded_from_history') else 'no'}")
+        return None
+
+    if subcommand == "list":
+        sessions = engine.list_saved_sessions() if hasattr(engine, "list_saved_sessions") else []
+        print("Saved sessions:")
+        if not sessions:
+            print("  (none)")
+            return None
+        for item in sessions:
+            marker = "*" if item.get("is_active") else " "
+            updated_at = item.get("updated_at") or "-"
+            print(f"  {marker} {item.get('session_id')} | {item.get('title') or '-'} | {updated_at}")
+        return None
+
+    if subcommand == "new":
+        title = " ".join(sub_args).strip() or None
+        session = {}
+        if hasattr(engine, "start_new_session"):
+            session = engine.start_new_session(title) if title else engine.start_new_session()
+        print(f"Started new session: {session.get('session_id')}")
+        if session.get("title"):
+            print(f"  Title: {session.get('title')}")
+        return None
+
+    if subcommand == "resume":
+        if len(sub_args) != 1:
+            print("Usage: /session resume <session_id>")
+            return None
+        try:
+            session = engine.resume_session(sub_args[0]) if hasattr(engine, "resume_session") else {}
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(f"Resumed session: {session.get('session_id')}")
+        if session.get("title"):
+            print(f"  Title: {session.get('title')}")
+        return None
+
+    if subcommand == "delete":
+        if not sub_args:
+            print("Usage: /session delete <session_id> --yes")
+            return None
+        if "--yes" not in sub_args:
+            print("Deleting a session requires --yes.")
+            return None
+        session_id = next((arg for arg in sub_args if arg != "--yes"), "")
+        if not session_id:
+            print("Usage: /session delete <session_id> --yes")
+            return None
+        try:
+            deleted = engine.delete_session(session_id) if hasattr(engine, "delete_session") else {}
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(f"Deleted session: {deleted.get('session_id')}")
+        return None
+
+    if subcommand == "clear-all":
+        if "--yes" not in sub_args:
+            print("Clearing saved sessions requires --yes.")
+            return None
+        try:
+            removed = engine.clear_saved_sessions() if hasattr(engine, "clear_saved_sessions") else 0
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(f"Cleared {removed} saved session{'s' if removed != 1 else ''}.")
+        return None
+
+    print(f"Unknown /session subcommand: {subcommand}")
+    print_session_help()
+    return None
+
+
+def print_session_help() -> None:
+    session_help = """
+/session Commands:
+  /session show
+  /session list
+  /session new [title...]
+  /session resume <session_id>
+/session delete <session_id> --yes
+/session clear-all --yes
+  /session help
+"""
+    print(session_help)
 
 
 def _parse_agent_selection_flag(args: list[str]) -> tuple[str, str | None]:

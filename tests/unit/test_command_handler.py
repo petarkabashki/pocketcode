@@ -29,6 +29,75 @@ class _EngineStub:
         return []
 
 
+class _SessionCommandEngineStub(_EngineStub):
+    def __init__(self):
+        self._sessions = [
+            {
+                "session_id": "session-1",
+                "title": "First session",
+                "updated_at": "2026-03-07T10:00:00+00:00",
+                "is_active": True,
+                "is_resumable": True,
+            },
+            {
+                "session_id": "session-2",
+                "title": "Earlier work",
+                "updated_at": "2026-03-07T09:00:00+00:00",
+                "is_active": False,
+                "is_resumable": True,
+            },
+        ]
+        self.current_session = {
+            "session_id": "session-1",
+            "title": "First session",
+            "updated_at": "2026-03-07T10:00:00+00:00",
+            "loaded_from_history": False,
+        }
+        self.started = 0
+        self.resumed: list[str] = []
+        self.deleted: list[str] = []
+        self.cleared = 0
+
+    def get_active_session_info(self):
+        return dict(self.current_session)
+
+    def list_saved_sessions(self):
+        return [dict(item) for item in self._sessions]
+
+    def start_new_session(self):
+        self.started += 1
+        self.current_session = {
+            "session_id": f"session-new-{self.started}",
+            "title": f"Session {self.started}",
+            "updated_at": "2026-03-07T11:00:00+00:00",
+            "loaded_from_history": False,
+        }
+        return dict(self.current_session)
+
+    def resume_session(self, session_id):
+        self.resumed.append(session_id)
+        self.current_session = {
+            "session_id": session_id,
+            "title": "Earlier work",
+            "updated_at": "2026-03-07T09:00:00+00:00",
+            "loaded_from_history": True,
+        }
+        return dict(self.current_session)
+
+    def delete_session(self, session_id):
+        if session_id == self.current_session["session_id"]:
+            raise ValueError("Cannot delete the active session.")
+        self.deleted.append(session_id)
+        self._sessions = [item for item in self._sessions if item["session_id"] != session_id]
+        return {"session_id": session_id, "deleted": True}
+
+    def clear_saved_sessions(self):
+        prior = [item for item in self._sessions if item["session_id"] != self.current_session["session_id"]]
+        self.cleared += len(prior)
+        self._sessions = [item for item in self._sessions if item["session_id"] == self.current_session["session_id"]]
+        return len(prior)
+
+
 class _PromptListingEngineStub(_EngineStub):
     def list_prompts(self):
         return ["core.react", "workspace.review"]
@@ -326,6 +395,82 @@ class TestCommandHandlerParsing:
         )
 
         assert cli_context["snippets"] == {"note": "line one with spaces"}
+
+    def test_session_list_prints_title_and_timestamp(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/session list", engine=_SessionCommandEngineStub(), cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "First session" in captured.out
+        assert "2026-03-07T10:00:00+00:00" in captured.out
+        assert "Earlier work" in captured.out
+
+    def test_session_show_reports_active_session(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/session show", engine=_SessionCommandEngineStub(), cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "Active session" in captured.out
+        assert "session-1" in captured.out
+        assert "First session" in captured.out
+
+    def test_session_new_reports_created_session(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _SessionCommandEngineStub()
+
+        handle_command("/session new", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.started == 1
+        assert "Started new session" in captured.out
+        assert "session-new-1" in captured.out
+
+    def test_session_resume_reports_selected_session(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _SessionCommandEngineStub()
+
+        handle_command("/session resume session-2", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.resumed == ["session-2"]
+        assert "Resumed session" in captured.out
+        assert "session-2" in captured.out
+
+    def test_session_delete_requires_explicit_confirmation(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _SessionCommandEngineStub()
+
+        handle_command("/session delete session-2", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.deleted == []
+        assert "requires --yes" in captured.out
+
+    def test_session_delete_blocks_active_session(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _SessionCommandEngineStub()
+
+        handle_command("/session delete session-1 --yes", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.deleted == []
+        assert "Cannot delete the active session" in captured.out
+
+    def test_session_clear_all_requires_confirmation_and_preserves_active_session(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _SessionCommandEngineStub()
+
+        handle_command("/session clear-all", engine=engine, cli_context=cli_context)
+        first = capsys.readouterr()
+        assert engine.cleared == 0
+        assert "requires --yes" in first.out
+
+        handle_command("/session clear-all --yes", engine=engine, cli_context=cli_context)
+        second = capsys.readouterr()
+        assert engine.cleared == 1
+        assert "Cleared 1 saved session" in second.out
 
     def test_invalid_quoted_command_returns_parse_error(self, capsys):
         cli_context = {

@@ -72,6 +72,19 @@ def format_runtime_event(event: Dict[str, Any]) -> str:
         return f"Input required ({kind}): {event.get('prompt')}."
     if event_type == "interaction_received":
         return "Input received."
+    if event_type == "session_started":
+        return f"Session started: {event.get('title') or event.get('session_id')}."
+    if event_type == "session_resumed":
+        return f"Session resumed: {event.get('title') or event.get('session_id')}."
+    if event_type == "session_saved":
+        return (
+            f"Session saved: {event.get('title') or event.get('session_id')} "
+            f"({event.get('transcript_entries', 0)} entries)."
+        )
+    if event_type == "session_deleted":
+        return f"Session deleted: {event.get('title') or event.get('session_id')}."
+    if event_type == "session_cleared":
+        return f"Session history cleared: removed {event.get('count', 0)} session(s)."
     if event_type == "user_input_requested":
         return f"Input required: {event.get('prompt')}."
     if event_type == "user_input_received":

@@ -54,6 +54,16 @@ class TestTopStatsText:
 
         assert text == "Tokens in=0 out=0 total=0 | Cost=$0.000000 | Session confirm=inherit"
 
+    def test_stats_text_appends_active_session_title_when_available(self):
+        status = {
+            "active_session": {"title": "Review Session"},
+            "last_run_summary": {"llm_usage": {}, "llm_cost_usd": 0.0},
+        }
+
+        text = _build_stats_text(status)
+
+        assert text.endswith(" | Session=Review Session")
+
 
 class TestUiTextHelpers:
     def test_status_text_matches_footer_format(self):
@@ -144,6 +154,74 @@ class TestTextualOutputRendering:
 
         asyncio.run(exercise())
 
+
+class TestTextualInteractionRequests:
+    def test_pending_button_interaction_accepts_scope_value(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            class _RunStub:
+                def __init__(self):
+                    self.calls = []
+
+                def drain_events(self):
+                    return []
+
+                def resolve_interaction(self, request_id, payload):
+                    self.calls.append((request_id, payload))
+                    return True
+
+            run_stub = _RunStub()
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._active_run = run_stub
+                app._pending_input_request = {
+                    "type": "interaction_requested",
+                    "request_id": "interaction-1",
+                    "kind": "buttons",
+                    "prompt": "Allow tool 'core.read_file'?",
+                    "options": [
+                        {"id": "once", "label": "Approve Once", "value": "once"},
+                        {"id": "session", "label": "Approve for Session", "value": "session"},
+                        {"id": "always", "label": "Always Approve", "value": "always"},
+                        {"id": "deny", "label": "Deny", "value": "deny"},
+                    ],
+                    "default": "deny",
+                }
+
+                input_widget = app.query_one("#main-input", Input)
+                input_widget.value = "always"
+                await app._handle_main_input("always")
+                await pilot.pause(0.05)
+
+                assert run_stub.calls == [
+                    (
+                        "interaction-1",
+                        {
+                            "kind": "buttons",
+                            "value": "always",
+                            "values": ["always"],
+                            "label": "Always Approve",
+                            "selected_options": [
+                                {
+                                    "id": "always",
+                                    "label": "Always Approve",
+                                    "value": "always",
+                                    "description": "",
+                                }
+                            ],
+                            "raw_input": "always",
+                        },
+                    )
+                ]
+
+        asyncio.run(exercise())
+
     def test_output_appends_lines_in_order_after_buffer_reset(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
@@ -201,9 +279,29 @@ class _TextualEngineStub:
         self.saved_selection_presets: list[str] = []
         self.applied_selection_presets: list[str] = []
         self.deleted_selection_presets: list[str] = []
+        self.started_sessions = 0
+        self.resumed_sessions: list[str] = []
+        self.deleted_sessions: list[str] = []
+        self.cleared_sessions = 0
         self.active_skills: list[str] = []
         self.skill_enabled: list[str] = []
         self.skill_disabled: list[str] = []
+        self._saved_sessions = [
+            {
+                "session_id": "session-1",
+                "title": "Current Session",
+                "updated_at": "2026-03-07T10:00:00+00:00",
+                "is_active": True,
+                "is_resumable": False,
+            },
+            {
+                "session_id": "session-2",
+                "title": "Earlier Work",
+                "updated_at": "2026-03-07T09:00:00+00:00",
+                "is_active": False,
+                "is_resumable": True,
+            },
+        ]
         self._modes = {
             "review": SimpleNamespace(name="review", source_path=Path("/tmp/review.md")),
             "focus": SimpleNamespace(name="focus", source_path=Path("/tmp/focus.md")),
@@ -543,6 +641,13 @@ class _TextualEngineStub:
             "selected_llm_profile": self.global_llm_override or "fast",
             "active_agent": self.active_agent_profile.name if self.active_agent_profile else None,
             "active_agent_profile": self.active_agent_profile.name if self.active_agent_profile else None,
+            "active_session_id": self._saved_sessions[0]["session_id"],
+            "active_session_title": self._saved_sessions[0]["title"],
+            "active_session": {
+                "session_id": self._saved_sessions[0]["session_id"],
+                "title": self._saved_sessions[0]["title"],
+                "loaded_from_history": False,
+            },
             "runtime_workflow": "internal-flow",
             "last_run_summary": {
                 "current_agent": self.current_agent,
@@ -551,6 +656,76 @@ class _TextualEngineStub:
                 "agent_path": [],
             },
         }
+
+    def get_active_session_info(self):
+        current = self._saved_sessions[0]
+        return {
+            "session_id": current["session_id"],
+            "title": current["title"],
+            "loaded_from_history": False,
+        }
+
+    def list_saved_sessions(self):
+        return [dict(item) for item in self._saved_sessions]
+
+    def start_new_session(self, title=None):
+        self.started_sessions += 1
+        created = {
+            "session_id": f"session-new-{self.started_sessions}",
+            "title": title or f"Session {self.started_sessions}",
+            "updated_at": "2026-03-07T11:00:00+00:00",
+            "is_active": True,
+            "is_resumable": False,
+        }
+        for item in self._saved_sessions:
+            item["is_active"] = False
+            item["is_resumable"] = True
+        self._saved_sessions.insert(0, created)
+        return {
+            "session_id": created["session_id"],
+            "title": created["title"],
+            "loaded_from_history": False,
+        }
+
+    def resume_session(self, session_id):
+        self.resumed_sessions.append(session_id)
+        for index, item in enumerate(self._saved_sessions):
+            if item["session_id"] == session_id:
+                self._saved_sessions.pop(index)
+                resumed = dict(item)
+                break
+        else:
+            resumed = {
+                "session_id": session_id,
+                "title": session_id,
+                "updated_at": "2026-03-07T09:00:00+00:00",
+                "is_active": False,
+                "is_resumable": True,
+            }
+        for item in self._saved_sessions:
+            item["is_active"] = False
+            item["is_resumable"] = True
+        resumed["is_active"] = True
+        resumed["is_resumable"] = False
+        self._saved_sessions.insert(0, resumed)
+        return {
+            "session_id": resumed["session_id"],
+            "title": resumed["title"],
+            "loaded_from_history": True,
+        }
+
+    def delete_session(self, session_id):
+        if session_id == self._saved_sessions[0]["session_id"]:
+            raise ValueError("Cannot delete the active session.")
+        self.deleted_sessions.append(session_id)
+        self._saved_sessions = [item for item in self._saved_sessions if item["session_id"] != session_id]
+        return {"session_id": session_id, "deleted": True}
+
+    def clear_saved_sessions(self):
+        count = max(0, len(self._saved_sessions) - 1)
+        self.cleared_sessions += count
+        self._saved_sessions = self._saved_sessions[:1]
+        return count
 
     def describe_agent(self, agent_name=None):
         target = agent_name or self.current_agent
@@ -685,6 +860,103 @@ class TestTextualSelectStability:
 
                 assert isinstance(app.screen, ToolSelectionScreen)
                 assert app.screen._filter_placeholder == "Filter skills..."
+
+        asyncio.run(exercise())
+
+    def test_f6_sessions_can_resume_saved_history(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("sessions")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("resume")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("session-2")
+                await pilot.pause(0.1)
+
+                assert engine.resumed_sessions == ["session-2"]
+                assert any("Resumed session: session-2" in line for line in app._output_lines)
+
+        asyncio.run(exercise())
+
+    def test_f6_sessions_delete_requires_confirmation_flow(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("sessions")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("delete")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("session-2")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("delete")
+                await pilot.pause(0.1)
+
+                assert engine.deleted_sessions == ["session-2"]
+                assert any("Deleted session: session-2" in line for line in app._output_lines)
+
+        asyncio.run(exercise())
+
+    def test_f6_sessions_can_clear_previous_history(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("sessions")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("clear_all")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("clear")
+                await pilot.pause(0.1)
+
+                assert engine.cleared_sessions == 1
+                assert any("Cleared 1 saved session" in line for line in app._output_lines)
 
         asyncio.run(exercise())
 

@@ -75,6 +75,8 @@ Common runtime keys used by the current engine include:
 - `llm_overrides`: config-level flow and handoff LLM overrides
 - `textual`: Textual UI settings and persisted selection state
 
+Saved session history is not configured inside `pocketcode.yml`. It is runtime state stored separately under `.pocketcode/state/sessions/`.
+
 ### Tool confirmation config shape
 
 Current normalized config shape is:
@@ -132,6 +134,8 @@ The current workspace extension surface lives under `.pocketcode/`:
 ├── modes/
 ├── plugins/
 ├── prompts/
+├── state/
+│   └── sessions/
 ├── skills/
 └── tools/
 ```
@@ -143,6 +147,7 @@ Purpose of each directory:
 - `modes/`: Markdown-authored runtime overlays
 - `plugins/`: workspace plugin roots discovered through `runtime.plugin_paths`
 - `prompts/`: shared workspace prompt files
+- `state/sessions/`: runtime-managed saved session JSON files
 - `skills/`: skill packs with `SKILL.md` and optional assets
 - `tools/`: shared workspace Python tools auto-registered under `workspace`
 

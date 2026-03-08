@@ -97,6 +97,11 @@ class TextualAppRenderingMixin:
         ]
         if active_profile and active_profile.description:
             summary_lines.append(f"Agent note: {active_profile.description}")
+        active_session = status.get("active_session", {}) if isinstance(status, dict) else {}
+        if isinstance(active_session, dict) and active_session.get("title"):
+            summary_lines.append(
+                f"Active session: {active_session.get('title')} ({active_session.get('session_id') or '-'})"
+            )
 
         profile_list_labels = tuple(
             f"{'* ' if active_profile_name == profile_name else '  '}{profile_name}"
@@ -153,6 +158,7 @@ class TextualAppRenderingMixin:
             auto_confirm_tools=bool(self._engine.auto_confirm_tools),
             inspector_summary_text="\n".join(summary_lines),
             inspector_context_text=self._render_context_summary(status),
+            inspector_sessions_text=self._render_saved_sessions_summary(status),
             skill_list_options=self._render_skill_options(status),
             inspector_tools_text=self._render_tool_summary(current_agent, active_profile, list(current_agent_tools)),
             inspector_prompts_text=self._render_prompt_summary({"prompt_sources": list(prompt_sources)}, active_profile),
@@ -224,6 +230,7 @@ class TextualAppRenderingMixin:
         self._set_selection_list_options(self.query_one("#skill-list", SelectionList), state.skill_list_options)
         self._set_static_text(self.query_one("#inspector-summary", Static), state.inspector_summary_text)
         self._set_text_area_text(self.query_one("#inspector-context", TextArea), state.inspector_context_text)
+        self._set_text_area_text(self.query_one("#inspector-sessions", TextArea), state.inspector_sessions_text)
         self._set_text_area_text(self.query_one("#inspector-tools", TextArea), state.inspector_tools_text)
         self._set_text_area_text(self.query_one("#inspector-prompts", TextArea), state.inspector_prompts_text)
         self._set_text_area_text(self.query_one("#run-preview", TextArea), state.run_preview_text)
@@ -315,6 +322,8 @@ class TextualAppRenderingMixin:
             context_stats = {}
 
         lines = [
+            f"session_id: {status.get('active_session_id') or '-'}",
+            f"session_title: {status.get('active_session_title') or '-'}",
             f"files: {context_stats.get('files', len(self._cli_context.get('files', set()) or set()))}",
             f"folders: {context_stats.get('folders', len(self._cli_context.get('folders', set()) or set()))}",
             f"urls: {context_stats.get('urls', len(self._cli_context.get('urls', set()) or set()))}",
@@ -323,6 +332,22 @@ class TextualAppRenderingMixin:
             "",
             self._render_context_preview(),
         ]
+        return "\n".join(lines)
+
+    def _render_saved_sessions_summary(self, status: Dict[str, Any]) -> str:
+        if not hasattr(self._engine, "list_saved_sessions"):
+            return "Saved session history is unavailable."
+        sessions = self._engine.list_saved_sessions()
+        if not sessions:
+            return "No saved sessions."
+        lines: list[str] = []
+        for item in sessions[:8]:
+            marker = "*" if item.get("is_active") else "-"
+            lines.append(
+                f"{marker} {item.get('title') or '-'} | {item.get('session_id') or '-'} | {item.get('updated_at') or '-'}"
+            )
+        if len(sessions) > 8:
+            lines.append(f"... {len(sessions) - 8} more")
         return "\n".join(lines)
 
     def _render_tool_summary(

@@ -16,6 +16,7 @@ from pocketcode.tools.user_input import ConfirmUserInputTool
 logger = logging.getLogger(__name__)
 
 VALID_CONFIRMATION_POLICIES = {"allow", "confirm", "deny"}
+VALID_APPROVAL_SCOPES = {"once", "session", "always", "deny"}
 VALID_EXECUTION_MODES = {"inline", "managed_subprocess"}
 
 
@@ -149,7 +150,7 @@ class ToolRuntime:
                 "error": f"Execution of tool '{tool_name}' denied by confirmation policy.",
             }
         if policy == "confirm":
-            approved = self._request_tool_confirmation(
+            approved, approval_scope = self._request_tool_confirmation(
                 tool_name=tool_name,
                 arguments=arguments,
                 shared_store=shared_store,
@@ -160,6 +161,12 @@ class ToolRuntime:
                     "success": False,
                     "error": f"Execution of tool '{tool_name}' denied by user confirmation.",
                 }
+            self._apply_confirmation_response(
+                tool_name=tool_name,
+                shared_store=shared_store,
+                approval_scope=approval_scope,
+                agent_name=agent_name,
+            )
 
         tool_impl = self._resolve_tool(tool_name)
         tool_instance = self._instantiate_tool(tool_impl)
@@ -535,13 +542,53 @@ class ToolRuntime:
             return None
         return profile
 
+    def _normalize_approval_scope(self, value: Any) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in VALID_APPROVAL_SCOPES:
+            return normalized
+        return "deny"
+
+    def _apply_confirmation_response(
+        self,
+        *,
+        tool_name: str,
+        shared_store: Dict[str, Any],
+        approval_scope: str,
+        agent_name: str | None,
+    ) -> None:
+        normalized_scope = self._normalize_approval_scope(approval_scope)
+        if normalized_scope == "once" or normalized_scope == "deny":
+            return
+
+        if normalized_scope == "session":
+            session = shared_store.setdefault(
+                "session_tool_confirmation",
+                {"default_policy": None, "tool_policies": {}, "agent_policies": {}},
+            )
+            if not isinstance(session, dict):
+                return
+            tool_policies = session.setdefault("tool_policies", {})
+            if not isinstance(tool_policies, dict):
+                tool_policies = {}
+                session["tool_policies"] = tool_policies
+            tool_policies[tool_name] = "allow"
+            replacer = shared_store.get("replace_session_confirmation_overrides")
+            if callable(replacer):
+                replacer(session)
+            return
+
+        if normalized_scope == "always":
+            persister = shared_store.get("persist_tool_confirmation")
+            if callable(persister):
+                persister(tool_name, "allow")
+
     def _request_tool_confirmation(
         self,
         tool_name: str,
         arguments: Dict[str, Any],
         shared_store: Dict[str, Any],
         agent_name: str | None,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         question = f"Allow tool '{tool_name}'"
         if agent_name:
             question += f" from agent '{agent_name}'"
@@ -558,12 +605,16 @@ class ToolRuntime:
 
         response = self._confirm_tool.execute(
             prompt=question,
-            default="no",
+            default="deny",
             shared_store=shared_store,
         )
         if not isinstance(response, dict):
-            return False
+            return False, "deny"
         if response.get("success") is False:
             logger.warning("Tool confirmation prompt failed for '%s': %s", tool_name, response.get("error"))
-            return False
-        return bool(response.get("approved", False))
+            return False, "deny"
+        scope = self._normalize_approval_scope(
+            response.get("approval_scope")
+            or ("once" if response.get("approved", False) else "deny")
+        )
+        return bool(response.get("approved", False)), scope

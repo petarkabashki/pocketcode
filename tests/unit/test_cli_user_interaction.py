@@ -35,3 +35,21 @@ def test_parse_checklist_response_accepts_multiple_ids():
 
     assert response["values"] == ["git", "search"]
     assert [item["id"] for item in response["selected_options"]] == ["git", "search"]
+
+
+def test_parse_buttons_response_accepts_explicit_value_token():
+    response = parse_interaction_response(
+        {
+            "kind": "buttons",
+            "prompt": "Approve this tool?",
+            "options": [
+                {"id": "one-time", "label": "Approve Once", "value": "once"},
+                {"id": "session", "label": "Approve for Session", "value": "session"},
+            ],
+            "default": "session",
+        },
+        "once",
+    )
+
+    assert response["value"] == "once"
+    assert response["selected_options"][0]["id"] == "one-time"

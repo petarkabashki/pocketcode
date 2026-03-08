@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _YES_VALUES = {"y", "yes", "true", "1", "on"}
 _NO_VALUES = {"n", "no", "false", "0", "off"}
+_APPROVAL_SCOPES = {"once", "session", "always", "deny"}
 
 
 def _resolve_interaction_handler(shared_store: Dict[str, Any] | None) -> Callable[[Dict[str, Any]], Dict[str, Any]] | None:
@@ -99,8 +100,12 @@ def ask_user_confirmation(
     shared_store: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     normalized_default = default.strip().lower()
-    if normalized_default not in _YES_VALUES and normalized_default not in _NO_VALUES:
-        normalized_default = "no"
+    if normalized_default in _YES_VALUES:
+        normalized_default = "once"
+    elif normalized_default in _NO_VALUES:
+        normalized_default = "deny"
+    elif normalized_default not in _APPROVAL_SCOPES:
+        normalized_default = "deny"
 
     try:
         response = _request_interaction(
@@ -109,8 +114,10 @@ def ask_user_confirmation(
                 "prompt": prompt.strip() or "Confirmation required",
                 "default": normalized_default,
                 "options": [
-                    {"id": "yes", "label": "Yes", "value": "yes"},
-                    {"id": "no", "label": "No", "value": "no"},
+                    {"id": "once", "label": "Approve Once", "value": "once"},
+                    {"id": "session", "label": "Approve for Session", "value": "session"},
+                    {"id": "always", "label": "Always Approve", "value": "always"},
+                    {"id": "deny", "label": "Deny", "value": "deny"},
                 ],
             },
             shared_store=shared_store,
@@ -124,9 +131,25 @@ def ask_user_confirmation(
 
     value = str(response.get("value", "")).strip().lower()
     if value in _YES_VALUES:
-        return {"success": True, "approved": True, "response": value, "interaction": response}
-    if value in _NO_VALUES:
-        return {"success": True, "approved": False, "response": value, "interaction": response}
+        value = "once"
+    elif value in _NO_VALUES:
+        value = "deny"
+    if value in {"once", "session", "always"}:
+        return {
+            "success": True,
+            "approved": True,
+            "approval_scope": value,
+            "response": value,
+            "interaction": response,
+        }
+    if value == "deny":
+        return {
+            "success": True,
+            "approved": False,
+            "approval_scope": value,
+            "response": value,
+            "interaction": response,
+        }
     return {"success": False, "error": f"Unrecognized confirmation response: '{value}'."}
 
 
@@ -350,7 +373,7 @@ class ConfirmUserInputTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Prompts the local CLI user for yes/no confirmation."
+        return "Prompts the local CLI user for once/session/always/deny confirmation."
 
     @property
     def schema(self) -> Dict[str, Any]:
@@ -358,7 +381,11 @@ class ConfirmUserInputTool(BaseTool):
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Confirmation question shown to the user."},
-                "default": {"type": "string", "description": "Default answer for empty input: yes or no.", "default": "no"},
+                "default": {
+                    "type": "string",
+                    "description": "Default answer for empty input: once, session, always, or deny.",
+                    "default": "deny",
+                },
             },
             "required": ["prompt"],
         }

@@ -29,7 +29,6 @@ class TextualAppInteractionMixin:
         input_widget = self.query_one("#main-input", Input)
         input_widget.value = ""
         if self._pending_input_request is not None and self._active_run is not None:
-            self._write_user(text)
             request_id = str(
                 self._pending_input_request.get("request_id")
                 or self._pending_input_request.get("prompt_id")
@@ -42,8 +41,11 @@ class TextualAppInteractionMixin:
                     self._write_error(str(exc))
                     self._set_main_input_placeholder(interaction_placeholder(self._pending_input_request))
                     return
+                display_text = str(response_payload.get("label") or text)
+                self._write_user(display_text)
                 resolved = bool(request_id) and self._active_run.resolve_interaction(request_id, response_payload)
             else:
+                self._write_user(text)
                 resolved = bool(request_id) and self._active_run.resolve_user_input(request_id, text)
             if not resolved:
                 self._write_error("The pending prompt is no longer active.")

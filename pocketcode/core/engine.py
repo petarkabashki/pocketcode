@@ -5,6 +5,7 @@ import logging
 import copy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import yaml
 
@@ -17,6 +18,7 @@ from pocketcode.core.namespace_registry import RegistryError
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.core.run_handle import RunCancelledError, RunHandle
 from pocketcode.core.runtime_models import AgentProfile
+from pocketcode.core.session_manager import SessionManager
 from pocketcode.core.tool_runtime import ToolRuntime
 from pocketcode.core.workspace_llm_profile_manager import WorkspaceLlmProfileManager
 
@@ -43,6 +45,7 @@ class PocketCodeEngine:
         self._mode_manager.load()
         self._skill_manager = SkillManager(self._workspace_root)
         self._skill_manager.load()
+        self._session_manager = SessionManager(self._workspace_root)
         self._workspace_llm_profile_manager = WorkspaceLlmProfileManager(self._workspace_root)
         self._workspace_llm_profile_manager.load()
         self.active_agent_profile = None  # type: ignore[assignment]  # AgentProfile | None
@@ -75,6 +78,9 @@ class PocketCodeEngine:
             "tool_policies": {},
             "agent_policies": {},
         }
+        self.active_session_id: str | None = None
+        self.active_session_title: str | None = None
+        self.active_session_loaded_from_history = False
         self.last_run_summary: Dict[str, Any] = {
             "agent_path": [],
             "current_agent": self.current_agent,
@@ -87,6 +93,7 @@ class PocketCodeEngine:
 
         self._validate_current_selections()
         self._restore_textual_selection_state()
+        self._ensure_active_session()
 
     def reload(self) -> None:
         self._plugins.load()
@@ -122,6 +129,7 @@ class PocketCodeEngine:
         self._refresh_runtime_components()
         self._agent_tools_cache = {}
         self._validate_current_selections()
+        self._ensure_active_session()
 
     def _validate_current_selections(self) -> None:
         if self.current_agent and self.current_agent not in self._plugins.agents:
@@ -947,14 +955,17 @@ class PocketCodeEngine:
                     agent=shared_store.get("active_agent") or "auto",
                 )
                 result = self._execute_request(shared_store=shared_store, cli_context=cli_context)
+                self._finalize_active_session(shared_store=shared_store, final_output=result)
                 handle.complete(result=result, summary=self._build_run_summary(shared_store, cli_context))
             except RunCancelledError as exc:
                 summary = self._build_run_summary(shared_store, cli_context)
                 self.last_run_summary = dict(summary)
+                self._finalize_active_session(shared_store=shared_store, cancellation_reason=str(exc))
                 handle.cancelled(reason=str(exc), summary=summary)
             except Exception as exc:
                 logger.error("Request processing failed: %s", exc, exc_info=True)
                 self.last_run_summary = dict(self._build_run_summary(shared_store, cli_context))
+                self._finalize_active_session(shared_store=shared_store, error=str(exc))
                 handle.fail(exc)
 
         handle.start(runner)
@@ -979,7 +990,21 @@ class PocketCodeEngine:
             if agents:
                 initial_agent = agents[0]
 
+        active_mode = getattr(self, "active_mode", None)
+        active_skills = self.get_active_skills() if hasattr(self, "get_active_skills") else []
+        active_skill_existing_tool_refs = (
+            self._active_skill_existing_tool_refs()
+            if hasattr(self, "_active_skill_existing_tool_refs")
+            else []
+        )
+        active_skill_tool_names = (
+            list(self._active_skill_provided_tools().keys())
+            if hasattr(self, "_active_skill_provided_tools")
+            else []
+        )
+
         shared_store: Dict[str, Any] = {
+            "run_id": uuid4().hex,
             "initial_request": user_input,
             "cli_context": self._copy_cli_context(cli_context),
             "formatted_cli_context": self._format_cli_context(cli_context),
@@ -995,10 +1020,15 @@ class PocketCodeEngine:
             "session_tool_confirmation": self._copy_session_confirmation_overrides(),
             # T013: inject active agent profile so AgentRuntime / ToolRuntime can read it.
             "active_agent_profile": self.active_agent_profile,
-            "active_mode": self.active_mode.name if self.active_mode is not None else None,
-            "active_skills": self.get_active_skills(),
-            "active_skill_existing_tool_refs": self._active_skill_existing_tool_refs(),
-            "active_skill_tool_names": list(self._active_skill_provided_tools().keys()),
+            "active_mode": active_mode.name if active_mode is not None else None,
+            "active_skills": active_skills,
+            "active_skill_existing_tool_refs": active_skill_existing_tool_refs,
+            "active_skill_tool_names": active_skill_tool_names,
+            "active_session_id": getattr(self, "active_session_id", None),
+            "active_session_title": getattr(self, "active_session_title", None),
+            "active_session_loaded_from_history": bool(getattr(self, "active_session_loaded_from_history", False)),
+            "replace_session_confirmation_overrides": self.replace_session_confirmation_overrides,
+            "persist_tool_confirmation": self.set_persistent_tool_confirmation,
         }
         if callable(event_handler):
             shared_store["runtime_event_handler"] = event_handler
@@ -1022,10 +1052,11 @@ class PocketCodeEngine:
         return str(shared_store.get("final_output") or shared_store.get("final_answer") or "No output generated.")
 
     def _build_run_summary(self, shared_store: Dict[str, Any], cli_context: Dict[str, Any]) -> Dict[str, Any]:
+        active_mode = getattr(self, "active_mode", None)
         return {
             "agent_path": self._build_agent_path(shared_store),
             "current_agent": shared_store.get("active_agent") or self.current_agent,
-            "active_mode": shared_store.get("active_mode") or (self.active_mode.name if self.active_mode else None),
+            "active_mode": shared_store.get("active_mode") or (active_mode.name if active_mode else None),
             "active_skills": [skill.name for skill in shared_store.get("active_skills", []) or []],
             "current_llm_profile": shared_store.get("last_llm_profile"),
             "current_llm_model": (
@@ -1043,6 +1074,7 @@ class PocketCodeEngine:
     def status(self) -> Dict[str, Any]:
         selected_agent = self.active_agent_profile.name if self.active_agent_profile else None
         selected_llm_profile = self._selected_llm_profile()
+        active_mode = getattr(self, "active_mode", None)
         runtime_flow = (
             self._runtime_config.get("agent_runtime_flow")
             or self._runtime_config.get("agent_runtime_workflow")
@@ -1053,7 +1085,7 @@ class PocketCodeEngine:
             "selected_flow": self.current_agent,
             "selected_agent": selected_agent,
             "selected_llm_profile": selected_llm_profile,
-            "mode": self.active_mode.name if self.active_mode else None,
+            "mode": active_mode.name if active_mode else None,
             "skills": list(self.enabled_skills),
             "runtime_flow": runtime_flow,
             # T013: expose active agent profile name.
@@ -1066,6 +1098,14 @@ class PocketCodeEngine:
             "default_llm_profile": self.default_llm_profile,
             "tool_confirmation": self._tool_confirmation_config,
             "session_tool_confirmation_overrides": self._copy_session_confirmation_overrides(),
+            "active_session_id": getattr(self, "active_session_id", None),
+            "active_session_title": getattr(self, "active_session_title", None),
+            "active_session_loaded_from_history": bool(getattr(self, "active_session_loaded_from_history", False)),
+            "active_session": {
+                "session_id": getattr(self, "active_session_id", None),
+                "title": getattr(self, "active_session_title", None),
+                "loaded_from_history": bool(getattr(self, "active_session_loaded_from_history", False)),
+            },
             "available_flows": self.list_flows(),
             "available_agents": self.list_available_agents(),
             "available_modes": self.list_modes(),
@@ -1073,6 +1113,86 @@ class PocketCodeEngine:
             "available_llm_profiles": self.list_llm_profiles(),
             "last_run_summary": dict(self.last_run_summary),
         }
+
+    def get_active_session_info(self) -> Dict[str, Any]:
+        self._ensure_active_session()
+        updated_at = None
+        session_manager = getattr(self, "_session_manager", None)
+        session_id = getattr(self, "active_session_id", None)
+        if session_manager is not None and session_id:
+            try:
+                updated_at = session_manager.load_session(session_id).updated_at
+            except Exception:
+                updated_at = None
+        return {
+            "session_id": session_id,
+            "title": getattr(self, "active_session_title", None),
+            "updated_at": updated_at,
+            "loaded_from_history": bool(getattr(self, "active_session_loaded_from_history", False)),
+        }
+
+    def list_saved_sessions(self) -> List[Dict[str, Any]]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            return []
+        self._ensure_active_session()
+        active_session_id = getattr(self, "active_session_id", None)
+        items: list[Dict[str, Any]] = []
+        for summary in session_manager.list_session_summaries():
+            item = summary.as_dict()
+            item["is_active"] = summary.session_id == active_session_id
+            item["is_resumable"] = summary.session_id != active_session_id
+            items.append(item)
+        return items
+
+    def start_new_session(self, title: str | None = None) -> Dict[str, Any]:
+        self._update_active_session_snapshot()
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        self.clear_session_confirmation_overrides()
+        record = session_manager.create_session(title=title, state=self._session_state_payload())
+        self.active_session_id = record.session_id
+        self.active_session_title = record.title
+        self.active_session_loaded_from_history = False
+        return self.get_active_session_info()
+
+    def resume_session(self, session_id: str) -> Dict[str, Any]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+
+        record = session_manager.load_session(session_id)
+        self._restore_saved_session(record)
+        self.active_session_id = record.session_id
+        self.active_session_title = record.title
+        self.active_session_loaded_from_history = True
+        self._update_active_session_snapshot()
+        return self.get_active_session_info()
+
+    def delete_session(self, session_id: str) -> Dict[str, Any]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        target_id = str(session_id or "").strip()
+        if not target_id:
+            raise ValueError("Session id is required.")
+        if target_id == getattr(self, "active_session_id", None):
+            raise ValueError("Cannot delete the active session.")
+        if not session_manager.session_exists(target_id):
+            raise ValueError(f"Unknown session '{target_id}'.")
+        if not session_manager.delete_session(target_id):
+            raise ValueError(f"Unknown session '{target_id}'.")
+        return {"session_id": target_id, "deleted": True}
+
+    def clear_saved_sessions(self) -> int:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        self._ensure_active_session()
+        active_session_id = getattr(self, "active_session_id", None)
+        excluded = [active_session_id] if active_session_id else []
+        return session_manager.clear_sessions(exclude_ids=excluded)
 
     def _selected_llm_profile(self) -> Optional[str]:
         if self.active_agent_profile is not None and self.active_agent_profile.llm_profile:
@@ -1084,6 +1204,70 @@ class PocketCodeEngine:
 
     def set_session_tool_confirmation(self, tool_name: str, policy: Optional[str]) -> None:
         self._set_policy_entry(self.session_confirmation_overrides["tool_policies"], tool_name, policy)
+
+    def replace_session_confirmation_overrides(self, overrides: Dict[str, Any]) -> None:
+        normalized = {
+            "default_policy": self._normalize_confirmation_policy(overrides.get("default_policy"))
+            if overrides.get("default_policy") is not None
+            else None,
+            "tool_policies": {},
+            "agent_policies": {},
+        }
+
+        raw_tool_policies = overrides.get("tool_policies", {})
+        if isinstance(raw_tool_policies, dict):
+            for tool_name, policy in raw_tool_policies.items():
+                try:
+                    normalized_policy = self._normalize_confirmation_policy(policy)
+                except ValueError:
+                    continue
+                if normalized_policy is not None:
+                    normalized["tool_policies"][str(tool_name)] = normalized_policy
+
+        raw_agent_policies = overrides.get("agent_policies", {})
+        if isinstance(raw_agent_policies, dict):
+            for agent_name, raw_policy in raw_agent_policies.items():
+                if not isinstance(raw_policy, dict):
+                    continue
+                entry = {"default_policy": None, "tool_policies": {}}
+                if raw_policy.get("default_policy") is not None:
+                    try:
+                        entry["default_policy"] = self._normalize_confirmation_policy(raw_policy.get("default_policy"))
+                    except ValueError:
+                        entry["default_policy"] = None
+                raw_entry_tools = raw_policy.get("tool_policies", {})
+                if isinstance(raw_entry_tools, dict):
+                    for tool_name, policy in raw_entry_tools.items():
+                        try:
+                            normalized_policy = self._normalize_confirmation_policy(policy)
+                        except ValueError:
+                            continue
+                        if normalized_policy is not None:
+                            entry["tool_policies"][str(tool_name)] = normalized_policy
+                if entry["default_policy"] is not None or entry["tool_policies"]:
+                    normalized["agent_policies"][str(agent_name)] = entry
+
+        self.session_confirmation_overrides = normalized
+        self._update_active_session_snapshot()
+
+    def set_persistent_tool_confirmation(self, tool_name: str, policy: Optional[str]) -> Path:
+        runtime_section = self._config.setdefault("runtime", {})
+        if not isinstance(runtime_section, dict):
+            runtime_section = {}
+            self._config["runtime"] = runtime_section
+        confirmation_section = runtime_section.setdefault("tool_confirmation", {})
+        if not isinstance(confirmation_section, dict):
+            confirmation_section = {}
+            runtime_section["tool_confirmation"] = confirmation_section
+        tool_policies = confirmation_section.setdefault("tool_policies", {})
+        if not isinstance(tool_policies, dict):
+            tool_policies = {}
+            confirmation_section["tool_policies"] = tool_policies
+        self._set_policy_entry(tool_policies, tool_name, policy)
+        self._runtime_config = runtime_section
+        self._tool_confirmation_config = self._build_tool_confirmation_config()
+        self._refresh_runtime_components()
+        return self._write_workspace_config()
 
     def set_session_agent_confirmation(self, agent_name: str, policy: Optional[str]) -> None:
         agent_entry = self._get_or_create_session_agent_entry(agent_name)
@@ -1105,6 +1289,48 @@ class PocketCodeEngine:
             "tool_policies": {},
             "agent_policies": {},
         }
+
+    def _restore_saved_session(self, record: Any) -> None:
+        active_mode_name = str(getattr(record, "active_mode", "") or "").strip()
+        active_profile_name = str(getattr(record, "active_profile", "") or "").strip()
+        active_agent_name = str(getattr(record, "active_agent", "") or "").strip()
+        llm_profile_name = str(getattr(record, "global_llm_profile", "") or "").strip()
+
+        self.active_mode = None
+        self.active_agent_profile = None
+        self.current_agent = None
+
+        if active_mode_name:
+            try:
+                self.set_mode(active_mode_name)
+            except Exception:
+                logger.warning("Saved session mode '%s' is unavailable; falling back.", active_mode_name)
+
+        if self.active_mode is None and active_profile_name:
+            try:
+                self.set_active_agent_profile(active_profile_name)
+            except Exception:
+                logger.warning("Saved session profile '%s' is unavailable; falling back.", active_profile_name)
+
+        if self.active_mode is None and self.active_agent_profile is None and active_agent_name:
+            try:
+                self.set_agent(active_agent_name)
+            except Exception:
+                logger.warning("Saved session agent '%s' is unavailable.", active_agent_name)
+
+        normalized_skills = self._normalize_skill_names(getattr(record, "enabled_skills", []) or [], strict=False)
+        self.enabled_skills = list(normalized_skills)
+
+        try:
+            self.set_global_llm_override(llm_profile_name or None)
+        except Exception:
+            logger.warning("Saved session LLM '%s' is unavailable; clearing override.", llm_profile_name)
+            self.set_global_llm_override(None)
+
+        self.replace_session_confirmation_overrides(
+            dict(getattr(record, "session_confirmation_overrides", {}) or {})
+        )
+        self._refresh_runtime_components()
 
     def _copy_cli_context(self, cli_context: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -1313,6 +1539,119 @@ class PocketCodeEngine:
             else {},
             "agent_policies": copied_agent_policies,
         }
+
+    def _session_state_payload(self, shared_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        source = shared_store or {}
+        active_profile = source.get("active_agent_profile", self.active_agent_profile)
+        active_skills = source.get("active_skills")
+        if active_skills is None:
+            active_skills = self.get_active_skills()
+        skill_names = [
+            skill.name if hasattr(skill, "name") else str(skill)
+            for skill in active_skills or []
+        ]
+        active_mode = source.get("active_mode")
+        current_active_mode = getattr(self, "active_mode", None)
+        if not active_mode and current_active_mode is not None:
+            active_mode = current_active_mode.name
+        return {
+            "active_agent": source.get("active_agent") or self.current_agent,
+            "active_profile": getattr(active_profile, "name", None),
+            "active_mode": active_mode,
+            "enabled_skills": skill_names,
+            "global_llm_profile": source.get("cli_llm_override") or self.global_llm_override,
+            "session_confirmation_overrides": dict(
+                source.get("session_tool_confirmation")
+                if isinstance(source.get("session_tool_confirmation"), dict)
+                else self._copy_session_confirmation_overrides()
+            ),
+        }
+
+    def _ensure_active_session(self) -> None:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            return
+        session_id = getattr(self, "active_session_id", None)
+        if session_id:
+            try:
+                record = session_manager.load_session(session_id)
+            except Exception:
+                logger.warning("Active session '%s' could not be loaded; creating a fresh session.", session_id)
+            else:
+                self.active_session_title = record.title
+                return
+        record = session_manager.create_session(state=self._session_state_payload())
+        self.active_session_id = record.session_id
+        self.active_session_title = record.title
+        self.active_session_loaded_from_history = False
+
+    def _update_active_session_snapshot(self, shared_store: Dict[str, Any] | None = None) -> None:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            return
+        self._ensure_active_session()
+        session_id = getattr(self, "active_session_id", None)
+        if not session_id:
+            return
+        record = session_manager.update_session(session_id, **self._session_state_payload(shared_store))
+        self.active_session_title = record.title
+
+    def _finalize_active_session(
+        self,
+        *,
+        shared_store: Dict[str, Any],
+        final_output: str | None = None,
+        error: str | None = None,
+        cancellation_reason: str | None = None,
+    ) -> None:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            return
+        self._update_active_session_snapshot(shared_store)
+        session_id = getattr(self, "active_session_id", None)
+        if not session_id:
+            return
+
+        run_id = str(shared_store.get("run_id") or "") or None
+        initial_request = str(shared_store.get("initial_request") or "").strip()
+        if initial_request:
+            session_manager.append_transcript_entry(
+                session_id,
+                role="user",
+                content=initial_request,
+                run_id=run_id,
+                metadata={"agent": shared_store.get("active_agent")},
+            )
+
+        transcript_payload = None
+        transcript_role = "assistant"
+        if final_output:
+            transcript_payload = str(final_output)
+        elif cancellation_reason:
+            transcript_role = "system"
+            transcript_payload = f"Run cancelled: {cancellation_reason}"
+        elif error:
+            transcript_role = "system"
+            transcript_payload = f"Run failed: {error}"
+
+        if transcript_payload:
+            session_manager.append_transcript_entry(
+                session_id,
+                role=transcript_role,
+                content=transcript_payload,
+                run_id=run_id,
+                metadata={"summary": dict(self.last_run_summary)},
+            )
+
+        event_handler = shared_store.get("runtime_event_handler")
+        if callable(event_handler):
+            saved_record = session_manager.load_session(session_id)
+            event_handler(
+                "session_saved",
+                session_id=session_id,
+                title=saved_record.title,
+                transcript_entries=len(saved_record.transcript),
+            )
 
     def _build_llm_overrides_config(self) -> Dict[str, Dict[str, str]]:
         runtime_overrides = self._runtime_config.get("llm_overrides", {})
