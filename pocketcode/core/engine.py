@@ -20,6 +20,7 @@ from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_re
 from pocketcode.core.reference_syntax import (
     normalize_prompt_source,
     normalize_registry_reference,
+    normalize_registry_reference_compat,
     parse_prompt_reference,
     parse_reference,
 )
@@ -680,13 +681,10 @@ class PocketCodeEngine:
         if not cleaned:
             return None
 
-        try:
-            canonical_candidate = normalize_registry_reference(
-                cleaned,
-                allowed_kinds={"agent", "flow"},
-            )
-        except ValueError:
-            canonical_candidate = cleaned.replace("::", ".")
+        canonical_candidate = normalize_registry_reference_compat(
+            cleaned,
+            allowed_kinds={"agent", "flow"},
+        )
 
         plugins = getattr(self, "_plugins", None)
         agents_registry = getattr(plugins, "agents", None)
@@ -2603,13 +2601,7 @@ class PocketCodeEngine:
         return normalized
 
     def _normalize_tool_key_for_persistence(self, tool_name: Any) -> str:
-        cleaned = str(tool_name or "").strip()
-        if not cleaned:
-            return ""
-        try:
-            return normalize_registry_reference(cleaned, allowed_kinds={"tool"})
-        except ValueError:
-            return cleaned.replace("::", ".")
+        return normalize_registry_reference_compat(tool_name, allowed_kinds={"tool"})
 
     def _normalize_agent_key_for_persistence(self, agent_name: Any) -> str:
         normalized = self._normalize_agent_name(agent_name)

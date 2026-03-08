@@ -141,6 +141,7 @@ Reference parsing is centralized in `pocketcode/core/reference_syntax.py`.
 - manifest loading, workspace agent loading, markdown mode and skill loading, registry normalization, prompt-resource resolution, and engine-side post-load pruning now consume this parsed form instead of duplicating string-splitting logic.
 - runtime tool lookup, allowlist checks, and confirmation-policy maps also normalize legacy and typed tool ids through the same parser-backed path.
 - persistence paths reuse the same normalization layer, so workspace agent YAML, saved session confirmation overrides, persistent tool-confirmation config, and Textual selection presets are written back with canonical dotted registry ids instead of mixed legacy forms.
+- permissive compatibility callers that must not reject malformed legacy input now route through the same shared fallback helper in `reference_syntax` instead of re-implementing local `::` normalization branches.
 - compatibility helpers such as `normalize_registry_reference()` remain available, but they are wrappers over the shared parser.
 
 ## Plugin Discovery

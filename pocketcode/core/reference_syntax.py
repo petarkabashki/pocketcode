@@ -93,6 +93,16 @@ def normalize_registry_reference(ref: str, *, allowed_kinds: Iterable[str] | Non
     return parse_reference(ref, allowed_kinds=allowed_kinds).as_registry_key()
 
 
+def normalize_registry_reference_compat(ref: str, *, allowed_kinds: Iterable[str] | None = None) -> str:
+    cleaned = str(ref or "").strip()
+    if not cleaned:
+        return ""
+    try:
+        return normalize_registry_reference(cleaned, allowed_kinds=allowed_kinds)
+    except ValueError:
+        return cleaned.replace("::", ".")
+
+
 def normalize_prompt_reference(prompt_ref: str) -> str:
     return parse_prompt_reference(prompt_ref).as_registry_key()
 

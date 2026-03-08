@@ -1,6 +1,7 @@
 from pocketcode.core.reference_syntax import (
     parse_prompt_reference,
     parse_reference,
+    normalize_registry_reference_compat,
     typed_reference_kind,
 )
 
@@ -66,3 +67,11 @@ class TestTypedReferenceKind:
 
     def test_detects_known_prefix(self):
         assert typed_reference_kind("agent:core.react") == "agent"
+
+
+class TestCompatibilityNormalization:
+    def test_compat_normalizer_keeps_legacy_normalization(self):
+        assert normalize_registry_reference_compat("core::read_file", allowed_kinds={"tool"}) == "core.read_file"
+
+    def test_compat_normalizer_preserves_invalid_typed_input_for_callers(self):
+        assert normalize_registry_reference_compat("prompt:core.review", allowed_kinds={"tool"}) == "prompt:core.review"

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from pocketcode.core.interfaces import BaseTool
-from pocketcode.core.reference_syntax import normalize_registry_reference
+from pocketcode.core.reference_syntax import normalize_registry_reference_compat
 from pocketcode.plugins.core.tools import ConfirmUserInputTool
 
 logger = logging.getLogger(__name__)
@@ -103,13 +103,7 @@ class ToolRuntime:
         return (namespace, *source_parts)
 
     def _normalize_tool_name(self, tool_name: Any) -> str:
-        cleaned = str(tool_name or "").strip()
-        if not cleaned:
-            return ""
-        try:
-            return normalize_registry_reference(cleaned, allowed_kinds={"tool"})
-        except ValueError:
-            return cleaned.replace("::", ".")
+        return normalize_registry_reference_compat(tool_name, allowed_kinds={"tool"})
 
     def _registered_tool_name(self, tool_name: str) -> str:
         raw_name = str(tool_name or "").strip()
