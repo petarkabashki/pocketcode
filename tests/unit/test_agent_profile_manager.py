@@ -15,6 +15,7 @@ from __future__ import annotations
 import yaml
 
 from pocketcode.core.agent_profile_manager import AgentProfileManager
+from pocketcode.core.namespace_registry import NamespaceRegistry
 from pocketcode.core.runtime_models import AgentDefinition, AgentProfile
 
 
@@ -169,6 +170,31 @@ class TestPluginDeclaredProfile:
         assert profile is not None
         assert profile.flow == "plug.agent"
 
+    def test_plugin_local_markdown_agent_resolves_prompt_imports_in_plugin_context(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        plugin_root = tmp_path / "plugins" / "plug"
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        (agents_dir / "agent.md").write_text(
+            """---
+name: plug::agent
+flow: plug::agent
+---
+{{ import:prompt:review }}
+""",
+            encoding="utf-8",
+        )
+        defn.metadata = {"plugin_root": str(plugin_root), "plugin": "plug"}
+        prompts = NamespaceRegistry()
+        prompts.register("plug", "review", "Plugin-local imported prompt.")
+
+        apm = AgentProfileManager(tmp_path, prompt_registry=prompts)
+        apm.load({qname: defn})
+
+        profile = apm.get("plug::agent")
+        assert profile is not None
+        assert profile.inline_prompt == "Plugin-local imported prompt."
+
     def test_plugin_agent_yaml_respects_plugin_ignore_rules(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
         plugin_root = tmp_path / "plugins" / "plug"
@@ -230,6 +256,80 @@ class TestWorkspaceYamlLoading:
         apm.load({qname: defn})
 
         assert apm.get("flow-review") is not None
+
+    def test_workspace_markdown_agent_profile_loads_inline_prompt(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        profiles_dir = tmp_path / ".pocketcode" / "agents"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "review.md").write_text(
+            """---
+name: review
+flow: plug::agent
+tools:
+  - tool:core.read_file
+---
+Review only the changed files.
+""",
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname.replace("::", "."): defn})
+
+        profile = apm.get("review")
+        assert profile is not None
+        assert profile.flow == "plug.agent"
+        assert profile.tools == ["core.read_file"]
+        assert profile.inline_prompt == "Review only the changed files."
+
+    def test_workspace_markdown_agent_profile_resolves_prompt_imports(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        profiles_dir = tmp_path / ".pocketcode" / "agents"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "review.md").write_text(
+            """---
+name: review
+flow: plug::agent
+---
+{{ import:prompt:review }}
+""",
+            encoding="utf-8",
+        )
+        prompts = NamespaceRegistry()
+        prompts.register("workspace", "review", "Imported workspace prompt.")
+
+        apm = AgentProfileManager(tmp_path, prompt_registry=prompts)
+        apm.load({qname.replace("::", "."): defn})
+
+        profile = apm.get("review")
+        assert profile is not None
+        assert profile.inline_prompt == "Imported workspace prompt."
+
+    def test_workspace_markdown_agent_profile_is_saved_as_markdown(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        profiles_dir = tmp_path / ".pocketcode" / "agents"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        source_path = profiles_dir / "review.md"
+        source_path.write_text(
+            """---
+name: review
+flow: plug::agent
+---
+Initial prompt.
+""",
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        profile = apm.get("review")
+        profile.inline_prompt = "Updated prompt."
+        apm.save(profile)
+
+        saved = source_path.read_text(encoding="utf-8")
+        assert "Updated prompt." in saved
+        assert "flow: plug.agent" in saved
 
     def test_workspace_yaml_loads_profile_skills(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")

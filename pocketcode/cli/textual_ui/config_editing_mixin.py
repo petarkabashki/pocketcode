@@ -136,6 +136,8 @@ class TextualAppConfigEditingMixin:
         active_profile = self._engine.active_agent_profile
         active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         llm_profile = self._current_llm_profile_name()
+        flow_asset_count = len(self._engine.list_markdown_assets("flow")) if hasattr(self._engine, "list_markdown_assets") else 0
+        tool_asset_count = len(self._engine.list_markdown_assets("tool")) if hasattr(self._engine, "list_markdown_assets") else 0
         return (
             PickerOption(
                 "agent",
@@ -148,6 +150,18 @@ class TextualAppConfigEditingMixin:
                 f"Mode Config: {active_mode.name if active_mode else 'none'}",
                 description="Edit the active mode markdown",
                 search_text="mode config markdown",
+            ),
+            PickerOption(
+                "flow_asset",
+                f"Flow Assets: {flow_asset_count}",
+                description="Edit a workspace markdown flow asset",
+                search_text="flow asset markdown edit workspace",
+            ),
+            PickerOption(
+                "tool_asset",
+                f"Tool Assets: {tool_asset_count}",
+                description="Edit a workspace markdown tool asset",
+                search_text="tool asset markdown edit workspace",
             ),
             PickerOption(
                 "llm",
@@ -173,6 +187,8 @@ class TextualAppConfigEditingMixin:
         active_profile = self._engine.active_agent_profile
         active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         llm_profile = self._current_llm_profile_name()
+        flow_asset_count = len(self._engine.list_markdown_assets("flow")) if hasattr(self._engine, "list_markdown_assets") else 0
+        tool_asset_count = len(self._engine.list_markdown_assets("tool")) if hasattr(self._engine, "list_markdown_assets") else 0
         return (
             PickerOption(
                 "agent",
@@ -185,6 +201,18 @@ class TextualAppConfigEditingMixin:
                 f"Mode Config: {active_mode.name if active_mode else 'none'}",
                 description="Clone the active mode",
                 search_text="clone mode markdown",
+            ),
+            PickerOption(
+                "flow_asset",
+                f"Flow Assets: {flow_asset_count}",
+                description="Clone a workspace markdown flow asset",
+                search_text="clone flow asset markdown workspace",
+            ),
+            PickerOption(
+                "tool_asset",
+                f"Tool Assets: {tool_asset_count}",
+                description="Clone a workspace markdown tool asset",
+                search_text="clone tool asset markdown workspace",
             ),
             PickerOption(
                 "llm",
@@ -246,6 +274,8 @@ class TextualAppConfigEditingMixin:
         openers = {
             "agent": self._open_agent_editor,
             "mode": self._open_mode_editor,
+            "flow_asset": self._open_markdown_flow_asset_editor,
+            "tool_asset": self._open_markdown_tool_asset_editor,
             "llm": self._open_llm_profile_editor,
             "tools": self._open_tool_selection_picker,
             "tool_policies": self._open_tool_policy_editor,
@@ -262,6 +292,12 @@ class TextualAppConfigEditingMixin:
             placeholder = "my-agent-safe"
         elif selected_value == "mode":
             placeholder = "review-copy"
+        elif selected_value == "flow_asset":
+            self._open_markdown_asset_clone_picker("flow")
+            return
+        elif selected_value == "tool_asset":
+            self._open_markdown_asset_clone_picker("tool")
+            return
         elif selected_value == "llm":
             placeholder = "my-llm-profile"
         self._open_name_prompt(
@@ -357,6 +393,79 @@ class TextualAppConfigEditingMixin:
     def _apply_mode_edit(self, mode_name: str, text: str) -> None:
         target_path = self._update_mode_effect(mode_name, text)
         self._write_info(f"Saved mode '{mode_name}' to {target_path}.")
+
+    def _workspace_markdown_asset_options(self, asset_kind: str) -> tuple[PickerOption, ...]:
+        if not hasattr(self._engine, "list_markdown_assets"):
+            return ()
+        names = self._engine.list_markdown_assets(asset_kind)
+        return tuple(
+            PickerOption(
+                name,
+                name,
+                description=f"Workspace markdown {asset_kind} asset",
+                search_text=f"{asset_kind} markdown asset workspace",
+            )
+            for name in names
+        )
+
+    def _open_markdown_asset_picker(
+        self,
+        *,
+        asset_kind: str,
+        title: str,
+        help_text: str,
+        on_select: Callable[[str], None],
+    ) -> None:
+        options = self._workspace_markdown_asset_options(asset_kind)
+        if not options:
+            self._write_error(f"No workspace markdown {asset_kind} assets are available.")
+            return
+        self._show_picker(
+            title=title,
+            options=options,
+            current_value=None,
+            on_select=on_select,
+            help_text=help_text,
+            empty_message=f"No workspace markdown {asset_kind} assets are available.",
+        )
+
+    def _open_markdown_flow_asset_editor(self, asset_name: str | None = None) -> None:
+        if asset_name is None:
+            self._open_markdown_asset_picker(
+                asset_kind="flow",
+                title="Edit Flow Asset",
+                help_text="Choose a workspace markdown flow asset to edit.",
+                on_select=self._open_markdown_flow_asset_editor,
+            )
+            return
+        asset = self._engine.get_markdown_asset("flow", asset_name)
+        self._open_text_editor(
+            title=f"Edit Flow Asset: {asset_name}",
+            help_text="Edit the flow markdown asset. Ctrl+S saves.",
+            initial_text=asset["text"],
+            on_submit=lambda text: self._apply_markdown_asset_edit("flow", asset_name, text),
+        )
+
+    def _open_markdown_tool_asset_editor(self, asset_name: str | None = None) -> None:
+        if asset_name is None:
+            self._open_markdown_asset_picker(
+                asset_kind="tool",
+                title="Edit Tool Asset",
+                help_text="Choose a workspace markdown tool asset to edit.",
+                on_select=self._open_markdown_tool_asset_editor,
+            )
+            return
+        asset = self._engine.get_markdown_asset("tool", asset_name)
+        self._open_text_editor(
+            title=f"Edit Tool Asset: {asset_name}",
+            help_text="Edit the tool markdown asset. Ctrl+S saves.",
+            initial_text=asset["text"],
+            on_submit=lambda text: self._apply_markdown_asset_edit("tool", asset_name, text),
+        )
+
+    def _apply_markdown_asset_edit(self, asset_kind: str, asset_name: str, text: str) -> None:
+        updated = self._update_markdown_asset_effect(asset_kind, asset_name, text)
+        self._write_info(f"Saved {asset_kind} asset '{asset_name}' to {updated['path']}.")
 
     def _open_llm_profile_editor(self) -> None:
         self._ensure_workspace_llm_profile(

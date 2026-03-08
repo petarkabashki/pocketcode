@@ -3,6 +3,9 @@ from __future__ import annotations
 import dataclasses
 import logging
 import copy
+import importlib
+import sys
+import types
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -11,24 +14,46 @@ import yaml
 
 from pocketcode.core.agent_manager import AgentManager
 from pocketcode.config.loader import WORKSPACE_SETTINGS_FILENAME
-from pocketcode.core.markdown_profiles import ModeDefinition, ModeManager, SkillDefinition, SkillManager
+from pocketcode.core.markdown_profiles import (
+    ModeDefinition,
+    ModeManager,
+    SkillDefinition,
+    SkillManager,
+    parse_markdown_front_matter,
+)
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.namespace_registry import RegistryError
 from pocketcode.core.plugin_manager import PluginManager
-from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
+from pocketcode.core.prompt_loader import (
+    coerce_str_list,
+    is_prompt_reference,
+    load_prompt_markdown,
+    resolve_prompt_bundle,
+    resolve_prompt_reference,
+)
 from pocketcode.core.reference_syntax import (
     normalize_prompt_source,
     normalize_registry_reference,
     normalize_registry_reference_compat,
     parse_prompt_reference,
     parse_reference,
+    validate_prompt_source,
+    validate_registry_reference,
 )
 from pocketcode.core.run_handle import RunCancelledError, RunHandle
 from pocketcode.core.runtime_models import AgentProfile
+from pocketcode.core.resource_roots import primary_resource_root
 from pocketcode.core.session_manager import SessionManager
 from pocketcode.core.tool_runtime import ToolRuntime
 from pocketcode.core.workspace_llm_profile_manager import WorkspaceLlmProfileManager
+from pocketcode.core.markdown_assets import (
+    compile_markdown_agent_definition,
+    compile_markdown_flow_definition,
+    compile_markdown_tool_definition,
+    parse_markdown_asset_text_document,
+)
+from pocketcode.core.markdown_graph_flow import build_graph_flow_from_metadata
 
 logger = logging.getLogger(__name__)
 _UNSET = object()
@@ -48,11 +73,21 @@ class PocketCodeEngine:
         self._plugins.load()
 
         # T011: instantiate AgentManager after plugins are loaded.
-        self._agent_profile_manager = AgentManager(self._workspace_root)
+        self._agent_profile_manager = AgentManager(self._workspace_root, prompt_registry=self._plugins.prompts)
         self._agent_profile_manager.load(dict(self._plugins.agents))
-        self._mode_manager = ModeManager(self._workspace_root)
+        self._mode_manager = ModeManager(
+            self._workspace_root,
+            flow_registry=self._plugins.flows,
+            tool_registry=self._plugins.tools,
+            prompt_registry=self._plugins.prompts,
+            agent_profile_getter=self._agent_profile_manager.get,
+        )
         self._mode_manager.load()
-        self._skill_manager = SkillManager(self._workspace_root)
+        self._skill_manager = SkillManager(
+            self._workspace_root,
+            tool_registry=self._plugins.tools,
+            prompt_registry=self._plugins.prompts,
+        )
         self._skill_manager.load()
         self._session_manager = SessionManager(self._workspace_root)
         self._workspace_llm_profile_manager = WorkspaceLlmProfileManager(self._workspace_root)
@@ -107,11 +142,224 @@ class PocketCodeEngine:
         self._restore_textual_selection_state()
         self._ensure_active_session()
 
+    def create_markdown_asset(self, asset_kind: str, name: str) -> Dict[str, Any]:
+        normalized_kind = str(asset_kind or "").strip().lower()
+        normalized_name = self._normalize_asset_file_name(name)
+        if normalized_kind not in {"agent", "flow", "tool"}:
+            raise ValueError("Unsupported asset kind. Expected one of: agent, flow, tool.")
+
+        resource_root = primary_resource_root(self._workspace_root)
+        target_dir = resource_root.path / f"{normalized_kind}s"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        asset_path = target_dir / f"{normalized_name}.md"
+        if asset_path.exists():
+            raise ValueError(f"{normalized_kind.title()} asset already exists: {asset_path}")
+
+        companion_path: Path | None = None
+        if normalized_kind == "tool":
+            companion_path = target_dir / f"{normalized_name}.py"
+            if companion_path.exists():
+                raise ValueError(f"Tool handler module already exists: {companion_path}")
+            companion_path.write_text(
+                self._tool_python_scaffold(normalized_name),
+                encoding="utf-8",
+            )
+
+        asset_path.write_text(
+            self._markdown_asset_scaffold(normalized_kind, normalized_name),
+            encoding="utf-8",
+        )
+        self.reload()
+        return {
+            "kind": normalized_kind,
+            "name": normalized_name,
+            "path": asset_path,
+            "companion_path": companion_path,
+            "resource_root": resource_root.path,
+        }
+
+    def list_markdown_assets(self, asset_kind: str) -> List[str]:
+        normalized_kind = str(asset_kind or "").strip().lower()
+        if normalized_kind == "agent":
+            return sorted(
+                profile.name
+                for profile in self._agent_profile_manager.list()
+                if getattr(profile, "source", None) == "workspace"
+                and getattr(profile, "source_path", None) is not None
+                and Path(profile.source_path).suffix.lower() == ".md"
+            )
+
+        if normalized_kind == "flow":
+            assets: set[str] = set()
+            for _, flow_def in self._plugins.flows.items():
+                path = self._flow_markdown_path(flow_def)
+                if path is None or not self._is_workspace_asset_path(path):
+                    continue
+                assets.add(str(flow_def.name))
+            return sorted(assets)
+
+        if normalized_kind == "tool":
+            assets: set[str] = set()
+            for qualified_name, tool_impl in self._plugins.tools.items():
+                path = self._tool_markdown_path(tool_impl)
+                if path is None or not self._is_workspace_asset_path(path):
+                    continue
+                _, _, local_name = qualified_name.partition(".")
+                assets.add(local_name or qualified_name)
+            return sorted(assets)
+
+        raise ValueError("Unsupported asset kind. Expected one of: agent, flow, tool.")
+
+    def clone_markdown_asset(self, asset_kind: str, source_name: str, new_name: str) -> Dict[str, Any]:
+        normalized_kind = str(asset_kind or "").strip().lower()
+        normalized_name = self._normalize_asset_file_name(new_name)
+        source_asset = self.get_markdown_asset(normalized_kind, source_name)
+        source_path = Path(source_asset["path"]).resolve()
+        target_path = source_path.with_name(f"{normalized_name}{source_path.suffix}")
+        if target_path.exists():
+            raise ValueError(f"{normalized_kind.title()} asset already exists: {target_path}")
+
+        markdown_text, companion_text, companion_path = self._clone_markdown_asset_contents(
+            asset_kind=normalized_kind,
+            source_path=source_path,
+            source_text=str(source_asset["text"]),
+            new_name=normalized_name,
+        )
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if companion_path is not None and companion_text is not None:
+            companion_path.parent.mkdir(parents=True, exist_ok=True)
+            companion_path.write_text(companion_text, encoding="utf-8")
+        try:
+            self._validate_markdown_asset_text(
+                normalized_kind,
+                markdown_text=markdown_text,
+                target_name=normalized_name,
+                target_path=target_path,
+            )
+        except Exception:
+            if companion_path is not None and companion_path.exists():
+                companion_path.unlink()
+            raise
+        target_path.write_text(markdown_text, encoding="utf-8")
+
+        self.reload()
+        return {
+            "kind": normalized_kind,
+            "name": normalized_name,
+            "path": target_path,
+            "companion_path": companion_path,
+        }
+
+    def update_markdown_asset(self, asset_kind: str, name: str, *, markdown_text: str) -> Dict[str, Any]:
+        asset = self.get_markdown_asset(asset_kind, name)
+        normalized_kind = str(asset_kind or "").strip().lower()
+        path = Path(asset["path"]).resolve()
+        validated_name = self._validate_markdown_asset_text(
+            normalized_kind,
+            markdown_text=markdown_text,
+            target_name=str(name or "").strip(),
+            target_path=path,
+        )
+        path.write_text(markdown_text.strip() + "\n", encoding="utf-8")
+        self.reload()
+        return {
+            "kind": normalized_kind,
+            "name": validated_name,
+            "path": path,
+            "companion_path": asset.get("companion_path"),
+        }
+
+    def delete_markdown_asset(self, asset_kind: str, name: str) -> Dict[str, Any]:
+        asset = self.get_markdown_asset(asset_kind, name)
+        normalized_kind = str(asset_kind or "").strip().lower()
+        target_path = Path(asset["path"]).resolve()
+        companion_path = asset.get("companion_path")
+
+        if normalized_kind == "agent":
+            deleted_path = self.delete_agent_profile(str(name or "").strip())
+            return {
+                "kind": normalized_kind,
+                "name": str(name or "").strip(),
+                "path": deleted_path,
+                "companion_path": companion_path,
+                "companion_deleted": False,
+            }
+
+        if not target_path.exists():
+            raise ValueError(f"Markdown asset file does not exist: {target_path}")
+        target_path.unlink()
+        self.reload()
+        return {
+            "kind": normalized_kind,
+            "name": str(name or "").strip(),
+            "path": target_path,
+            "companion_path": companion_path,
+            "companion_deleted": False,
+        }
+
+    def get_markdown_asset(self, asset_kind: str, name: str) -> Dict[str, Any]:
+        normalized_kind = str(asset_kind or "").strip().lower()
+        normalized_name = str(name or "").strip()
+        if not normalized_name:
+            raise ValueError("Asset name must not be empty.")
+
+        if normalized_kind == "agent":
+            profile = self.get_agent_profile(normalized_name)
+            if profile is None:
+                raise ValueError(f"Unknown agent profile '{normalized_name}'.")
+            source_path = getattr(profile, "source_path", None)
+            if getattr(profile, "source", None) != "workspace" or source_path is None:
+                raise ValueError(f"Agent '{normalized_name}' is not a workspace markdown asset.")
+            path = Path(source_path)
+            if path.suffix.lower() != ".md":
+                raise ValueError(f"Agent '{normalized_name}' is not stored as Markdown.")
+            return {
+                "kind": normalized_kind,
+                "name": profile.name,
+                "path": path,
+                "companion_path": None,
+                "text": path.read_text(encoding="utf-8"),
+            }
+
+        if normalized_kind == "flow":
+            flow_def, path = self._resolve_workspace_markdown_flow(normalized_name)
+            return {
+                "kind": normalized_kind,
+                "name": flow_def.name,
+                "path": path,
+                "companion_path": None,
+                "text": path.read_text(encoding="utf-8"),
+            }
+
+        if normalized_kind == "tool":
+            _, local_name, tool_impl, path = self._resolve_workspace_markdown_tool(normalized_name)
+            companion_path = path.with_suffix(".py") if path.with_suffix(".py").exists() else None
+            return {
+                "kind": normalized_kind,
+                "name": local_name,
+                "path": path,
+                "companion_path": companion_path,
+                "text": path.read_text(encoding="utf-8"),
+            }
+
+        raise ValueError("Unsupported asset kind. Expected one of: agent, flow, tool.")
+
     def reload(self) -> None:
         self._plugins.load()
         # T014: reload APM after plugins reload.
         self._agent_profile_manager.reload(dict(self._plugins.agents))
+        self._mode_manager.set_registries(
+            flow_registry=self._plugins.flows,
+            tool_registry=self._plugins.tools,
+            prompt_registry=self._plugins.prompts,
+            agent_profile_getter=self._agent_profile_manager.get,
+        )
         self._mode_manager.load()
+        self._skill_manager.set_registries(
+            tool_registry=self._plugins.tools,
+            prompt_registry=self._plugins.prompts,
+        )
         self._skill_manager.load()
         self._workspace_llm_profile_manager.load()
         self._validate_loaded_reference_surfaces()
@@ -957,6 +1205,508 @@ class PocketCodeEngine:
             "source_path": cloned.get("source_path"),
             "config": copy.deepcopy(cloned.get("config", {})),
         }
+
+    def _normalize_asset_file_name(self, name: str) -> str:
+        normalized = str(name or "").strip()
+        if not normalized:
+            raise ValueError("Asset name must not be empty.")
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        if any(character not in allowed for character in normalized):
+            raise ValueError(
+                "Asset name may contain only letters, numbers, dot, underscore, and hyphen."
+            )
+        if normalized.startswith(".") or ".." in normalized:
+            raise ValueError("Asset name must not start with '.' or contain '..'.")
+        return normalized
+
+    def _markdown_asset_scaffold(self, asset_kind: str, name: str) -> str:
+        if asset_kind == "agent":
+            front_matter = {
+                "name": name,
+                "flow": "core.react",
+                "description": f"Workspace agent '{name}'.",
+            }
+            front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
+            return (
+                f"---\n{front_matter_text}\n---\n"
+                "Describe the role, boundaries, and priorities for this agent here.\n"
+            )
+
+        if asset_kind == "flow":
+            front_matter = {
+                "name": name,
+                "description": f"Workspace markdown flow '{name}'.",
+            }
+            front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
+            return (
+                f"---\n{front_matter_text}\n---\n\n"
+                "```yaml flow\n"
+                "start: start\n"
+                "nodes:\n"
+                "  start:\n"
+                "    kind: noop\n"
+                "  done:\n"
+                f"    kind: output\n    message: \"{name} flow scaffold ready.\"\n"
+                "```\n\n"
+                "```mermaid graph\n"
+                "graph TD\n"
+                "  start --> done\n"
+                "```\n"
+            )
+
+        if asset_kind == "tool":
+            class_name = self._tool_scaffold_class_name(name)
+            front_matter = {
+                "name": name,
+                "description": f"Workspace markdown tool '{name}'.",
+                "handler": f"./{name}.py:{class_name}",
+            }
+            front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
+            return (
+                f"---\n{front_matter_text}\n---\n\n"
+                "Describe what this tool should do and when the agent should call it.\n\n"
+                "```yaml schema\n"
+                "type: object\n"
+                "properties:\n"
+                "  text:\n"
+                "    type: string\n"
+                "    description: Input text for the scaffolded tool.\n"
+                "required:\n"
+                "  - text\n"
+                "```\n"
+            )
+
+        raise ValueError(f"Unsupported asset kind: {asset_kind}")
+
+    def _tool_python_scaffold(self, name: str) -> str:
+        class_name = self._tool_scaffold_class_name(name)
+        return (
+            "from __future__ import annotations\n\n"
+            "from typing import Any, Dict\n\n"
+            "from pocketcode.core.interfaces import BaseTool\n\n\n"
+            f"class {class_name}(BaseTool):\n"
+            "    @property\n"
+            "    def name(self) -> str:\n"
+            f"        return \"{name}\"\n\n"
+            "    @property\n"
+            "    def description(self) -> str:\n"
+            f"        return \"Workspace scaffold tool '{name}'.\"\n\n"
+            "    @property\n"
+            "    def schema(self) -> Dict[str, Any]:\n"
+            "        return {\n"
+            "            \"type\": \"object\",\n"
+            "            \"properties\": {\n"
+            "                \"text\": {\n"
+            "                    \"type\": \"string\",\n"
+            "                    \"description\": \"Input text for the scaffolded tool.\",\n"
+            "                }\n"
+            "            },\n"
+            "            \"required\": [\"text\"],\n"
+            "        }\n\n"
+            "    def execute(self, **kwargs) -> Any:\n"
+            "        text = str(kwargs.get(\"text\", \"\"))\n"
+            "        return {\n"
+            "            \"success\": True,\n"
+            f"            \"message\": \"{name}: \" + text,\n"
+            "        }\n"
+        )
+
+    def _tool_scaffold_class_name(self, name: str) -> str:
+        parts = [part for part in str(name).replace("-", ".").replace("_", ".").split(".") if part]
+        stem = "".join(part[:1].upper() + part[1:] for part in parts) or "WorkspaceTool"
+        return f"{stem}Tool"
+
+    def _clone_markdown_asset_contents(
+        self,
+        *,
+        asset_kind: str,
+        source_path: Path,
+        source_text: str,
+        new_name: str,
+    ) -> tuple[str, str | None, Path | None]:
+        front_matter, body = parse_markdown_front_matter(source_text)
+        updated_front_matter = dict(front_matter)
+        updated_front_matter["name"] = new_name
+
+        companion_text: str | None = None
+        companion_path: Path | None = None
+        if asset_kind == "tool":
+            handler_key = "handler" if updated_front_matter.get("handler") else "callable"
+            handler_value = updated_front_matter.get(handler_key)
+            if isinstance(handler_value, str) and ":" in handler_value:
+                path_part, object_name = handler_value.split(":", 1)
+                handler_path = Path(path_part)
+                if not handler_path.is_absolute():
+                    source_handler_path = (source_path.parent / handler_path).resolve()
+                    if source_handler_path.exists():
+                        cloned_rel_path = handler_path.with_name(f"{new_name}{source_handler_path.suffix}")
+                        companion_path = (source_path.parent / cloned_rel_path).resolve()
+                        companion_text = source_handler_path.read_text(encoding="utf-8")
+                        cloned_rel_text = cloned_rel_path.as_posix()
+                        if path_part.startswith("./") and not cloned_rel_text.startswith("./"):
+                            cloned_rel_text = f"./{cloned_rel_text}"
+                        updated_front_matter[handler_key] = f"{cloned_rel_text}:{object_name}"
+
+        return (
+            self._serialize_markdown_with_front_matter(updated_front_matter, body),
+            companion_text,
+            companion_path,
+        )
+
+    def _validate_markdown_asset_text(
+        self,
+        asset_kind: str,
+        *,
+        markdown_text: str,
+        target_name: str,
+        target_path: Path,
+    ) -> str:
+        front_matter, _ = parse_markdown_front_matter(markdown_text)
+        raw_name = str(front_matter.get("name") or target_name).strip()
+        if raw_name != target_name:
+            raise ValueError(
+                f"Markdown front matter name '{raw_name}' does not match target {asset_kind} '{target_name}'."
+            )
+        if asset_kind == "agent":
+            self._validate_markdown_agent(markdown_text=markdown_text, target_path=target_path)
+        if asset_kind == "flow":
+            self._validate_markdown_flow(markdown_text=markdown_text, target_path=target_path)
+        if asset_kind == "tool":
+            self._validate_markdown_tool_handler(markdown_text=markdown_text, target_path=target_path)
+        return raw_name
+
+    def _validate_markdown_agent(self, *, markdown_text: str, target_path: Path) -> None:
+        document = self._parse_workspace_markdown_asset_text_document(markdown_text, target_path=target_path)
+        raw = compile_markdown_agent_definition(document, default_name=target_path.stem)
+
+        flow_name = raw.get("flow") or raw.get("agent")
+        if not flow_name:
+            raise ValueError(f"Markdown agent '{target_path}' is missing required field 'flow'.")
+        validate_registry_reference(
+            str(flow_name).strip(),
+            allowed_kinds={"agent", "flow"},
+            field_name=f"{target_path.name}: flow",
+        )
+        normalized_flow = normalize_registry_reference(str(flow_name).strip(), allowed_kinds={"agent", "flow"})
+        self._validate_live_registry_reference(
+            normalized_flow,
+            registry=self._plugins.flows,
+            allowed_kinds={"agent", "flow"},
+            field_name=f"{target_path.name}: flow",
+        )
+
+        tools_raw = raw.get("tools")
+        if tools_raw is not None:
+            if not isinstance(tools_raw, list):
+                raise ValueError(f"{target_path.name}: tools must be a list when provided.")
+            self._validate_live_registry_reference_list(
+                tools_raw,
+                registry=self._plugins.tools,
+                allowed_kinds={"tool"},
+                field_name_prefix=f"{target_path.name}: tools",
+            )
+
+        extra_prompts = raw.get("extra_prompts") or []
+        if extra_prompts:
+            if not isinstance(extra_prompts, list):
+                raise ValueError(f"{target_path.name}: extra_prompts must be a list when provided.")
+            for index, prompt_ref in enumerate(extra_prompts):
+                if not isinstance(prompt_ref, str):
+                    raise ValueError(f"{target_path.name}: extra_prompts[{index}] must be a string.")
+                validate_prompt_source(prompt_ref, field_name=f"{target_path.name}: extra_prompts[{index}]")
+                normalized_prompt = normalize_prompt_source(prompt_ref)
+                self._validate_prompt_source_reference(
+                    normalized_prompt,
+                    source_path=target_path,
+                    field_name=f"{target_path.name}: extra_prompts[{index}]",
+                )
+
+    def _validate_markdown_flow(self, *, markdown_text: str, target_path: Path) -> None:
+        document = self._parse_workspace_markdown_asset_text_document(markdown_text, target_path=target_path)
+        flow_definition = compile_markdown_flow_definition(document, default_name=target_path.stem)
+
+        prompt_definition = dict(flow_definition)
+        if "prompt_files" not in prompt_definition and "prompts" in prompt_definition:
+            prompt_definition["prompt_files"] = prompt_definition.get("prompts")
+        resolve_prompt_bundle(
+            prompt_definition,
+            base_dir=target_path.parent,
+            inline_keys=("system_prompt", "prompt"),
+            file_keys=("system_prompt_file", "prompt_file"),
+            files_key="prompt_files",
+            default_files=[],
+            fallback_dirs=self._workspace_prompt_fallback_dirs(),
+            prompt_registry=getattr(self._plugins, "prompts", None),
+            context_plugin="workspace",
+        )
+
+        self._validate_live_registry_reference_list(
+            coerce_str_list(flow_definition.get("tools")),
+            registry=self._plugins.tools,
+            allowed_kinds={"tool"},
+            field_name_prefix=f"{target_path.name}: tools",
+        )
+
+        self._validate_live_registry_reference_list(
+            coerce_str_list(flow_definition.get("handoff_agents")),
+            registry=self._plugins.flows,
+            allowed_kinds={"agent", "flow"},
+            field_name_prefix=f"{target_path.name}: handoff_agents",
+        )
+
+        self._validate_live_registry_reference_list(
+            coerce_str_list(flow_definition.get("composite_agents")),
+            registry=self._plugins.flows,
+            allowed_kinds={"agent", "flow"},
+            field_name_prefix=f"{target_path.name}: composite_agents",
+        )
+
+        metadata = flow_definition.get("metadata") or {}
+        if isinstance(metadata, dict) and metadata.get("markdown_graphs"):
+            build_graph_flow_from_metadata(flow_definition)
+
+    def _validate_markdown_tool_handler(self, *, markdown_text: str, target_path: Path) -> None:
+        document = self._parse_workspace_markdown_asset_text_document(markdown_text, target_path=target_path)
+        tool_definition = compile_markdown_tool_definition(document, default_name=target_path.stem)
+        self._resolve_tool_handler_reference(tool_definition.handler, target_path.parent)
+
+    def _parse_workspace_markdown_asset_text_document(
+        self,
+        markdown_text: str,
+        *,
+        target_path: Path,
+    ):
+        return parse_markdown_asset_text_document(
+            markdown_text,
+            source_path=target_path,
+            expand_includes=True,
+            fallback_dirs=self._workspace_prompt_fallback_dirs(),
+            prompt_registry=getattr(self._plugins, "prompts", None),
+            context_plugin="workspace",
+        )
+
+    def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
+        return (primary_resource_root(self._workspace_root).path / "prompts",)
+
+    def _validate_live_registry_reference(
+        self,
+        reference: str,
+        *,
+        registry: Any,
+        allowed_kinds: set[str],
+        field_name: str,
+    ) -> str:
+        validate_registry_reference(reference, allowed_kinds=allowed_kinds, field_name=field_name)
+        normalized_reference = normalize_registry_reference(reference, allowed_kinds=allowed_kinds)
+        self._qualify_registry_reference_or_raise(
+            registry,
+            normalized_reference,
+            context_plugin="workspace",
+            error_prefix=field_name,
+        )
+        return normalized_reference
+
+    def _validate_live_registry_reference_list(
+        self,
+        references: list[Any],
+        *,
+        registry: Any,
+        allowed_kinds: set[str],
+        field_name_prefix: str,
+    ) -> list[str]:
+        normalized: list[str] = []
+        for index, reference in enumerate(references):
+            field_name = f"{field_name_prefix}[{index}]"
+            if not isinstance(reference, str):
+                raise ValueError(f"{field_name} must be a string.")
+            normalized.append(
+                self._validate_live_registry_reference(
+                    reference,
+                    registry=registry,
+                    allowed_kinds=allowed_kinds,
+                    field_name=field_name,
+                )
+            )
+        return normalized
+
+    def _qualify_registry_reference_or_raise(
+        self,
+        registry: Any,
+        reference: str,
+        *,
+        context_plugin: str | None,
+        error_prefix: str,
+    ) -> str:
+        try:
+            return registry.qualify(reference, context_plugin=context_plugin)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{error_prefix} could not be resolved: {reference} ({exc})") from exc
+
+    def _validate_prompt_source_reference(self, prompt_ref: str, *, source_path: Path, field_name: str) -> None:
+        if is_prompt_reference(prompt_ref):
+            try:
+                resolve_prompt_reference(
+                    prompt_ref,
+                    prompt_registry=getattr(self._plugins, "prompts", None),
+                    context_plugin="workspace",
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
+            return
+
+        try:
+            load_prompt_markdown(
+                base_dir=source_path.parent,
+                prompt_file=prompt_ref,
+                fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                prompt_registry=getattr(self._plugins, "prompts", None),
+                context_plugin="workspace",
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
+
+    def _resolve_tool_handler_reference(self, handler_reference: str, base_dir: Path) -> Any:
+        candidate = str(handler_reference or "").strip()
+        if not candidate:
+            raise ValueError("Markdown tool is missing required field 'handler'.")
+
+        if ":" in candidate:
+            path_part, object_name = candidate.split(":", 1)
+            file_path = (base_dir / path_part).resolve()
+            if not file_path.is_file():
+                raise ValueError(f"Tool handler file not found: {file_path}")
+            try:
+                return self._load_object_from_file(file_path, object_name)
+            except AttributeError as exc:
+                raise ValueError(
+                    f"Tool handler '{object_name}' was not found in {file_path}."
+                ) from exc
+
+        if "." not in candidate:
+            raise ValueError(
+                "Tool handler must be an import path (module.Object) or file reference (path.py:Object)."
+            )
+
+        module_name, object_name = candidate.rsplit(".", 1)
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Tool handler module import failed for '{module_name}': {exc}") from exc
+        if not hasattr(module, object_name):
+            raise ValueError(f"Tool handler '{object_name}' was not found in module '{module_name}'.")
+        return getattr(module, object_name)
+
+    def _load_object_from_file(self, file_path: Path, object_name: str) -> Any:
+        module_name = self._build_dynamic_asset_module_name(file_path)
+        sys.modules.pop(module_name, None)
+        module = self._execute_dynamic_asset_module(file_path, module_name)
+        return getattr(module, object_name)
+
+    def _build_dynamic_asset_module_name(self, file_path: Path) -> str:
+        content_hash = hash(file_path.read_bytes())
+        token = f"{file_path.resolve()}:{content_hash}"
+        return f"pocketcode_dynamic_asset_{abs(hash(token))}"
+
+    def _execute_dynamic_asset_module(self, file_path: Path, module_name: str) -> types.ModuleType:
+        module = types.ModuleType(module_name)
+        module.__file__ = str(file_path)
+        if file_path.name == "__init__.py":
+            module.__package__ = module_name
+            module.__path__ = [str(file_path.parent)]  # type: ignore[attr-defined]
+        sys.modules[module_name] = module
+        source = file_path.read_text(encoding="utf-8")
+        code = compile(source, str(file_path), "exec")
+        exec(code, module.__dict__)
+        return module
+
+    def _serialize_markdown_with_front_matter(self, front_matter: Dict[str, Any], body: str) -> str:
+        front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
+        cleaned_body = str(body or "").rstrip()
+        if cleaned_body:
+            return f"---\n{front_matter_text}\n---\n{cleaned_body}\n"
+        return f"---\n{front_matter_text}\n---\n"
+
+    def _is_workspace_asset_path(self, path: Path) -> bool:
+        resolved = Path(path).resolve()
+        resource_roots = getattr(getattr(self, "_plugins", None), "resource_roots", None)
+        if not resource_roots:
+            resource_roots = [primary_resource_root(self._workspace_root)]
+        return any(self._path_is_within(resolved, resource_root.path) for resource_root in resource_roots)
+
+    def _path_is_within(self, path: Path, root: Path) -> bool:
+        try:
+            path.relative_to(Path(root).resolve())
+            return True
+        except ValueError:
+            return False
+
+    def _flow_markdown_path(self, flow_def: Any) -> Path | None:
+        metadata = getattr(flow_def, "metadata", {}) or {}
+        markdown_path = metadata.get("markdown_path")
+        if not markdown_path:
+            return None
+        return Path(str(markdown_path)).resolve()
+
+    def _tool_markdown_path(self, tool_impl: Any) -> Path | None:
+        source_path = getattr(tool_impl, "_tool_source_path", None)
+        if source_path is None:
+            return None
+        return Path(source_path).resolve()
+
+    def _resolve_workspace_markdown_flow(self, name: str) -> tuple[Any, Path]:
+        candidates: list[str] = []
+        if "." in name and name in self._plugins.flows:
+            candidates.append(name)
+        else:
+            candidates.extend(self._plugins.flows.owners_for(name))
+
+        matches: list[tuple[Any, Path]] = []
+        seen_paths: set[Path] = set()
+        for qualified_name in candidates:
+            flow_def = self._plugins.flows.get(qualified_name)
+            if flow_def is None:
+                continue
+            path = self._flow_markdown_path(flow_def)
+            if path is None or not self._is_workspace_asset_path(path):
+                continue
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            matches.append((flow_def, path))
+
+        if not matches:
+            raise ValueError(f"Workspace markdown flow not found: {name}")
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous workspace markdown flow name: {name}")
+        return matches[0]
+
+    def _resolve_workspace_markdown_tool(self, name: str) -> tuple[str, str, Any, Path]:
+        candidates: list[str] = []
+        if "." in name and name in self._plugins.tools:
+            candidates.append(name)
+        else:
+            candidates.extend(self._plugins.tools.owners_for(name))
+
+        matches: list[tuple[str, str, Any, Path]] = []
+        seen_paths: set[Path] = set()
+        for qualified_name in candidates:
+            tool_impl = self._plugins.tools.get(qualified_name)
+            if tool_impl is None:
+                continue
+            path = self._tool_markdown_path(tool_impl)
+            if path is None or not self._is_workspace_asset_path(path):
+                continue
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            _, _, local_name = qualified_name.partition(".")
+            matches.append((qualified_name, local_name or qualified_name, tool_impl, path))
+
+        if not matches:
+            raise ValueError(f"Workspace markdown tool not found: {name}")
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous workspace markdown tool name: {name}")
+        return matches[0]
 
     def delete_agent_profile(self, name: str) -> Path:
         target_path = self._agent_profile_manager.delete(name)

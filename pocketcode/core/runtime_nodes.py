@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""Legacy runtime nodes for the older graph workflow runtime.
+
+New markdown-authored flows are compiled into the current manifest-backed flow
+model instead of introducing new node kinds here.
+"""
+
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict
 

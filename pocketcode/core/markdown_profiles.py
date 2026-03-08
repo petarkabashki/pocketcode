@@ -9,12 +9,13 @@ import sys
 import types
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import yaml
 
 from pocketcode.core.discovery_rules import DiscoveryFilter
 from pocketcode.core.interfaces import BaseTool
+from pocketcode.core.prompt_loader import is_prompt_reference, load_prompt_markdown, resolve_prompt_reference
 from pocketcode.core.reference_syntax import (
     normalize_prompt_source,
     normalize_registry_reference,
@@ -116,13 +117,39 @@ class SkillDefinition:
 
 
 class ModeManager:
-    def __init__(self, workspace_root: Path) -> None:
+    def __init__(
+        self,
+        workspace_root: Path,
+        *,
+        flow_registry: Any | None = None,
+        tool_registry: Any | None = None,
+        prompt_registry: Any | None = None,
+        agent_profile_getter: Callable[[str], Any | None] | None = None,
+    ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
+        self._flow_registry = flow_registry
+        self._tool_registry = tool_registry
+        self._prompt_registry = prompt_registry
+        self._agent_profile_getter = agent_profile_getter
         self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
         self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
         self._modes_dir = self._primary_resource_root.path / "modes"
         self._modes: Dict[str, ModeDefinition] = {}
         self._resource_root_filters = self._build_resource_root_filters()
+
+    def set_registries(
+        self,
+        *,
+        flow_registry: Any | None = None,
+        tool_registry: Any | None = None,
+        prompt_registry: Any | None = None,
+        agent_profile_getter: Callable[[str], Any | None] | None = None,
+    ) -> None:
+        self._flow_registry = flow_registry
+        self._tool_registry = tool_registry
+        self._prompt_registry = prompt_registry
+        if agent_profile_getter is not None:
+            self._agent_profile_getter = agent_profile_getter
 
     def load(self) -> None:
         self._modes = {}
@@ -240,22 +267,45 @@ class ModeManager:
 
         tools_specified, tools = normalize_tool_selection(front_matter.get("tools"))
         flow_value = str(front_matter["flow"]).strip() if front_matter.get("flow") else None
+        agent_value = str(front_matter["agent"]).strip() if front_matter.get("agent") else None
+        if agent_value:
+            self._validate_agent_profile_reference(
+                agent_value,
+                field_name=f"{source_path.name}: agent",
+            )
         if flow_value:
             validate_registry_reference(flow_value, allowed_kinds={"agent", "flow"}, field_name=f"{source_path.name}: flow")
             flow_value = normalize_registry_reference(flow_value, allowed_kinds={"agent", "flow"})
+            self._qualify_registry_reference_or_raise(
+                self._flow_registry,
+                flow_value,
+                field_name=f"{source_path.name}: flow",
+            )
         extra_prompts = coerce_str_list(front_matter.get("extra_prompts"))
         for index, prompt_ref in enumerate(extra_prompts):
             validate_prompt_source(prompt_ref, field_name=f"{source_path.name}: extra_prompts[{index}]")
         extra_prompts = [normalize_prompt_source(prompt_ref) for prompt_ref in extra_prompts]
+        for index, prompt_ref in enumerate(extra_prompts):
+            self._validate_prompt_source_reference(
+                prompt_ref,
+                source_path=source_path,
+                field_name=f"{source_path.name}: extra_prompts[{index}]",
+            )
         if tools:
             for index, tool_ref in enumerate(tools):
                 validate_registry_reference(tool_ref, allowed_kinds={"tool"}, field_name=f"{source_path.name}: tools[{index}]")
             tools = [normalize_registry_reference(tool_ref, allowed_kinds={"tool"}) for tool_ref in tools]
+            for index, tool_ref in enumerate(tools):
+                self._qualify_registry_reference_or_raise(
+                    self._tool_registry,
+                    tool_ref,
+                    field_name=f"{source_path.name}: tools[{index}]",
+                )
         return ModeDefinition(
             name=raw_name.strip(),
             description=str(front_matter.get("description", "")),
             flow=flow_value,
-            agent=str(front_matter["agent"]).strip() if front_matter.get("agent") else None,
+            agent=agent_value,
             llm_profile=(
                 str(front_matter["llm_profile"]).strip()
                 if front_matter.get("llm_profile")
@@ -306,16 +356,78 @@ class ModeManager:
     def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
         return self._resource_root_filters[resource_root.path.resolve()]
 
+    def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
+        return (self._primary_resource_root.path / "prompts",)
+
+    def _qualify_registry_reference_or_raise(self, registry: Any, reference: str, *, field_name: str) -> str:
+        if registry is None:
+            return reference
+        try:
+            return registry.qualify(reference, context_plugin="workspace")
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{field_name} could not be resolved: {reference} ({exc})") from exc
+
+    def _validate_prompt_source_reference(self, prompt_ref: str, *, source_path: Path, field_name: str) -> None:
+        if is_prompt_reference(prompt_ref):
+            if self._prompt_registry is None:
+                return
+            try:
+                resolve_prompt_reference(
+                    prompt_ref,
+                    prompt_registry=self._prompt_registry,
+                    context_plugin="workspace",
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
+            return
+        try:
+            load_prompt_markdown(
+                base_dir=source_path.parent,
+                prompt_file=prompt_ref,
+                fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                prompt_registry=self._prompt_registry,
+                context_plugin="workspace",
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
+
+    def _validate_agent_profile_reference(self, agent_name: str, *, field_name: str) -> None:
+        if self._agent_profile_getter is None:
+            return
+        try:
+            profile = self._agent_profile_getter(agent_name)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{field_name} could not be resolved: {agent_name} ({exc})") from exc
+        if profile is None:
+            raise ValueError(f"{field_name} could not be resolved: {agent_name}")
+
 
 class SkillManager:
-    def __init__(self, workspace_root: Path) -> None:
+    def __init__(
+        self,
+        workspace_root: Path,
+        *,
+        tool_registry: Any | None = None,
+        prompt_registry: Any | None = None,
+    ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
+        self._tool_registry = tool_registry
+        self._prompt_registry = prompt_registry
         self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
         self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
         self._skills_dir = self._primary_resource_root.path / "skills"
         self._skills: Dict[str, SkillDefinition] = {}
         self._dynamic_module_names: set[str] = set()
         self._resource_root_filters = self._build_resource_root_filters()
+
+    def set_registries(
+        self,
+        *,
+        tool_registry: Any | None = None,
+        prompt_registry: Any | None = None,
+    ) -> None:
+        self._tool_registry = tool_registry
+        self._prompt_registry = prompt_registry
 
     def load(self) -> None:
         self._unload_dynamic_modules()
@@ -380,10 +492,22 @@ class SkillManager:
                     field_name=f"{skill_path.name}: tools[{index}]",
                 )
             tool_refs = [normalize_registry_reference(tool_ref, allowed_kinds={"tool"}) for tool_ref in tool_refs]
+            for index, tool_ref in enumerate(tool_refs):
+                self._qualify_registry_reference_or_raise(
+                    self._tool_registry,
+                    tool_ref,
+                    field_name=f"{skill_path.name}: tools[{index}]",
+                )
             extra_prompts = coerce_str_list(front_matter.get("extra_prompts"))
             for index, prompt_ref in enumerate(extra_prompts):
                 validate_prompt_source(prompt_ref, field_name=f"{skill_path.name}: extra_prompts[{index}]")
             extra_prompts = [normalize_prompt_source(prompt_ref) for prompt_ref in extra_prompts]
+            for index, prompt_ref in enumerate(extra_prompts):
+                self._validate_prompt_source_reference(
+                    prompt_ref,
+                    source_path=skill_path,
+                    field_name=f"{skill_path.name}: extra_prompts[{index}]",
+                )
             return SkillDefinition(
                 name=raw_name.strip(),
                 description=str(front_matter.get("description", "")),
@@ -449,6 +573,41 @@ class SkillManager:
 
     def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
         return self._resource_root_filters[resource_root.path.resolve()]
+
+    def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
+        return (self._primary_resource_root.path / "prompts",)
+
+    def _qualify_registry_reference_or_raise(self, registry: Any, reference: str, *, field_name: str) -> str:
+        if registry is None:
+            return reference
+        try:
+            return registry.qualify(reference, context_plugin="workspace")
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{field_name} could not be resolved: {reference} ({exc})") from exc
+
+    def _validate_prompt_source_reference(self, prompt_ref: str, *, source_path: Path, field_name: str) -> None:
+        if is_prompt_reference(prompt_ref):
+            if self._prompt_registry is None:
+                return
+            try:
+                resolve_prompt_reference(
+                    prompt_ref,
+                    prompt_registry=self._prompt_registry,
+                    context_plugin="workspace",
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
+            return
+        try:
+            load_prompt_markdown(
+                base_dir=source_path.parent,
+                prompt_file=prompt_ref,
+                fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                prompt_registry=self._prompt_registry,
+                context_plugin="workspace",
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
 
     def _load_module_from_file(self, file_path: Path) -> types.ModuleType:
         digest = hashlib.sha1(str(file_path.resolve()).encode("utf-8")).hexdigest()[:12]

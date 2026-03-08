@@ -49,6 +49,7 @@ def _resolve_prompt_path(
     candidates = [(base_dir / prompt_file).resolve()]
     for fallback_dir in fallback_dirs:
         candidates.append((fallback_dir / prompt_file).resolve())
+        candidates.append((fallback_dir.parent / prompt_file).resolve())
 
     for candidate in candidates:
         if candidate.is_file():
@@ -115,12 +116,39 @@ def load_prompt_markdown(
 
     stack.add(stack_key)
     text = prompt_path.read_text(encoding="utf-8")
-    sources: List[str] = [str(prompt_path)]
+    expanded, sources = expand_prompt_markdown_text(
+        text,
+        base_dir=prompt_path.parent,
+        source_path=prompt_path,
+        _stack=stack,
+        fallback_dirs=fallback_dirs,
+        prompt_registry=prompt_registry,
+        context_plugin=context_plugin,
+    )
+    stack.remove(stack_key)
+
+    deduped_sources = list(dict.fromkeys(sources))
+    return expanded.strip(), deduped_sources
+
+
+def expand_prompt_markdown_text(
+    markdown_text: str,
+    *,
+    base_dir: Path,
+    source_path: Path | None = None,
+    _stack: set[str] | None = None,
+    fallback_dirs: Sequence[Path] = (),
+    prompt_registry: Any | None = None,
+    context_plugin: str | None = None,
+) -> Tuple[str, List[str]]:
+    stack = _stack if _stack is not None else set()
+    resolved_source_path = source_path.resolve() if isinstance(source_path, Path) else None
+    sources: List[str] = [str(resolved_source_path)] if resolved_source_path is not None else []
 
     def _replace_include(match: re.Match[str]) -> str:
         include_target = match.group(1).strip()
         included_text, included_sources = load_prompt_markdown(
-            base_dir=prompt_path.parent,
+            base_dir=base_dir,
             prompt_file=include_target,
             _stack=stack,
             fallback_dirs=fallback_dirs,
@@ -130,11 +158,8 @@ def load_prompt_markdown(
         sources.extend(included_sources)
         return included_text
 
-    expanded = _INCLUDE_RE.sub(_replace_include, text)
-    stack.remove(stack_key)
-
-    deduped_sources = list(dict.fromkeys(sources))
-    return expanded.strip(), deduped_sources
+    expanded = _INCLUDE_RE.sub(_replace_include, markdown_text)
+    return expanded, list(dict.fromkeys(sources))
 
 
 def resolve_prompt_bundle(

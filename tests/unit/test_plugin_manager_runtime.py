@@ -86,6 +86,203 @@ class TestPluginManagerRuntimeLoading:
         manager.load()
         assert manager.tools.resolve("reloadplug.greet")() == "v2"
 
+    def test_manifest_markdown_tool_loads_metadata_and_handler(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "marktool"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: marktool",
+                    'description: "markdown tool test"',
+                    "tools:",
+                    '  greet: "tools/greet.md"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "tools" / "greet.md",
+            """---
+handler: greet.py:greet
+description: Greeting tool
+---
+
+```yaml schema
+type: object
+properties:
+  name:
+    type: string
+required:
+  - name
+```
+""",
+        )
+        _write(
+            plugin_root / "tools" / "greet.py",
+            "def greet(name):\n    return f'hello {name}'\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.tools.resolve("marktool.greet").execute(name="Ada") == "hello Ada"
+
+    def test_manifest_markdown_flow_loads_prompt_and_graph_metadata(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "markflow"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: markflow",
+                    'description: "markdown flow test"',
+                    "flows:",
+                    "  planner:",
+                    '    markdown: "flows/planner.md"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.md",
+            """---
+module: planner.py
+entry_fn: create_flow
+llm_profile: fast
+---
+Plan carefully.
+
+```mermaid graph
+graph TD
+  Start --> End
+```
+""",
+        )
+        _write(
+            plugin_root / "flows" / "planner.py",
+            "from pocketflow import Flow, Node\n\n"
+            "class _Start(Node):\n"
+            "    def prep(self, shared):\n"
+            "        return None\n\n"
+            "    def exec(self, value):\n"
+            "        return None\n\n"
+            "    def post(self, shared, prep_res, exec_res):\n"
+            "        return 'continue'\n\n"
+            "def create_flow():\n"
+            "    return Flow(start=_Start())\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        flow_def = manager.agents.resolve("markflow.planner")
+        assert flow_def.system_prompt == "Plan carefully."
+        assert flow_def.metadata["markdown_graphs"][0]["language"] == "mermaid"
+
+        def test_manifest_markdown_graph_flow_builds_executable_flow_instance(self, tmp_path):
+                plugin_root = tmp_path / "plugins" / "graphflow"
+                _write(
+                        plugin_root / "plugin.yaml",
+                        "\n".join(
+                                [
+                                        "schema_version: 1",
+                                        "name: graphflow",
+                                        'description: "markdown graph flow test"',
+                                        "flows:",
+                                        "  planner:",
+                                        '    markdown: "flows/planner.md"',
+                                ]
+                        ),
+                )
+                _write(
+                        plugin_root / "flows" / "planner.md",
+                        """---
+nodes:
+    route:
+        kind: route
+        transition_key: requested_path
+    yes:
+        kind: output
+        message: Approved
+    no:
+        kind: output
+        message: Rejected
+---
+
+```mermaid graph
+graph TD
+    route -->|yes| yes
+    route -->|no| no
+```
+""",
+                )
+
+                manager = _make_manager(tmp_path)
+                manager.load()
+
+                flow_def = manager.agents.resolve("graphflow.planner")
+                shared = {"requested_path": "yes"}
+
+                assert flow_def.flow_instance is not None
+                assert flow_def.flow_instance.run(shared) == "final_answer"
+                assert shared["final_answer"] == "Approved"
+
+    def test_workspace_markdown_tool_is_loaded(self, tmp_path):
+        _write(
+            tmp_path / ".pocketcode" / "tools" / "helpers" / "echo.md",
+            """---
+handler: echo.py:echo_text
+description: Echo helper
+---
+
+```yaml schema
+type: object
+properties:
+  text:
+    type: string
+required:
+  - text
+```
+""",
+        )
+        _write(
+            tmp_path / ".pocketcode" / "tools" / "helpers" / "echo.py",
+            "def echo_text(text):\n    return {'text': text}\n",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        assert manager.tools.resolve("workspace.helpers.echo").execute(text="ok") == {"text": "ok"}
+
+        def test_workspace_markdown_flow_is_loaded(self, tmp_path):
+                _write(
+                        tmp_path / ".pocketcode" / "flows" / "triage.md",
+                        """---
+name: triage
+nodes:
+    start:
+        kind: noop
+    done:
+        kind: output
+        message: Workspace flow ready
+---
+
+```mermaid graph
+graph TD
+    start --> done
+```
+""",
+                )
+
+                manager = _make_manager(tmp_path)
+                manager.load()
+
+                flow_def = manager.flows.resolve("workspace.triage")
+                shared = {}
+                assert flow_def.flow_instance is not None
+                assert flow_def.flow_instance.run(shared) == "final_answer"
+                assert shared["final_answer"] == "Workspace flow ready"
+
     def test_prompt_registry_loads_manifest_prompts(self, tmp_path):
         plugin_root = tmp_path / "plugins" / "promptplug"
         _write(

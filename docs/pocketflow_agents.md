@@ -2,6 +2,8 @@
 
 This document describes the current relationship between executable flows and agent profiles.
 
+For the canonical Markdown file formats for flows and profiles, see `markdown_assets.md`.
+
 ## One Executable Model, Multiple Overlays
 
 PocketCoder executes flows. Agent profiles do not replace flows; they configure how a selected flow runs.
@@ -53,6 +55,10 @@ flows:
     description: Analyze the current workspace.
 ```
 
+Markdown can also author executable deterministic flows. In that case the Markdown file contributes the flow fields directly, and if it omits `module` and `entry_fn` but includes a supported Mermaid or DOT graph plus a `nodes:` mapping, PocketCoder compiles that graph into a generated PocketFlow `Flow` instance.
+
+That generated path is intended for lightweight orchestration and routing. It does not replace handwritten Python factories when you need custom logic, loops with complex side effects, or richer PocketFlow node behavior.
+
 ## What A Flow Definition Can Do
 
 A flow definition can supply:
@@ -87,8 +93,8 @@ Profiles do not define executable graph logic. They select and constrain behavio
 Current profile sources are:
 
 1. inline `default_agent` inside a flow definition
-2. plugin-local `agents/*.yaml`
-3. workspace `.pocketcode/agents/*.yaml`
+2. plugin-local `agents/*.yaml` and `agents/*.md`
+3. workspace `.pocketcode/agents/*.yaml` and `.pocketcode/agents/*.md`
 4. synthesised fallback profile created from the flow definition
 
 Effective precedence is:
@@ -136,6 +142,7 @@ Notes:
 - `skills` omitted means fall back to the global Textual skill defaults for that session.
 - `tools` omitted means inherit the flow tool surface.
 - `tools: []` means allow no base tools.
+- workspace and plugin-local profiles may also be authored as Markdown, where front matter carries the structured fields and the body becomes `inline_prompt`.
 
 ## Modes Resolve Into Profiles
 

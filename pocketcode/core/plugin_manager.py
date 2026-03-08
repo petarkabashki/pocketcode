@@ -21,6 +21,13 @@ from pocketcode.core.prompt_loader import (
     resolve_prompt_reference,
 )
 from pocketcode.core.discovery_rules import DiscoveryFilter
+from pocketcode.core.markdown_assets import (
+    build_markdown_tool_wrapper,
+    compile_markdown_flow_definition,
+    compile_markdown_tool_definition,
+    load_markdown_asset_document,
+)
+from pocketcode.core.markdown_graph_flow import build_graph_flow_from_metadata
 from pocketcode.core.resource_roots import (
     ResourceRoot,
     discover_resource_roots,
@@ -103,6 +110,7 @@ class PluginManager:
                 logger.error("Failed loading plugin at %s: %s", plugin_root, exc, exc_info=True)
 
         self._load_workspace_tools_only()
+        self._load_workspace_flows_only()
         self._validate_loaded_flow_references()
 
         logger.info(
@@ -333,6 +341,10 @@ class PluginManager:
         for resource_root in self._resource_roots:
             self._load_workspace_tools(resource_root, resource_root.path / "tools")
 
+    def _load_workspace_flows_only(self) -> None:
+        for resource_root in self._resource_roots:
+            self._load_workspace_flows(resource_root, resource_root.path / "flows")
+
     def _load_workspace_prompts(self, resource_root: ResourceRoot, prompts_root: Path) -> None:
         if not prompts_root.is_dir():
             return
@@ -360,6 +372,12 @@ class PluginManager:
     def _load_workspace_tools(self, resource_root: ResourceRoot, tools_root: Path) -> None:
         if not tools_root.is_dir():
             return
+
+        for tool_file in sorted(tools_root.rglob("*.md")):
+            resource_filter = self._resource_root_filter(resource_root)
+            if resource_filter.ignores(tool_file, is_dir=False):
+                continue
+            self._load_workspace_markdown_tool(resource_root, tools_root, tool_file)
 
         for tool_file in sorted(tools_root.rglob("*.py")):
             if tool_file.name == "__init__.py":
@@ -391,6 +409,183 @@ class PluginManager:
                 logger.warning(
                     "Workspace tool module '%s' defines no public tool exports. Skipping.",
                     tool_file,
+                )
+
+    def _load_workspace_flows(self, resource_root: ResourceRoot, flows_root: Path) -> None:
+        if not flows_root.is_dir():
+            return
+
+        resource_filter = self._resource_root_filter(resource_root)
+        for flow_file in sorted(flows_root.rglob("*.md")):
+            if resource_filter.ignores(flow_file, is_dir=False):
+                continue
+            self._load_workspace_markdown_flow(resource_root, flows_root, flow_file)
+
+    def _load_workspace_markdown_tool(
+        self,
+        resource_root: ResourceRoot,
+        tools_root: Path,
+        tool_file: Path,
+    ) -> None:
+        default_name = self._workspace_resource_name(tools_root, tool_file.with_suffix(""))
+        try:
+            document = load_markdown_asset_document(tool_file)
+            tool_definition = compile_markdown_tool_definition(document, default_name=default_name)
+            loaded_tool = self._load_reference(tool_definition.handler, tool_file.parent)
+            wrapped_tool = build_markdown_tool_wrapper(
+                tool_definition=tool_definition,
+                delegate=loaded_tool,
+                registered_name=tool_definition.name or default_name,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed loading workspace markdown tool '%s': %s",
+                tool_file,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        for namespace in self._resource_root_namespaces(resource_root):
+            try:
+                self.tools.register(namespace, tool_definition.name or default_name, wrapped_tool)
+            except RegistryError as exc:
+                logger.warning(
+                    "Resource-root markdown tool '%s' from '%s' collides with an existing registration in '%s': %s",
+                    tool_definition.name or default_name,
+                    tool_file,
+                    namespace,
+                    exc,
+                )
+
+    def _load_workspace_markdown_flow(
+        self,
+        resource_root: ResourceRoot,
+        flows_root: Path,
+        flow_file: Path,
+    ) -> None:
+        default_name = self._workspace_resource_name(flows_root, flow_file.with_suffix(""))
+        try:
+            document = load_markdown_asset_document(
+                flow_file,
+                fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                prompt_registry=self.prompts,
+                context_plugin=WORKSPACE_NAMESPACE,
+            )
+            definition = compile_markdown_flow_definition(document, default_name=default_name)
+            flow_name = str(definition.get("name") or default_name).strip() or default_name
+
+            prompt_definition = dict(definition)
+            if "prompt_files" not in prompt_definition and "prompts" in prompt_definition:
+                prompt_definition["prompt_files"] = prompt_definition.get("prompts")
+
+            system_prompt, prompt_sources = resolve_prompt_bundle(
+                prompt_definition,
+                base_dir=flow_file.parent,
+                inline_keys=("system_prompt", "prompt"),
+                file_keys=("system_prompt_file", "prompt_file"),
+                files_key="prompt_files",
+                default_files=[],
+                fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                prompt_registry=self.prompts,
+                context_plugin=WORKSPACE_NAMESPACE,
+            )
+
+            llm_profile = definition.get("llm_profile")
+            tools = coerce_str_list(definition.get("tools"))
+            handoff_agents = coerce_str_list(definition.get("handoff_agents"))
+            composite_agents = coerce_str_list(definition.get("composite_agents"))
+            execution_mode = str(definition.get("execution_mode") or "llm").strip() or "llm"
+            deterministic_handler = definition.get("deterministic_handler") or definition.get("handler")
+            pre_handlers = list(
+                dict.fromkeys(
+                    coerce_str_list(definition.get("pre")) + coerce_str_list(definition.get("pre_steps"))
+                )
+            )
+            step_handlers = list(
+                dict.fromkeys(
+                    coerce_str_list(definition.get("steps"))
+                    + coerce_str_list(definition.get("exec"))
+                    + coerce_str_list(definition.get("exec_steps"))
+                )
+            )
+            post_handlers = list(
+                dict.fromkeys(
+                    coerce_str_list(definition.get("post")) + coerce_str_list(definition.get("post_steps"))
+                )
+            )
+
+            raw_handoff_policies = definition.get("handoff_policies", {})
+            if not isinstance(raw_handoff_policies, dict):
+                raw_handoff_policies = {}
+            handoff_policies = {
+                str(target): dict(policy)
+                for target, policy in raw_handoff_policies.items()
+                if isinstance(target, str) and isinstance(policy, dict)
+            }
+            raw_default_handoff_policy = definition.get("default_handoff_policy", {})
+            if not isinstance(raw_default_handoff_policy, dict):
+                raw_default_handoff_policy = {}
+
+            flow_instance = self._load_agent_flow(
+                module_ref=definition.get("module"),
+                entry_fn_name=definition.get("entry_fn"),
+                plugin_root=flow_file.parent,
+                agent_name=flow_name,
+                plugin_name=WORKSPACE_NAMESPACE,
+            )
+            if flow_instance is None:
+                flow_instance = build_graph_flow_from_metadata(definition)
+        except Exception as exc:
+            logger.error(
+                "Failed loading workspace markdown flow '%s': %s",
+                flow_file,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        metadata_base = {
+            **dict(definition.get("metadata") or {}),
+            "markdown_path": str(flow_file.resolve()),
+            "resource_root": str(resource_root.path),
+        }
+
+        for namespace in self._resource_root_namespaces(resource_root):
+            flow_def = FlowDefinition(
+                name=flow_name,
+                description=str(definition.get("description", "")),
+                llm_profile=str(llm_profile) if llm_profile else None,
+                tools=[str(item) for item in tools if isinstance(item, str)],
+                handoff_agents=[str(item) for item in handoff_agents if isinstance(item, str)],
+                execution_mode=execution_mode,
+                deterministic_handler=str(deterministic_handler).strip() if deterministic_handler else None,
+                composite_agents=[str(item) for item in composite_agents if isinstance(item, str)],
+                system_prompt=system_prompt,
+                prompt_sources=prompt_sources,
+                pre_handlers=pre_handlers,
+                step_handlers=step_handlers,
+                post_handlers=post_handlers,
+                handoff_policies=handoff_policies,
+                default_handoff_policy=dict(raw_default_handoff_policy),
+                module=str(definition["module"]).strip() if definition.get("module") else None,
+                entry_fn=str(definition["entry_fn"]).strip() if definition.get("entry_fn") else None,
+                flow_instance=flow_instance,
+                metadata={
+                    **metadata_base,
+                    "plugin": namespace,
+                    "plugin_root": str(resource_root.path),
+                },
+            )
+            try:
+                self.flows.register(namespace, flow_name, flow_def)
+            except RegistryError as exc:
+                logger.warning(
+                    "Resource-root markdown flow '%s' from '%s' collides with an existing registration in '%s': %s",
+                    flow_name,
+                    flow_file,
+                    namespace,
+                    exc,
                 )
 
     def _validate_loaded_flow_references(self) -> None:
@@ -742,6 +937,14 @@ class PluginManager:
             return
 
         for tool_name, reference in tools_section.items():
+            if isinstance(reference, str) and reference.strip().lower().endswith(".md"):
+                self._load_markdown_manifest_tool(
+                    plugin_name=plugin_name,
+                    plugin_root=plugin_root,
+                    tool_name=str(tool_name),
+                    reference=reference.strip(),
+                )
+                continue
             try:
                 if self._reference_is_ignored(reference, plugin_root):
                     continue
@@ -762,6 +965,44 @@ class PluginManager:
                     reference,
                     exc,
                 )
+
+    def _load_markdown_manifest_tool(
+        self,
+        *,
+        plugin_name: str,
+        plugin_root: Path,
+        tool_name: str,
+        reference: str,
+    ) -> None:
+        markdown_path = (plugin_root / reference).resolve()
+        if self._plugin_resource_is_ignored(plugin_root, markdown_path):
+            return
+        try:
+            document = load_markdown_asset_document(markdown_path)
+            tool_definition = compile_markdown_tool_definition(document, default_name=tool_name)
+            loaded_tool = self._load_reference(tool_definition.handler, markdown_path.parent)
+            wrapped_tool = build_markdown_tool_wrapper(
+                tool_definition=tool_definition,
+                delegate=loaded_tool,
+                registered_name=tool_name,
+            )
+            self.tools.register(plugin_name, tool_name, wrapped_tool)
+        except RegistryError as exc:
+            logger.error(
+                "Plugin '%s' markdown tool '%s' registry collision: %s",
+                plugin_name,
+                tool_name,
+                exc,
+            )
+        except Exception as exc:
+            logger.error(
+                "Plugin '%s' failed to load markdown tool '%s' from '%s': %s",
+                plugin_name,
+                tool_name,
+                reference,
+                exc,
+                exc_info=True,
+            )
 
     def _load_plugin_flows(self, plugin_name: str, plugin_root: Path, flows_section: Dict[str, Any]) -> None:
         if not isinstance(flows_section, dict):
@@ -790,6 +1031,15 @@ class PluginManager:
         plugin_name: str,
         plugin_root: Path,
     ) -> None:
+        definition = self._resolve_markdown_flow_definition(
+            flow_name=flow_name,
+            definition=definition,
+            plugin_name=plugin_name,
+            plugin_root=plugin_root,
+        )
+        if not definition:
+            return
+
         llm_profile = definition.get("llm_profile")
         tools = definition.get("tools", [])
         if not tools and definition.get("allowed_tools"):
@@ -876,6 +1126,16 @@ class PluginManager:
         if not isinstance(raw_default_handoff_policy, dict):
             raw_default_handoff_policy = {}
 
+        flow_instance = self._load_agent_flow(
+            module_ref=definition.get("module"),
+            entry_fn_name=definition.get("entry_fn"),
+            plugin_root=plugin_root,
+            agent_name=flow_name,
+            plugin_name=plugin_name,
+        )
+        if flow_instance is None:
+            flow_instance = build_graph_flow_from_metadata(definition)
+
         flow_def = FlowDefinition(
             name=flow_name,
             description=str(definition.get("description", "")),
@@ -894,14 +1154,9 @@ class PluginManager:
             default_handoff_policy=dict(raw_default_handoff_policy),
             module=str(definition["module"]).strip() if definition.get("module") else None,
             entry_fn=str(definition["entry_fn"]).strip() if definition.get("entry_fn") else None,
-            flow_instance=self._load_agent_flow(
-                module_ref=definition.get("module"),
-                entry_fn_name=definition.get("entry_fn"),
-                plugin_root=plugin_root,
-                agent_name=flow_name,
-                plugin_name=plugin_name,
-            ),
+            flow_instance=flow_instance,
             metadata={
+                **dict(definition.get("metadata") or {}),
                 "plugin": plugin_name,
                 "plugin_root": str(plugin_root),
             },
@@ -965,6 +1220,58 @@ class PluginManager:
                 flow_name,
                 exc,
             )
+
+    def _resolve_markdown_flow_definition(
+        self,
+        *,
+        flow_name: str,
+        definition: Dict[str, Any],
+        plugin_name: str,
+        plugin_root: Path,
+    ) -> Dict[str, Any]:
+        markdown_ref = self._markdown_asset_reference(definition)
+        if markdown_ref is None:
+            return definition
+
+        markdown_path = (plugin_root / markdown_ref).resolve()
+        try:
+            document = load_markdown_asset_document(
+                markdown_path,
+                fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                prompt_registry=self.prompts,
+                context_plugin=plugin_name,
+            )
+            compiled = compile_markdown_flow_definition(document, default_name=flow_name)
+        except Exception as exc:
+            logger.error(
+                "Plugin '%s' flow '%s': failed to load markdown definition '%s': %s",
+                plugin_name,
+                flow_name,
+                markdown_path,
+                exc,
+                exc_info=True,
+            )
+            return {}
+
+        merged = dict(compiled)
+        for key, value in definition.items():
+            if key in {"markdown", "markdown_file", "source"} and value == markdown_ref:
+                continue
+            merged[key] = value
+        metadata = dict(compiled.get("metadata") or {})
+        metadata["markdown_path"] = str(markdown_path)
+        merged["metadata"] = metadata
+        return merged
+
+    def _markdown_asset_reference(self, definition: Dict[str, Any]) -> str | None:
+        markdown_ref = definition.get("markdown") or definition.get("markdown_file")
+        if isinstance(markdown_ref, str) and markdown_ref.strip():
+            return markdown_ref.strip()
+
+        source_ref = definition.get("source")
+        if isinstance(source_ref, str) and source_ref.strip().lower().endswith(".md"):
+            return source_ref.strip()
+        return None
 
     def _load_agent_flow(
         self,

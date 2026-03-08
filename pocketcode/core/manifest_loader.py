@@ -234,8 +234,14 @@ def _expect_flow_dict(value: Any, path: Path) -> Dict[str, Dict[str, Any]]:
             )
             continue
         # Validate required fields: module + entry_fn
+        markdown_ref = flow_cfg.get("markdown") or flow_cfg.get("markdown_file")
+        source_ref = flow_cfg.get("source")
+        has_markdown_source = isinstance(markdown_ref, str) and markdown_ref.strip()
+        if not has_markdown_source and isinstance(source_ref, str) and source_ref.strip().lower().endswith(".md"):
+            has_markdown_source = True
+
         missing = [f for f in ("module", "entry_fn") if not flow_cfg.get(f)]
-        if missing:
+        if missing and not has_markdown_source:
             raise ManifestSchemaError(
                 f"Flow '{flow_name}' in '{path}' is missing required field(s): "
                 + ", ".join(f"'{f}'" for f in missing)

@@ -7,6 +7,68 @@ from .shared import PickerOption
 
 
 class TextualAppAssetManagementMixin:
+    def _open_markdown_asset_clone_picker(self, asset_kind: str) -> None:
+        options = self._workspace_markdown_asset_options(asset_kind)
+        if not options:
+            self._write_error(f"No workspace markdown {asset_kind} assets are available.")
+            return
+        self._show_picker(
+            title=f"Clone {asset_kind.title()} Asset",
+            options=options,
+            current_value=None,
+            on_select=lambda asset_name: self._open_name_prompt(
+                title=f"Clone {asset_kind.title()} Asset",
+                placeholder=f"{asset_name}-copy",
+                help_text="Enter the new workspace name / filename.",
+                on_submit=lambda value: self._clone_markdown_asset(asset_kind, asset_name, value),
+            ),
+            help_text=f"Choose which workspace markdown {asset_kind} asset to clone.",
+            empty_message=f"No workspace markdown {asset_kind} assets are available.",
+        )
+
+    def _clone_markdown_asset(self, asset_kind: str, source_name: str, new_name: str) -> None:
+        cloned = self._clone_markdown_asset_effect(asset_kind, source_name, new_name)
+        self._write_info(
+            f"Cloned {asset_kind} asset '{source_name}' to {cloned['path']}."
+        )
+        companion_path = cloned.get("companion_path") if isinstance(cloned, dict) else None
+        if companion_path:
+            self._write_info(f"Cloned companion handler to {companion_path}.")
+        self._commit_engine_ui_update(refresh_suggestions=True)
+
+    def _open_markdown_asset_delete_picker(self, asset_kind: str) -> None:
+        options = self._workspace_markdown_asset_options(asset_kind)
+        if not options:
+            self._write_error(f"No workspace markdown {asset_kind} assets are available.")
+            return
+        self._show_picker(
+            title=f"Delete {asset_kind.title()} Asset",
+            options=options,
+            current_value=None,
+            on_select=lambda asset_name: self._confirm_delete_markdown_asset(asset_kind, asset_name),
+            help_text=f"Choose which workspace markdown {asset_kind} asset to delete.",
+            empty_message=f"No workspace markdown {asset_kind} assets are available.",
+        )
+
+    def _confirm_delete_markdown_asset(self, asset_kind: str, asset_name: str) -> None:
+        self._show_picker(
+            title=f"Delete {asset_kind.title()} Asset",
+            options=(
+                PickerOption("delete", f"Delete {asset_name}", search_text="confirm delete"),
+                PickerOption("cancel", "Cancel"),
+            ),
+            current_value=None,
+            on_select=lambda value: self._delete_markdown_asset(asset_kind, asset_name) if value == "delete" else None,
+            help_text=f"Delete the workspace markdown {asset_kind} asset '{asset_name}'.",
+        )
+
+    def _delete_markdown_asset(self, asset_kind: str, asset_name: str) -> None:
+        deleted = self._delete_markdown_asset_effect(asset_kind, asset_name)
+        self._write_info(f"Deleted {asset_kind} asset '{asset_name}' from {deleted['path']}.")
+        if deleted.get("companion_path") and not deleted.get("companion_deleted"):
+            self._write_info(f"Left companion handler in place at {deleted['companion_path']}.")
+        self._commit_engine_ui_update(refresh_suggestions=True)
+
     def _save_inspector_skill_selection(self) -> None:
         active_profile = self._engine.active_agent_profile
         if active_profile is None:

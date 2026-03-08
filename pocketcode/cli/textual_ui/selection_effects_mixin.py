@@ -82,6 +82,13 @@ class TextualAppSelectionEffectsMixin:
 
         raise ValueError(f"Unsupported clone target: {asset_name}")
 
+    def _clone_markdown_asset_effect(self, asset_kind: str, source_name: str, new_name: str):
+        if not hasattr(self._engine, "clone_markdown_asset"):
+            raise ValueError("This runtime does not support cloning markdown assets.")
+        cloned = self._engine.clone_markdown_asset(asset_kind, source_name, new_name)
+        self._refresh_suggestions()
+        return cloned
+
     def _delete_asset_effect(self, asset_name: str):
         if asset_name == "agent":
             active_profile = self._engine.active_agent_profile
@@ -114,6 +121,20 @@ class TextualAppSelectionEffectsMixin:
             return active_mode.name, target_path
 
         raise ValueError(f"Unsupported delete target: {asset_name}")
+
+    def _delete_markdown_asset_effect(self, asset_kind: str, asset_name: str):
+        if not hasattr(self._engine, "delete_markdown_asset"):
+            raise ValueError("This runtime does not support deleting markdown assets.")
+        deleted = self._engine.delete_markdown_asset(asset_kind, asset_name)
+        self._refresh_suggestions()
+        return deleted
+
+    def _update_markdown_asset_effect(self, asset_kind: str, asset_name: str, markdown_text: str):
+        if not hasattr(self._engine, "update_markdown_asset"):
+            raise ValueError("This runtime does not support editing markdown assets.")
+        updated = self._engine.update_markdown_asset(asset_kind, asset_name, markdown_text=markdown_text)
+        self._refresh_suggestions()
+        return updated
 
     def _save_selection_preset_effect(self, preset_name: str) -> str:
         if not hasattr(self._engine, "save_textual_selection_preset"):

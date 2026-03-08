@@ -85,6 +85,10 @@ class ToolRuntime:
         tool_impl: Any,
         tool_instance: BaseTool | None,
     ) -> Path | None:
+        metadata_source = getattr(tool_instance or tool_impl, "_tool_source_path", None)
+        if isinstance(metadata_source, (str, Path)):
+            return Path(metadata_source).resolve()
+
         target = tool_instance.__class__ if tool_instance is not None else tool_impl
         try:
             source_file = inspect.getsourcefile(target) or inspect.getfile(target)

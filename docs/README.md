@@ -28,6 +28,7 @@ The runtime also accepts `plugin::resource` in user-facing configuration, manife
 - `agent_system.md`: agent profile model, schemas, precedence, and control surfaces
 - `architecture.md`: startup, loading, registries, execution loop, and precedence rules
 - `configuration.md`: `pocketcode.yml`, `.pocketcode/`, discovery controls, and prompt loading
+- `markdown_assets.md`: canonical syntax, locations, validation, and runtime behavior for Markdown-authored prompts, tools, flows, agents, modes, and skills
 - `cli.md`: startup flags, commands, aliases, and Textual controls
 - `plugin_architecture.md`: plugin discovery, manifest schema, flow fields, and prompt/tool registration
 - `pocketflow_agents.md`: flow authoring and agent profile behavior
@@ -39,10 +40,11 @@ The runtime also accepts `plugin::resource` in user-facing configuration, manife
 1. Read `architecture.md` for the system model.
 2. Read `agent_system.md` for agent-profile behavior and precedence.
 3. Read `configuration.md` for workspace setup and discovery behavior.
-4. Read `cli.md` for the user-facing control surface.
-5. Read `plugin_architecture.md` and `pocketflow_agents.md` when changing runtime resources.
-6. Read `modes_and_skills.md` when working on session overlays.
-7. Read `run_cancellation.md` when changing long-running tools or stop behavior.
+4. Read `markdown_assets.md` when working on any Markdown-authored asset.
+5. Read `cli.md` for the user-facing control surface.
+6. Read `plugin_architecture.md` and `pocketflow_agents.md` when changing runtime resources.
+7. Read `modes_and_skills.md` when working on session overlays.
+8. Read `run_cancellation.md` when changing long-running tools or stop behavior.
 
 ## Historical Specs
 

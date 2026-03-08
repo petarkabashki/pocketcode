@@ -814,6 +814,9 @@ class _TextualEngineStub:
         self.update_agent_profile_calls: list[dict[str, object]] = []
         self.update_llm_profile_calls: list[dict[str, object]] = []
         self.update_mode_calls: list[dict[str, object]] = []
+        self.clone_markdown_asset_calls: list[tuple[str, str, str]] = []
+        self.update_markdown_asset_calls: list[dict[str, object]] = []
+        self.delete_markdown_asset_calls: list[tuple[str, str]] = []
         self.save_system_settings_calls: list[dict[str, object]] = []
         self.set_last_used_skill_calls: list[list[str]] = []
         self.set_last_used_profile_skill_calls: list[tuple[str, list[str]]] = []
@@ -870,6 +873,21 @@ class _TextualEngineStub:
             "b-safe": self._profile("b-safe", "b"),
             "c": self._profile("c", "c"),
             "c-safe": self._profile("c-safe", "c"),
+        }
+        self._markdown_assets = {
+            "flow": {
+                "review-flow": {
+                    "text": "---\nname: review-flow\n---\nflow body\n",
+                    "path": Path("/tmp/review-flow.md"),
+                }
+            },
+            "tool": {
+                "workspace-echo": {
+                    "text": "---\nname: workspace-echo\nhandler: ./workspace-echo.py:WorkspaceEchoTool\n---\ntool body\n",
+                    "path": Path("/tmp/workspace-echo.md"),
+                    "companion_path": Path("/tmp/workspace-echo.py"),
+                }
+            },
         }
 
     @staticmethod
@@ -1030,6 +1048,56 @@ class _TextualEngineStub:
         self.clone_mode_calls.append((src_name, new_name))
         self._modes[new_name] = SimpleNamespace(name=new_name, source_path=Path(f"/tmp/{new_name}.md"))
         return Path(f"/tmp/{new_name}.md")
+
+    def list_markdown_assets(self, asset_kind):
+        return sorted(self._markdown_assets.get(asset_kind, {}))
+
+    def get_markdown_asset(self, asset_kind, name):
+        asset = dict(self._markdown_assets[asset_kind][name])
+        asset.setdefault("kind", asset_kind)
+        asset.setdefault("name", name)
+        asset.setdefault("companion_path", None)
+        return asset
+
+    def clone_markdown_asset(self, asset_kind, source_name, new_name):
+        self.clone_markdown_asset_calls.append((asset_kind, source_name, new_name))
+        source = dict(self._markdown_assets[asset_kind][source_name])
+        cloned = {
+            "text": source["text"].replace(f"name: {source_name}", f"name: {new_name}"),
+            "path": Path(f"/tmp/{new_name}.md"),
+            "companion_path": Path(f"/tmp/{new_name}.py") if asset_kind == "tool" else None,
+        }
+        self._markdown_assets.setdefault(asset_kind, {})[new_name] = cloned
+        return {
+            "kind": asset_kind,
+            "name": new_name,
+            "path": cloned["path"],
+            "companion_path": cloned.get("companion_path"),
+        }
+
+    def update_markdown_asset(self, asset_kind, name, *, markdown_text):
+        self.update_markdown_asset_calls.append(
+            {"asset_kind": asset_kind, "name": name, "markdown_text": markdown_text}
+        )
+        asset = self._markdown_assets[asset_kind][name]
+        asset["text"] = markdown_text
+        return {
+            "kind": asset_kind,
+            "name": name,
+            "path": asset["path"],
+            "companion_path": asset.get("companion_path"),
+        }
+
+    def delete_markdown_asset(self, asset_kind, name):
+        self.delete_markdown_asset_calls.append((asset_kind, name))
+        asset = self._markdown_assets[asset_kind].pop(name)
+        return {
+            "kind": asset_kind,
+            "name": name,
+            "path": asset["path"],
+            "companion_path": asset.get("companion_path"),
+            "companion_deleted": False,
+        }
 
     def update_agent_profile(
         self,
@@ -2136,6 +2204,118 @@ class TestProfileCloneAndSave:
                         },
                     }
                 ]
+
+        asyncio.run(exercise())
+
+    def test_edit_flow_asset_popup_opens_text_editor(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._open_markdown_flow_asset_editor()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("review-flow")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, TextEditorScreen)
+
+        asyncio.run(exercise())
+
+    def test_edit_flow_asset_popup_persists_markdown_edits(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._apply_markdown_asset_edit("flow", "review-flow", "---\nname: review-flow\n---\nupdated\n")
+                await pilot.pause(0.05)
+
+                assert engine.update_markdown_asset_calls == [
+                    {
+                        "asset_kind": "flow",
+                        "name": "review-flow",
+                        "markdown_text": "---\nname: review-flow\n---\nupdated\n",
+                    }
+                ]
+
+        asyncio.run(exercise())
+
+    def test_control_center_can_clone_tool_asset(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("tool_assets")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("clone")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("workspace-echo")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, NameInputScreen)
+                app.screen.dismiss("workspace-echo-copy")
+                await pilot.pause(0.1)
+
+                assert engine.clone_markdown_asset_calls == [("tool", "workspace-echo", "workspace-echo-copy")]
+
+        asyncio.run(exercise())
+
+    def test_control_center_can_delete_flow_asset(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("flow_assets")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("delete")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("review-flow")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("delete")
+                await pilot.pause(0.1)
+
+                assert engine.delete_markdown_asset_calls == [("flow", "review-flow")]
 
         asyncio.run(exercise())
 

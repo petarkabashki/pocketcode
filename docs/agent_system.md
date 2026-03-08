@@ -6,6 +6,7 @@ Use this document together with:
 
 - `architecture.md` for runtime loading and precedence behavior
 - `configuration.md` for workspace file locations and configuration
+- `markdown_assets.md` for Markdown-backed profile syntax, includes, and validation
 - `cli.md` for the command surface
 - `pocketflow_agents.md` for the relationship between flows, agent profiles, modes, and skills
 
@@ -40,7 +41,7 @@ Current fields:
 | `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` means inherit flow tool surface |
 | `tool_confirmation` | `dict` | `{}` | Confirmation defaults and per-tool overrides |
 | `source` | `str` | `"synthesised"` | One of `synthesised`, `plugin`, or `workspace` |
-| `source_path` | `Path \| None` | `None` | Source YAML path for workspace-backed profiles |
+| `source_path` | `Path \| None` | `None` | Source file path for workspace-backed profiles |
 
 - `tools` entries resolve through the shared registry, so they accept `plugin.resource`, `plugin::resource`, and typed `tool:` references.
 
@@ -49,8 +50,8 @@ Current fields:
 Agent profiles are loaded through `AgentManager` with this effective precedence:
 
 1. plugin-declared inline `default_agent`
-2. plugin-local `agents/*.yaml`
-3. workspace `.pocketcode/agents/*.yaml`
+2. plugin-local `agents/*.yaml` and `agents/*.md`
+3. workspace `.pocketcode/agents/*.yaml` and `.pocketcode/agents/*.md`
 4. synthesised defaults built from flow definitions
 
 On name collision, the higher-precedence source wins.
@@ -89,7 +90,7 @@ Current confirmation resolution order is:
 
 The agent-profile system uses these workspace paths:
 
-- `<resource_root>/agents/` for workspace profile YAML files
+- `<resource_root>/agents/` for workspace profile YAML and Markdown files
 - `<resource_root>/llm-profiles/` for workspace LLM profile YAML files
 - `<resource_root>/plugins/` for nested plugins
 - `<resource_root>/tools/` for shared direct tools under `resource_root.<name>`; the default `.pocketcode/` root is also aliased under `workspace`
@@ -114,7 +115,9 @@ parameters:
 
 ## Workspace Agent Profile Schema
 
-Workspace agent profiles are loaded from all discovered `<resource_root>/agents/<name>.yaml` locations and are saved into the primary resource root.
+Workspace agent profiles are loaded from all discovered `<resource_root>/agents/<name>.yaml` and `<resource_root>/agents/<name>.md` locations and are saved into the primary resource root.
+
+Markdown-backed profiles use the same fields, with YAML front matter for structured keys and the Markdown body as `inline_prompt`.
 
 Example:
 
@@ -136,6 +139,21 @@ tool_confirmation:
     core.execute_command: deny
 ```
 
+Equivalent Markdown form:
+
+```md
+---
+name: my-agent
+flow: core.react
+llm_profile: fast-review
+tools:
+  - core.read_file
+extra_prompts:
+  - prompts/review.md
+---
+Review changes conservatively and call out regressions first.
+```
+
 Notes:
 
 - `flow` is required.
@@ -143,9 +161,13 @@ Notes:
 - `tools` omitted means inherit the target flow tool surface.
 - agent-facing runtime controls such as flow selection, tool listing, and per-agent LLM overrides normalize `plugin::resource` and typed `flow:` or `agent:` references before registry lookup.
 - `extra_prompts` entries beginning with `prompt:` resolve through the prompt registry.
-- path-based `extra_prompts` are resolved relative to the profile file first, then through plugin and resource-root fallback roots.
-- workspace-backed agent profile YAML now validates and normalizes typed refs while loading; malformed `flow`, `tools`, or `extra_prompts` entries cause that profile file to be skipped with a warning instead of failing later during runtime resolution.
-- when a workspace-backed agent profile is saved or updated, registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries are written back in canonical `plugin.resource` form, while `prompt:` sources remain typed and plain path-based prompt entries remain plain paths.
+- path-based `extra_prompts` are resolved relative to the profile file first, then through plugin and resource-root fallback roots. Paths such as `prompts/review.md` are also accepted when the resource-root prompt fallback path is active.
+- workspace Markdown-backed agent bodies are loaded into `inline_prompt` after include and import expansion using the same workspace prompt registry and `<resource_root>/prompts/` fallback resolution used by workspace Markdown flows.
+- plugin-local Markdown-backed agent bodies also expand `include` and `import` directives during load; prompt imports resolve in the plugin namespace when plugin metadata exposes a plugin name and root, with plugin `prompts/` and workspace prompt roots used as fallback locations for path-based includes.
+- workspace-backed agent profile files now validate and normalize typed refs while loading; malformed `flow`, `tools`, or `extra_prompts` entries cause that profile file to be skipped with a warning instead of failing later during runtime resolution.
+- workspace Markdown agent edits and clones now validate `include` and `import` prompt references before reload through the shared engine asset API, so broken prompt-file references fail during authoring instead of only after a later registry reload.
+- that same pre-reload validation now resolves the target `flow`, explicit `tools`, and `prompt:` entries in `extra_prompts` against the live registries, so missing runtime targets fail during authoring instead of waiting for a later session or reload path.
+- when a workspace-backed agent profile is saved or updated, registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries are written back in canonical `plugin.resource` form, while `prompt:` sources remain typed and plain path-based prompt entries remain plain paths; Markdown-backed profiles are preserved as Markdown on save.
 - after the engine has loaded flows, tools, and prompts, agent profiles are validated again against the live registries; resolvable tool refs are canonicalized, invalid prompt-resource refs are removed with a warning, and profiles whose target flow is no longer available are dropped from the loaded registry.
 
 ## Inline Flow Default Agent Block
@@ -215,22 +237,22 @@ Current Textual agent-system controls include:
 - `F3` opens the editor picker for agent config, mode config, LLM config, tool selection, and tool policies
 - `F4` opens the clone picker for agent, mode, and LLM configs
 - `F6` opens the Control Center for active profile selection, mode selection, LLM override, skills, tool selection, tool policy editing, selection presets, session confirmation, and system settings
-- the inspector exposes inline `Skills` and `Allowed Tools` selection lists, each with a `Save` button that writes the current selection into the active workspace agent YAML
+- the inspector exposes inline `Skills` and `Allowed Tools` selection lists, each with a `Save` button that writes the current selection into the active workspace agent profile file
 - inline inspector tool and skill selections are session-scoped effective runtime overrides, not persistent `pocketcode.yml` state
-- new sessions seed those runtime overrides from the active agent profile YAML before any session-specific changes are applied
+- new sessions seed those runtime overrides from the active agent profile file before any session-specific changes are applied
 - tool entries are grouped hierarchically and can be toggled at either the group or leaf level
 - searchable selection popups support `Ctrl+Down`, `Ctrl+Up`, and `Space`
 - tool groups are derived from the tool source path under `tools/`
 - last-used mode, profile, and LLM choices are still persisted for Textual startup convenience
-- saving inspector skills writes `skills` in `.pocketcode/agents/<profile>.yaml` and clears any matching legacy Textual override state
-- saving inspector tools writes `tools` in `.pocketcode/agents/<profile>.yaml` and clears any matching legacy Textual override state
+- saving inspector skills writes `skills` in the active workspace agent profile file and clears any matching legacy Textual override state
+- saving inspector tools writes `tools` in the active workspace agent profile file and clears any matching legacy Textual override state
 - `Reset` clears the current session override and `Save as Default` writes the current selection into config
 - editing a plugin or synthesised profile from the Textual UI requires cloning it to a workspace-backed profile first
 
 Current skill fallback order is:
 
 1. active session per-profile skill override
-2. active profile YAML `skills`
+2. active profile file `skills`
 3. active session global skill override
 4. Textual `default_skills`
 

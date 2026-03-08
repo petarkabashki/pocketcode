@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -258,6 +259,587 @@ class TestEngineAgentProfiles:
         )
 
         assert engine.list_agent_profiles("flow:coder.coder") == ["coder.safe"]
+
+    def test_clone_markdown_tool_asset_rewrites_name_and_handler_path(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text(
+            "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\nbody\n",
+            encoding="utf-8",
+        )
+        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path.write_text("class SampleTool: pass\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine.reload_called = False
+        engine.reload = lambda: setattr(engine, "reload_called", True)
+
+        cloned = engine.clone_markdown_asset("tool", "sample_tool", "sample_tool_copy")
+
+        cloned_markdown = cloned["path"].read_text(encoding="utf-8")
+        cloned_handler = cloned["companion_path"].read_text(encoding="utf-8")
+        assert cloned["path"].name == "sample_tool_copy.md"
+        assert cloned["companion_path"].name == "sample_tool_copy.py"
+        assert "name: sample_tool_copy" in cloned_markdown
+        assert "handler: ./sample_tool_copy.py:SampleTool" in cloned_markdown
+        assert cloned_handler == "class SampleTool: pass\n"
+        assert engine.reload_called is True
+
+    def test_clone_markdown_tool_asset_cleans_up_when_cloned_handler_object_is_missing(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text(
+            "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\nbody\n",
+            encoding="utf-8",
+        )
+        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path.write_text("class DifferentTool: pass\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine.reload_called = False
+        engine.reload = lambda: setattr(engine, "reload_called", True)
+
+        try:
+            engine.clone_markdown_asset("tool", "sample_tool", "sample_tool_copy")
+        except ValueError as exc:
+            assert "Tool handler 'SampleTool' was not found in" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing cloned tool handler object.")
+
+        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.md").exists()
+        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.py").exists()
+        assert engine.reload_called is False
+
+    def test_clone_markdown_tool_asset_rejects_invalid_import_path_handler(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text(
+            "---\nname: sample_tool\nhandler: missing.module.SampleTool\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine.reload_called = False
+        engine.reload = lambda: setattr(engine, "reload_called", True)
+
+        try:
+            engine.clone_markdown_asset("tool", "sample_tool", "sample_tool_copy")
+        except ValueError as exc:
+            assert "Tool handler module import failed for 'missing.module'" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for invalid import-path handler during clone.")
+
+        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.md").exists()
+        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.py").exists()
+        assert engine.reload_called is False
+
+    def test_clone_markdown_tool_asset_rejects_missing_prompt_include_and_cleans_up(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text(
+            "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\n{{ include:missing-prompt.md }}\n",
+            encoding="utf-8",
+        )
+        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path.write_text("class SampleTool: pass\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(
+            tools=tool_registry,
+            flows=NamespaceRegistry(),
+            prompts=NamespaceRegistry(),
+            resource_roots=[],
+        )
+        engine.reload_called = False
+        engine.reload = lambda: setattr(engine, "reload_called", True)
+
+        try:
+            engine.clone_markdown_asset("tool", "sample_tool", "sample_tool_copy")
+        except FileNotFoundError as exc:
+            assert "Prompt file not found" in str(exc)
+        else:
+            raise AssertionError("Expected FileNotFoundError for missing included prompt file during clone.")
+
+        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.md").exists()
+        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.py").exists()
+        assert engine.reload_called is False
+
+    def test_update_markdown_asset_rejects_mismatched_front_matter_name(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path.parent.mkdir(parents=True, exist_ok=True)
+        flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        flow_registry = NamespaceRegistry()
+        flow_registry.register(
+            "workspace",
+            "sample_flow",
+            SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
+        )
+        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "flow",
+                "sample_flow",
+                markdown_text="---\nname: other_flow\n---\nbody\n",
+            )
+        except ValueError as exc:
+            assert "does not match target flow 'sample_flow'" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for mismatched front matter name.")
+
+    def test_update_markdown_flow_asset_rejects_invalid_graph_transition(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path.parent.mkdir(parents=True, exist_ok=True)
+        flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        flow_registry = NamespaceRegistry()
+        flow_registry.register(
+            "workspace",
+            "sample_flow",
+            SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
+        )
+        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "flow",
+                "sample_flow",
+                markdown_text=(
+                    "---\nname: sample_flow\nnodes:\n  start:\n    kind: noop\n    transition: missing\n  done:\n    kind: output\n    message: Done\n---\n```mermaid\ngraph TD\n  start -->|ok| done\n```\n"
+                ),
+            )
+        except ValueError as exc:
+            assert "references transition 'missing'" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for invalid graph transition.")
+
+    def test_update_markdown_flow_asset_rejects_missing_prompt_include(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path.parent.mkdir(parents=True, exist_ok=True)
+        flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        flow_registry = NamespaceRegistry()
+        flow_registry.register(
+            "workspace",
+            "sample_flow",
+            SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
+        )
+        engine._plugins = SimpleNamespace(
+            tools=NamespaceRegistry(),
+            flows=flow_registry,
+            prompts=NamespaceRegistry(),
+            resource_roots=[],
+        )
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "flow",
+                "sample_flow",
+                markdown_text="---\nname: sample_flow\n---\n{{ include:missing-prompt.md }}\n",
+            )
+        except FileNotFoundError as exc:
+            assert "Prompt file not found" in str(exc)
+        else:
+            raise AssertionError("Expected FileNotFoundError for missing included prompt file.")
+
+    def test_update_markdown_flow_asset_rejects_missing_tool_reference(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path.parent.mkdir(parents=True, exist_ok=True)
+        flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        flow_registry = NamespaceRegistry()
+        flow_registry.register(
+            "workspace",
+            "sample_flow",
+            SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
+        )
+        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "flow",
+                "sample_flow",
+                markdown_text="---\nname: sample_flow\ntools:\n  - workspace.missing_tool\n---\nbody\n",
+            )
+        except ValueError as exc:
+            assert "sample_flow.md: tools[0] could not be resolved" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing flow tool reference.")
+
+    def test_update_markdown_flow_asset_rejects_missing_handoff_target(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path.parent.mkdir(parents=True, exist_ok=True)
+        flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        flow_registry = NamespaceRegistry()
+        flow_registry.register(
+            "workspace",
+            "sample_flow",
+            SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
+        )
+        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "flow",
+                "sample_flow",
+                markdown_text="---\nname: sample_flow\nhandoff_agents:\n  - workspace.missing_flow\n---\nbody\n",
+            )
+        except ValueError as exc:
+            assert "sample_flow.md: handoff_agents[0] could not be resolved" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing handoff flow reference.")
+
+    def test_update_markdown_flow_asset_rejects_missing_prompt_bundle_reference(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path.parent.mkdir(parents=True, exist_ok=True)
+        flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        flow_registry = NamespaceRegistry()
+        flow_registry.register(
+            "workspace",
+            "sample_flow",
+            SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
+        )
+        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "flow",
+                "sample_flow",
+                markdown_text="---\nname: sample_flow\nprompt_files:\n  - prompt:missing.review\n---\nbody\n",
+            )
+        except Exception as exc:  # noqa: BLE001
+            assert "missing.review" in str(exc)
+        else:
+            raise AssertionError("Expected failure for missing prompt bundle reference.")
+
+    def test_update_markdown_agent_asset_rejects_missing_prompt_include(self, tmp_path):
+        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path.parent.mkdir(parents=True, exist_ok=True)
+        agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._agent_profile_manager = _ProfileManagerStub(
+            {
+                "review": AgentProfile(name="review", flow="plug.agent", source="workspace", source_path=agent_path),
+            }
+        )
+        flow_registry = NamespaceRegistry()
+        flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
+        engine._plugins = SimpleNamespace(
+            tools=NamespaceRegistry(),
+            flows=flow_registry,
+            prompts=NamespaceRegistry(),
+            resource_roots=[],
+        )
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "agent",
+                "review",
+                markdown_text="---\nname: review\nflow: plug.agent\n---\n{{ include:missing-prompt.md }}\n",
+            )
+        except FileNotFoundError as exc:
+            assert "Prompt file not found" in str(exc)
+        else:
+            raise AssertionError("Expected FileNotFoundError for missing included prompt file in agent asset.")
+
+    def test_update_markdown_agent_asset_rejects_missing_target_flow(self, tmp_path):
+        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path.parent.mkdir(parents=True, exist_ok=True)
+        agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._agent_profile_manager = _ProfileManagerStub(
+            {"review": AgentProfile(name="review", flow="plug.agent", source="workspace", source_path=agent_path)}
+        )
+        engine._plugins = SimpleNamespace(
+            tools=NamespaceRegistry(),
+            flows=NamespaceRegistry(),
+            prompts=NamespaceRegistry(),
+            resource_roots=[],
+        )
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "agent",
+                "review",
+                markdown_text="---\nname: review\nflow: plug.agent\n---\nbody\n",
+            )
+        except ValueError as exc:
+            assert "review.md: flow could not be resolved" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing target flow.")
+
+    def test_update_markdown_agent_asset_rejects_missing_tool_reference(self, tmp_path):
+        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path.parent.mkdir(parents=True, exist_ok=True)
+        agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._agent_profile_manager = _ProfileManagerStub(
+            {"review": AgentProfile(name="review", flow="plug.agent", source="workspace", source_path=agent_path)}
+        )
+        flow_registry = NamespaceRegistry()
+        flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
+        engine._plugins = SimpleNamespace(
+            tools=NamespaceRegistry(),
+            flows=flow_registry,
+            prompts=NamespaceRegistry(),
+            resource_roots=[],
+        )
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "agent",
+                "review",
+                markdown_text="---\nname: review\nflow: plug.agent\ntools:\n  - workspace.missing_tool\n---\nbody\n",
+            )
+        except ValueError as exc:
+            assert "review.md: tools[0] could not be resolved" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing tool reference.")
+
+    def test_update_markdown_agent_asset_rejects_missing_prompt_resource(self, tmp_path):
+        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path.parent.mkdir(parents=True, exist_ok=True)
+        agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._agent_profile_manager = _ProfileManagerStub(
+            {"review": AgentProfile(name="review", flow="plug.agent", source="workspace", source_path=agent_path)}
+        )
+        flow_registry = NamespaceRegistry()
+        flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
+        engine._plugins = SimpleNamespace(
+            tools=NamespaceRegistry(),
+            flows=flow_registry,
+            prompts=NamespaceRegistry(),
+            resource_roots=[],
+        )
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "agent",
+                "review",
+                markdown_text=(
+                    "---\nname: review\nflow: plug.agent\nextra_prompts:\n  - prompt:missing.review\n---\nbody\n"
+                ),
+            )
+        except ValueError as exc:
+            assert "review.md: extra_prompts[0] could not be resolved" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing prompt resource.")
+
+    def test_clone_markdown_flow_asset_rejects_invalid_graph_and_cleans_up(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path.parent.mkdir(parents=True, exist_ok=True)
+        flow_path.write_text(
+            "---\nname: sample_flow\nnodes:\n  start:\n    kind: noop\n    transition: missing\n  done:\n    kind: output\n    message: Done\n---\n```mermaid\ngraph TD\n  start -->|ok| done\n```\n",
+            encoding="utf-8",
+        )
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        flow_registry = NamespaceRegistry()
+        flow_registry.register(
+            "workspace",
+            "sample_flow",
+            SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
+        )
+        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
+        engine.reload_called = False
+        engine.reload = lambda: setattr(engine, "reload_called", True)
+
+        try:
+            engine.clone_markdown_asset("flow", "sample_flow", "sample_flow_copy")
+        except ValueError as exc:
+            assert "references transition 'missing'" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for invalid graph transition during clone.")
+
+        assert not (tmp_path / ".pocketcode" / "flows" / "sample_flow_copy.md").exists()
+        assert engine.reload_called is False
+
+    def test_clone_markdown_agent_asset_rejects_missing_prompt_include_and_cleans_up(self, tmp_path):
+        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path.parent.mkdir(parents=True, exist_ok=True)
+        agent_path.write_text(
+            "---\nname: review\nflow: plug.agent\n---\n{{ include:missing-prompt.md }}\n",
+            encoding="utf-8",
+        )
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._agent_profile_manager = _ProfileManagerStub(
+            {
+                "review": AgentProfile(name="review", flow="plug.agent", source="workspace", source_path=agent_path),
+            }
+        )
+        flow_registry = NamespaceRegistry()
+        flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
+        engine._plugins = SimpleNamespace(
+            tools=NamespaceRegistry(),
+            flows=flow_registry,
+            prompts=NamespaceRegistry(),
+            resource_roots=[],
+        )
+        engine.reload_called = False
+        engine.reload = lambda: setattr(engine, "reload_called", True)
+
+        try:
+            engine.clone_markdown_asset("agent", "review", "review_copy")
+        except FileNotFoundError as exc:
+            assert "Prompt file not found" in str(exc)
+        else:
+            raise AssertionError("Expected FileNotFoundError for missing included prompt file during agent clone.")
+
+        assert not (tmp_path / ".pocketcode" / "agents" / "review_copy.md").exists()
+        assert engine.reload_called is False
+
+    def test_update_markdown_tool_asset_rejects_missing_handler_file(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "tool",
+                "sample_tool",
+                markdown_text=(
+                    "---\nname: sample_tool\nhandler: ./missing_tool.py:SampleTool\n---\nbody\n"
+                ),
+            )
+        except ValueError as exc:
+            assert "Tool handler file not found" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing tool handler file.")
+
+    def test_update_markdown_tool_asset_rejects_missing_handler_object(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
+        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path.write_text("class DifferentTool: pass\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "tool",
+                "sample_tool",
+                markdown_text=(
+                    "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\nbody\n"
+                ),
+            )
+        except ValueError as exc:
+            assert "Tool handler 'SampleTool' was not found in" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for missing tool handler object.")
+
+    def test_update_markdown_tool_asset_rejects_invalid_import_path_handler(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine.reload = lambda: None
+
+        try:
+            engine.update_markdown_asset(
+                "tool",
+                "sample_tool",
+                markdown_text=(
+                    "---\nname: sample_tool\nhandler: missing.module.SampleTool\n---\nbody\n"
+                ),
+            )
+        except ValueError as exc:
+            assert "Tool handler module import failed for 'missing.module'" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for invalid import-path handler.")
+
+    def test_delete_markdown_tool_asset_removes_markdown_and_keeps_handler(self, tmp_path):
+        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path.parent.mkdir(parents=True, exist_ok=True)
+        tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
+        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path.write_text("class SampleTool: pass\n", encoding="utf-8")
+
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        tool_registry = NamespaceRegistry()
+        tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
+        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine.reload_called = False
+        engine.reload = lambda: setattr(engine, "reload_called", True)
+
+        deleted = engine.delete_markdown_asset("tool", "sample_tool")
+
+        assert deleted["path"] == tool_path.resolve()
+        assert deleted["companion_path"] == handler_path.resolve()
+        assert deleted["companion_deleted"] is False
+        assert not tool_path.exists()
+        assert handler_path.exists()
+        assert engine.reload_called is True
 
     def test_set_active_agent_profile_rejects_unknown_target_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)

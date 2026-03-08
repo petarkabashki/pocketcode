@@ -312,12 +312,110 @@ class _StatusEngineStub(_EngineStub):
         }
 
 
+class _AssetCommandEngineStub(_EngineStub):
+    def __init__(self, workspace_root: Path):
+        self.workspace_root = workspace_root
+        self.created_calls: list[tuple[str, str]] = []
+        self.list_calls: list[str] = []
+        self.show_calls: list[tuple[str, str]] = []
+        self.clone_calls: list[tuple[str, str, str]] = []
+        self.edit_calls: list[tuple[str, str, str]] = []
+        self.delete_calls: list[tuple[str, str]] = []
+
+    def create_markdown_asset(self, asset_kind: str, name: str):
+        self.created_calls.append((asset_kind, name))
+        target_dir = self.workspace_root / ".pocketcode" / f"{asset_kind}s"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        asset_path = target_dir / f"{name}.md"
+        asset_path.write_text(f"{asset_kind}:{name}\n", encoding="utf-8")
+        companion_path = None
+        if asset_kind == "tool":
+            companion_path = target_dir / f"{name}.py"
+            companion_path.write_text("class Placeholder: pass\n", encoding="utf-8")
+        return {
+            "kind": asset_kind,
+            "name": name,
+            "path": asset_path,
+            "companion_path": companion_path,
+        }
+
+    def list_markdown_assets(self, asset_kind: str):
+        self.list_calls.append(asset_kind)
+        return [f"{asset_kind}.one", f"{asset_kind}.two"]
+
+    def get_markdown_asset(self, asset_kind: str, name: str):
+        self.show_calls.append((asset_kind, name))
+        asset_path = self.workspace_root / ".pocketcode" / f"{asset_kind}s" / f"{name}.md"
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_path.write_text(f"---\nname: {name}\n---\nbody\n", encoding="utf-8")
+        return {
+            "kind": asset_kind,
+            "name": name,
+            "path": asset_path,
+            "companion_path": None,
+            "text": asset_path.read_text(encoding="utf-8"),
+        }
+
+    def clone_markdown_asset(self, asset_kind: str, source_name: str, new_name: str):
+        self.clone_calls.append((asset_kind, source_name, new_name))
+        target_dir = self.workspace_root / ".pocketcode" / f"{asset_kind}s"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        asset_path = target_dir / f"{new_name}.md"
+        asset_path.write_text(f"clone:{source_name}->{new_name}\n", encoding="utf-8")
+        companion_path = None
+        if asset_kind == "tool":
+            companion_path = target_dir / f"{new_name}.py"
+            companion_path.write_text("class Placeholder: pass\n", encoding="utf-8")
+        return {
+            "kind": asset_kind,
+            "name": new_name,
+            "path": asset_path,
+            "companion_path": companion_path,
+        }
+
+    def update_markdown_asset(self, asset_kind: str, name: str, *, markdown_text: str):
+        self.edit_calls.append((asset_kind, name, markdown_text))
+        asset_path = self.workspace_root / ".pocketcode" / f"{asset_kind}s" / f"{name}.md"
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_path.write_text(markdown_text, encoding="utf-8")
+        return {
+            "kind": asset_kind,
+            "name": name,
+            "path": asset_path,
+            "companion_path": None,
+        }
+
+    def delete_markdown_asset(self, asset_kind: str, name: str):
+        self.delete_calls.append((asset_kind, name))
+        asset_path = self.workspace_root / ".pocketcode" / f"{asset_kind}s" / f"{name}.md"
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_path.write_text("to-delete\n", encoding="utf-8")
+        companion_path = None
+        if asset_kind == "tool":
+            companion_path = asset_path.with_suffix(".py")
+            companion_path.write_text("class Placeholder: pass\n", encoding="utf-8")
+        asset_path.unlink()
+        return {
+            "kind": asset_kind,
+            "name": name,
+            "path": asset_path,
+            "companion_path": companion_path,
+            "companion_deleted": False,
+        }
+
+
+class _FailingAssetEditEngineStub(_AssetCommandEngineStub):
+    def update_markdown_asset(self, asset_kind: str, name: str, *, markdown_text: str):
+        raise ValueError("Tool handler file not found: /tmp/missing_tool.py")
+
+
 class TestCommandHandlerParsing:
     def test_universal_command_suggestions_exclude_textual_only_commands(self):
         suggestions = list_command_suggestions(_EngineStub())
 
         assert "/help" in suggestions
         assert "/agent" in suggestions
+        assert "/asset" in suggestions
         assert "/copy" not in suggestions
         assert "/copy-all" not in suggestions
         assert "/view" not in suggestions
@@ -367,6 +465,178 @@ class TestCommandHandlerParsing:
         assert "/copy" in captured.out
         assert "/copy-all" in captured.out
         assert "/view" in captured.out
+
+    def test_asset_help_lists_create_commands(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+
+        handle_command("/asset help", engine=_EngineStub(), cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "/asset create agent <name>" in captured.out
+        assert "/asset create flow <name>" in captured.out
+        assert "/asset create tool <name>" in captured.out
+        assert "/asset clone <kind> <source> <new_name>" in captured.out
+        assert "/asset edit <kind> <name> <file>" in captured.out
+        assert "/asset delete <kind> <name> --yes" in captured.out
+
+    def test_asset_list_prints_workspace_markdown_assets(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _AssetCommandEngineStub(tmp_path)
+
+        handle_command("/asset list flow", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.list_calls == ["flow"]
+        assert "Workspace markdown flow assets:" in captured.out
+        assert "flow.one" in captured.out
+        assert "flow.two" in captured.out
+
+    def test_asset_show_prints_path_and_markdown_source(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _AssetCommandEngineStub(tmp_path)
+
+        handle_command("/asset show tool sample_tool", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.show_calls == [("tool", "sample_tool")]
+        assert "Asset: tool sample_tool" in captured.out
+        assert ".pocketcode/tools/sample_tool.md" in captured.out
+        assert "name: sample_tool" in captured.out
+
+    def test_asset_create_tool_creates_markdown_and_handler(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _AssetCommandEngineStub(tmp_path)
+
+        handle_command("/asset create tool sample_tool", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        asset_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        assert engine.created_calls == [("tool", "sample_tool")]
+        assert asset_path.is_file()
+        assert handler_path.is_file()
+        assert "Created tool markdown asset 'sample_tool'" in captured.out
+        assert "Created companion handler" in captured.out
+        assert "Reloaded runtime registries." in captured.out
+
+    def test_asset_clone_tool_creates_markdown_and_handler_copy(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _AssetCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/asset clone tool sample_tool sample_tool_copy",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.clone_calls == [("tool", "sample_tool", "sample_tool_copy")]
+        assert "Cloned tool markdown asset 'sample_tool' -> 'sample_tool_copy'" in captured.out
+        assert "Cloned companion handler" in captured.out
+        assert "Reloaded runtime registries." in captured.out
+
+    def test_asset_edit_updates_markdown_from_file(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _AssetCommandEngineStub(tmp_path)
+        source_file = tmp_path / "edited-flow.md"
+        source_file.write_text("---\nname: sample_flow\n---\nupdated\n", encoding="utf-8")
+
+        handle_command(
+            f"/asset edit flow sample_flow {source_file}",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.edit_calls == [("flow", "sample_flow", "---\nname: sample_flow\n---\nupdated\n")]
+        assert "Updated flow markdown asset 'sample_flow'" in captured.out
+        assert "Reloaded runtime registries." in captured.out
+
+    def test_asset_edit_reports_tool_handler_validation_errors(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _FailingAssetEditEngineStub(tmp_path)
+        source_file = tmp_path / "bad-tool.md"
+        source_file.write_text("---\nname: bad-tool\n---\nbody\n", encoding="utf-8")
+
+        handle_command(
+            f"/asset edit tool bad-tool {source_file}",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Tool handler file not found" in captured.out
+
+    def test_asset_delete_requires_yes(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _AssetCommandEngineStub(tmp_path)
+
+        handle_command("/asset delete tool sample_tool", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.delete_calls == []
+        assert "Usage: /asset delete <agent|flow|tool> <name> --yes" in captured.out
+
+    def test_asset_delete_tool_removes_markdown_and_leaves_handler(self, tmp_path, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _AssetCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/asset delete tool sample_tool --yes",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.delete_calls == [("tool", "sample_tool")]
+        assert "Deleted tool markdown asset 'sample_tool'" in captured.out
+        assert "Left companion handler in place" in captured.out
+        assert "Reloaded runtime registries." in captured.out
 
     def test_textual_only_command_reports_interface_scope_outside_textual(self, capsys):
         cli_context = {

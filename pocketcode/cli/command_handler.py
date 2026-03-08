@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import shlex
 from typing import Any, Dict, Optional
 
@@ -32,6 +33,7 @@ BASE_COMMAND_SUGGESTIONS = [
     "/skill",
     "/agents",
     "/agent",
+    "/asset",
     "/llms",
     "/llm",
     "/llm-flow",
@@ -58,6 +60,24 @@ BASE_COMMAND_SUGGESTIONS = [
     "/agent edit prompts",
     "/agent tools",
     "/agent policy",
+    "/asset create",
+    "/asset create agent",
+    "/asset create flow",
+    "/asset create tool",
+    "/asset clone",
+    "/asset clone agent",
+    "/asset clone flow",
+    "/asset clone tool",
+    "/asset edit",
+    "/asset edit agent",
+    "/asset edit flow",
+    "/asset edit tool",
+    "/asset delete",
+    "/asset delete agent",
+    "/asset delete flow",
+    "/asset delete tool",
+    "/asset list",
+    "/asset show",
     "/mode list",
     "/mode show",
     "/mode switch",
@@ -326,6 +346,9 @@ def handle_command(
 
     if command == "/agent":
         return _handle_agent_command(args, engine)
+
+    if command == "/asset":
+        return _handle_asset_command(args, engine)
 
     if command == "/mode":
         return _handle_mode_command(args, engine)
@@ -867,6 +890,7 @@ Pocketcode Commands:
     /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
     /session <cmd> [opts]          Manage saved sessions. Run '/session help'.
   /agent <cmd> [opts]            Manage agents. Run '/agent help'.
+    /asset <cmd> [opts]            Create workspace markdown assets. Run '/asset help'.
   /exit, /quit                   Exit Pocketcode.
 
 Compatibility aliases:
@@ -1265,6 +1289,137 @@ def _handle_agent_command(
     return None
 
 
+def _handle_asset_command(
+    args: list[str],
+    engine: PocketCodeEngine,
+) -> Optional[str]:
+    if not args:
+        print_asset_help()
+        return None
+
+    subcommand = args[0].lower()
+    sub_args = args[1:]
+
+    if subcommand == "help":
+        print_asset_help()
+        return None
+
+    if subcommand == "list":
+        if len(sub_args) != 1:
+            print("Usage: /asset list <agent|flow|tool>")
+            return None
+        try:
+            assets = engine.list_markdown_assets(sub_args[0])
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(f"Workspace markdown {sub_args[0].lower()} assets:")
+        if not assets:
+            print("  (none)")
+            return None
+        for asset_name in assets:
+            print(f"  {asset_name}")
+        return None
+
+    if subcommand == "show":
+        if len(sub_args) != 2:
+            print("Usage: /asset show <agent|flow|tool> <name>")
+            return None
+        try:
+            asset = engine.get_markdown_asset(sub_args[0], sub_args[1])
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(f"Asset: {asset['kind']} {asset['name']}")
+        print(f"  Path     : {asset['path']}")
+        if asset.get("companion_path"):
+            print(f"  Companion: {asset['companion_path']}")
+        print("")
+        print(asset["text"].rstrip())
+        return None
+
+    if subcommand == "clone":
+        if len(sub_args) != 3:
+            print("Usage: /asset clone <agent|flow|tool> <source_name> <new_name>")
+            return None
+        try:
+            cloned = engine.clone_markdown_asset(sub_args[0], sub_args[1], sub_args[2])
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(
+            f"Cloned {cloned['kind']} markdown asset '{sub_args[1]}' -> '{cloned['name']}' at {cloned['path']}."
+        )
+        if cloned.get("companion_path"):
+            print(f"Cloned companion handler at {cloned['companion_path']}.")
+        print("Reloaded runtime registries.")
+        return None
+
+    if subcommand == "edit":
+        if len(sub_args) != 3:
+            print("Usage: /asset edit <agent|flow|tool> <name> <markdown_file>")
+            return None
+        markdown_path = Path(sub_args[2]).expanduser()
+        if not markdown_path.is_absolute():
+            markdown_path = Path.cwd() / markdown_path
+        if not markdown_path.is_file():
+            print(f"Error: markdown file not found: {markdown_path}")
+            return None
+        try:
+            updated = engine.update_markdown_asset(
+                sub_args[0],
+                sub_args[1],
+                markdown_text=markdown_path.read_text(encoding="utf-8"),
+            )
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(
+            f"Updated {updated['kind']} markdown asset '{updated['name']}' from {markdown_path} into {updated['path']}."
+        )
+        print("Reloaded runtime registries.")
+        return None
+
+    if subcommand == "delete":
+        if len(sub_args) != 3 or sub_args[2] != "--yes":
+            print("Usage: /asset delete <agent|flow|tool> <name> --yes")
+            return None
+        try:
+            deleted = engine.delete_markdown_asset(sub_args[0], sub_args[1])
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(f"Deleted {deleted['kind']} markdown asset '{deleted['name']}' from {deleted['path']}.")
+        if deleted.get("companion_path") and not deleted.get("companion_deleted"):
+            print(f"Left companion handler in place at {deleted['companion_path']}.")
+        print("Reloaded runtime registries.")
+        return None
+
+    if subcommand != "create":
+        print(f"Unknown /asset subcommand: {subcommand}")
+        print_asset_help()
+        return None
+
+    if len(sub_args) != 2:
+        print("Usage: /asset create <agent|flow|tool> <name>")
+        return None
+
+    asset_kind, name = sub_args[0].lower(), sub_args[1]
+    try:
+        created = engine.create_markdown_asset(asset_kind, name)
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return None
+
+    print(
+        f"Created {created['kind']} markdown asset '{created['name']}' at {created['path']}."
+    )
+    if created.get("companion_path"):
+        print(f"Created companion handler at {created['companion_path']}.")
+    print("Reloaded runtime registries.")
+    return None
+
+
 def _handle_agent_tools_command(
     args: list[str],
     engine: PocketCodeEngine,
@@ -1523,6 +1678,27 @@ Compatibility:
     Agent shortcuts only: /ag and /ap map to /agent.
 """
     print(text)
+
+
+def print_asset_help() -> None:
+        text = """
+/asset Commands:
+    /asset list <agent|flow|tool>             List workspace markdown assets by kind.
+    /asset show <agent|flow|tool> <name>      Print the asset path and markdown source.
+    /asset create agent <name>                Create a workspace markdown agent scaffold.
+    /asset create flow <name>                 Create a workspace markdown flow scaffold.
+    /asset create tool <name>                 Create a workspace markdown tool scaffold and Python handler.
+    /asset clone <kind> <source> <new_name>   Clone a workspace markdown asset.
+    /asset edit <kind> <name> <file>          Replace a workspace markdown asset from a markdown file.
+    /asset delete <kind> <name> --yes         Delete a workspace markdown asset.
+    /asset help                               Show this help message.
+
+Notes:
+    Asset names may contain letters, numbers, dot, underscore, and hyphen.
+    Assets are created in the primary workspace resource root and trigger a reload.
+    Delete leaves any sibling tool handler file in place unless a future explicit option removes it.
+"""
+        print(text)
 
 
 def print_mode_help() -> None:

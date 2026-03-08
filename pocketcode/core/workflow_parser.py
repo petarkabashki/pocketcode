@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""Legacy markdown graph workflow parser.
+
+This module predates the manifest-plus-FlowDefinition loading path and is no
+longer the canonical authoring surface. New markdown-authored assets compile
+through `pocketcode.core.markdown_assets` into the current flow, tool, prompt,
+and agent loaders instead of going through this graph parser.
+"""
+
 import logging
 import re
 from pathlib import Path

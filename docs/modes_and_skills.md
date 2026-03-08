@@ -2,6 +2,8 @@
 
 This document describes the current Markdown-authored runtime overlay system.
 
+See `markdown_assets.md` for the shared Markdown syntax, include and import behavior, and asset-validation model used by modes and skills.
+
 ## Overview
 
 Modes and skills are session-time overlays on top of the flow plus agent-profile runtime.
@@ -140,6 +142,8 @@ Skills can contribute:
 - new Python tool modules loaded from `tools/*.py`
 - static reference files, scripts, and assets for human use
 
+`SKILL.md` uses the same shared Markdown asset rules as other Markdown-backed resources: YAML front matter for structured keys, Markdown body text for inline guidance, and prompt expansion for `include` and `import` directives in prompt-bearing sections.
+
 ### Skill Tool Names
 
 Skill-provided tools are registered under:
@@ -189,11 +193,11 @@ The Textual UI currently supports:
 - enabling and disabling skills
 - persisting last-used skill selections
 - persisting per-profile skill selections for the active agent profile
-- saving the current inspector skill selection into the active workspace agent YAML
+- saving the current inspector skill selection into the active workspace agent profile file
 - saving default skill selections to config
 - saving full runtime selection presets that include mode and skills
 
-When an active agent profile is selected, inspector toggles and the Control Center skill picker save the selected skills under that profile's Textual state. The inspector `Save` button writes the current selection into that profile's YAML `skills` field. If no profile-specific override exists, the runtime falls back to the profile YAML `skills`, then the global last-used skill list, and finally `default_skills`.
+When an active agent profile is selected, inspector toggles and the Control Center skill picker save the selected skills under that profile's Textual state. The inspector `Save` button writes the current selection into that profile's persisted `skills` field. If no profile-specific override exists, the runtime falls back to the profile file's `skills`, then the global last-used skill list, and finally `default_skills`.
 
 The primary controls are exposed through:
 
@@ -222,12 +226,16 @@ For modes, skills, and agent overlays, `extra_prompts` now accepts either:
 
 Malformed typed refs in mode and skill front matter are rejected while those files load. A bad `tool:` or `prompt:` value causes the specific mode or skill to be skipped with a warning instead of remaining partially loadable.
 
-After engine startup, PocketCoder runs a second validation pass against the populated registries:
+When the engine constructs the mode and skill managers, it also passes the live flow, tool, and prompt registries into them. That means validation happens during the normal mode or skill load itself, not in a later cleanup pass:
 
-- modes that reference missing target flows or base agent profiles are removed from the loaded registry
-- resolvable mode and skill tool refs are canonicalized to their registry-backed qualified names
-- invalid prompt-resource refs are warned and pruned from the effective loaded definition
-- unqualified refs that require runtime agent context, especially in skills, remain deferred until the skill is applied to a concrete active flow
+- modes are skipped if their `flow` reference cannot be resolved against the loaded flow or agent registry
+- modes are skipped if their `agent` reference cannot be resolved against the loaded agent-profile registry
+- modes and skills are skipped if any referenced `tools` entry cannot be resolved against the live tool registry
+- modes and skills are skipped if any `prompt:` reference in `extra_prompts` cannot be resolved against the prompt registry
+- modes and skills are skipped if any relative prompt file in `extra_prompts` cannot be loaded from the current resource-root prompt search path
+- successfully loaded tool refs are stored in canonical dotted form such as `core.read_file`
+
+Unqualified refs that depend on later per-turn context are still deferred until that context exists, but static mode and skill asset references are now rejected before those overlays become selectable.
 
 ## Repository-Shipped Workspace Skills
 

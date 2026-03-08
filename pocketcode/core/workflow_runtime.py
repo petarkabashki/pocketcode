@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Legacy workflow graph runtime.
+
+PocketCoder's canonical runtime executes manifest-loaded FlowDefinition objects
+and PocketFlow factories. This module remains as a compatibility path for the
+older graph runtime and should not be extended for new markdown asset work.
+"""
+
 import importlib
 import importlib.util
 import inspect

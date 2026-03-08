@@ -12,7 +12,9 @@ Plugins can contribute:
 - flows
 - prompts
 - LLM profiles
-- plugin-local agent profiles in `agents/*.yaml`
+- plugin-local agent profiles in `agents/*.yaml` and `agents/*.md`
+
+Flows, tools, and plugin-local agent profiles may also be authored in Markdown and compiled into the same runtime objects used by the canonical loaders. See `markdown_assets.md` for the canonical shared Markdown syntax and validation rules.
 
 ## Discovery Roots
 
@@ -45,6 +47,7 @@ description: Example plugin
 
 tools:
   read_notes: tools/notes.py:ReadNotesTool
+  search_notes: tools/search_notes.md
 
 prompts:
   system: prompts/system.md
@@ -57,8 +60,7 @@ llm_profiles:
 flows:
   analyst:
     description: Analyze workspace notes
-    module: flows/analyst.py
-    entry_fn: create_flow
+    markdown: flows/analyst.md
     llm_profile: fast
     tools:
       - read_notes
@@ -69,6 +71,8 @@ flows:
 ```
 
 Flow-level `tools` entries resolve through the shared registry. They accept bare local names, canonical `plugin.resource`, legacy `plugin::resource`, and typed `tool:` references.
+
+Workspace Markdown flow edits and clones now validate those `tools` references, `handoff_agents`, `composite_agents`, and prompt-bundle entries against the live registries before reload, in addition to validating executable Mermaid or DOT graph topology.
 
 Internally, these manifest-facing string forms are parsed through the shared `ResourceReference` model in `pocketcode/core/reference_syntax.py`, so tool, flow, agent, and prompt refs now share the same normalization and kind-validation path.
 
@@ -96,11 +100,14 @@ Legacy top-level keys such as `components`, `workflows`, `node_definitions`, and
 
 Manifest `tools` is a mapping of local name to `path.py:ObjectName`.
 
+It also accepts a Markdown definition file path.
+
 Example:
 
 ```yaml
 tools:
   search_code: tools/search.py:SearchCodeTool
+  summarize_notes: tools/summarize_notes.md
 ```
 
 Loaded tool implementations may be:
@@ -111,6 +118,8 @@ Loaded tool implementations may be:
 
 After registration, the canonical qualified name is `plugin.tool`.
 
+Markdown tool files are compiled first, then their `handler` field is resolved through the same `path.py:ObjectName` loader used by manifest string entries. The Markdown file supplies metadata such as description, schema, timeout, and execution mode; the underlying Python handler remains the executable implementation.
+
 ## Flow Definitions
 
 Each manifest flow becomes a `FlowDefinition`.
@@ -119,6 +128,8 @@ Required fields:
 
 - `module`
 - `entry_fn`
+
+Those required fields may be supplied either directly in `plugin.yaml` or inside a Markdown flow definition referenced through `markdown:` or a `.md` `source:` value.
 
 Important optional fields:
 
@@ -152,6 +163,28 @@ Current normalized flow execution modes are:
 - `composite`
 
 If `module` plus `entry_fn` loads a PocketFlow factory successfully, the resulting `flow_instance` is used directly for execution.
+
+Markdown-authored flows do not introduce a second runtime. They compile into the same `FlowDefinition` structure before normal manifest normalization, prompt resolution, and PocketFlow factory loading continue.
+
+## Markdown Asset Authoring
+
+Plugin manifests may point at Markdown-authored tools, flows, and plugin-local agent profiles.
+
+Current plugin-specific Markdown entry points are:
+
+- `tools.<name>: tools/<name>.md`
+- `flows.<name>.markdown: flows/<name>.md`
+- `flows.<name>.source: flows/<name>.md`
+- `<plugin>/agents/*.md`
+
+Current plugin-specific behavior:
+
+- Markdown tools compile metadata first, then resolve the required Python `handler`
+- Markdown flows compile into ordinary `FlowDefinition` data before prompt resolution and registry normalization continue
+- plugin-local Markdown agent profiles expand `include` and `import` directives in plugin context when plugin metadata provides a plugin name and root
+- plugin `prompts/` directories participate in fallback resolution for path-based prompt includes referenced by plugin-local Markdown assets
+
+For the shared Markdown syntax, graph-flow semantics, prompt include and import behavior, and workspace authoring validation, see `markdown_assets.md`.
 
 ## Prompt Resolution For Flows
 
@@ -229,17 +262,18 @@ This becomes the flow's `default_agent_profile` and participates in agent profil
 
 ## Plugin-Local Agent Profiles
 
-Plugins may also define profile YAML files under:
+Plugins may also define profile files under:
 
 ```text
 <plugin>/agents/*.yaml
+<plugin>/agents/*.md
 ```
 
-Those files use the same schema as workspace agent profiles.
+Those files use the same schema as workspace agent profiles. Markdown-backed profile files use front matter plus a Markdown body just like workspace Markdown agent profiles.
 
 Precedence is:
 
-1. plugin-declared default agent and plugin-local `agents/*.yaml`
+1. plugin-declared default agent and plugin-local `agents/*.yaml` or `agents/*.md`
 2. workspace agent profiles
 3. synthesised default built from the flow definition
 
@@ -256,14 +290,16 @@ That object can contribute:
 
 Flow instances returned by factory plugins are wrapped into `FlowDefinition` objects with `is_programmatic=True`.
 
-## Resource-Root Tools And Prompts
+## Resource-Root Prompts, Tools, And Flows
 
 Direct resource-root shared assets are not declared through plugin manifests.
 
 - `<resource_root>/prompts/` files are auto-registered under `resource_root.<name>`
 - `<resource_root>/tools/*.py` modules are auto-discovered and registered under `resource_root.<name>`
+- `<resource_root>/tools/*.md` files are auto-discovered as Markdown-backed tools under `resource_root.<name>`
+- `<resource_root>/flows/*.md` files are auto-discovered as Markdown-backed flows under `resource_root.<name>`
 
-For backward compatibility, the default `.pocketcode/` resource root also exposes its direct prompts and tools under the legacy `workspace` namespace.
+For backward compatibility, the default `.pocketcode/` resource root also exposes its direct prompts, tools, and Markdown flows under the legacy `workspace` namespace.
 
 Built-in core tools are separate from these direct resource-root resources. Their canonical implementation lives under `pocketcode/plugins/core/tools/`, while `pocketcode/tools/` is retained as a compatibility import surface.
 

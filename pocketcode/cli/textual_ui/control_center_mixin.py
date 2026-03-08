@@ -20,6 +20,8 @@ class TextualAppControlCenterMixin:
         preset_count = len(self._engine.list_textual_selection_presets()) if hasattr(
             self._engine, "list_textual_selection_presets"
         ) else 0
+        flow_asset_count = len(self._engine.list_markdown_assets("flow")) if hasattr(self._engine, "list_markdown_assets") else 0
+        tool_asset_count = len(self._engine.list_markdown_assets("tool")) if hasattr(self._engine, "list_markdown_assets") else 0
         saved_sessions = self._engine.list_saved_sessions() if hasattr(self._engine, "list_saved_sessions") else []
         active_session = self._engine.get_active_session_info() if hasattr(self._engine, "get_active_session_info") else {}
         return (
@@ -56,6 +58,18 @@ class TextualAppControlCenterMixin:
                 label=f"Tools: {active_profile.name if active_profile else 'none'}",
                 description="Edit the active agent tool allowlist",
                 search_text="tools allowlist selection groups",
+            ),
+            PickerOption(
+                value="flow_assets",
+                label=f"Flow Assets: {flow_asset_count}",
+                description="Edit, clone, or delete workspace markdown flow assets",
+                search_text="flow assets markdown edit clone delete",
+            ),
+            PickerOption(
+                value="tool_assets",
+                label=f"Tool Assets: {tool_asset_count}",
+                description="Edit, clone, or delete workspace markdown tool assets",
+                search_text="tool assets markdown edit clone delete",
             ),
             PickerOption(
                 value="tool_policies",
@@ -139,6 +153,18 @@ class TextualAppControlCenterMixin:
             return (PickerOption("select", "Select Skills", search_text="skills selection"),)
         if category == "tools":
             return (PickerOption("select", "Edit Allowed Tools", search_text="tool selection allowlist"),)
+        if category == "flow_assets":
+            return (
+                PickerOption("edit", "Edit Flow Asset", search_text="edit flow asset markdown"),
+                PickerOption("clone", "Clone Flow Asset", search_text="clone flow asset markdown"),
+                PickerOption("delete", "Delete Flow Asset", search_text="delete flow asset markdown"),
+            )
+        if category == "tool_assets":
+            return (
+                PickerOption("edit", "Edit Tool Asset", search_text="edit tool asset markdown"),
+                PickerOption("clone", "Clone Tool Asset", search_text="clone tool asset markdown"),
+                PickerOption("delete", "Delete Tool Asset", search_text="delete tool asset markdown"),
+            )
         if category == "tool_policies":
             return (PickerOption("edit", "Edit Tool Policies", search_text="tool policy overrides"),)
         if category == "presets":
@@ -235,6 +261,26 @@ class TextualAppControlCenterMixin:
         if category == "tools" and action == "select":
             self._open_tool_selection_picker()
             return
+        if category == "flow_assets":
+            if action == "edit":
+                self._open_markdown_flow_asset_editor()
+                return
+            if action == "clone":
+                self._open_markdown_asset_clone_picker("flow")
+                return
+            if action == "delete":
+                self._open_markdown_asset_delete_picker("flow")
+                return
+        if category == "tool_assets":
+            if action == "edit":
+                self._open_markdown_tool_asset_editor()
+                return
+            if action == "clone":
+                self._open_markdown_asset_clone_picker("tool")
+                return
+            if action == "delete":
+                self._open_markdown_asset_delete_picker("tool")
+                return
         if category == "tool_policies" and action == "edit":
             self._open_tool_policy_editor()
             return

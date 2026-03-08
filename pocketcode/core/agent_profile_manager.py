@@ -16,6 +16,11 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from pocketcode.core.discovery_rules import DiscoveryFilter
+from pocketcode.core.markdown_assets import (
+    compile_markdown_agent_definition,
+    load_markdown_asset_document,
+    serialize_markdown_agent_definition,
+)
 from pocketcode.core.reference_syntax import (
     normalize_prompt_source,
     normalize_registry_reference,
@@ -30,13 +35,16 @@ from pocketcode.core.resource_roots import (
 )
 
 logger = logging.getLogger(__name__)
+WORKSPACE_NAMESPACE = "workspace"
 
 
 class CompositeAgentManager:
     """Runtime registry for composite agent configuration objects."""
 
-    def __init__(self, workspace_root: Path) -> None:
+    def __init__(self, workspace_root: Path, *, prompt_registry: Any | None = None) -> None:
         self._workspace_root = Path(workspace_root).resolve()
+        self._prompt_registry = prompt_registry
+        self._plugin_context_by_root: Dict[Path, str] = {}
         self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
         self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
         self._workspace_agents_dir: Path = self._primary_resource_root.path / "agents"
@@ -57,6 +65,7 @@ class CompositeAgentManager:
             str(name): definition
             for name, definition in flow_definitions.items()
         }
+        self._plugin_context_by_root = self._build_plugin_context_by_root(flow_definitions)
         self._agents = {}
         self._resource_roots = discover_resource_roots(self._workspace_root)
         self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
@@ -114,6 +123,8 @@ class CompositeAgentManager:
             )
 
         target_path = self._workspace_agents_dir / f"{new_name}.yaml"
+        if src.source_path is not None and Path(src.source_path).suffix.lower() == ".md":
+            target_path = self._workspace_agents_dir / f"{new_name}.md"
         if target_path.exists():
             raise ValueError(
                 f"Cannot clone: target file '{target_path}' already exists. "
@@ -137,11 +148,18 @@ class CompositeAgentManager:
                 "Use clone() to promote an agent to a workspace file."
             )
         self._workspace_agents_dir.mkdir(parents=True, exist_ok=True)
-        data = self._agent_to_yaml_dict(agent)
-        agent.source_path.write_text(
-            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
+        target_path = Path(agent.source_path)
+        if target_path.suffix.lower() == ".md":
+            agent.source_path.write_text(
+                serialize_markdown_agent_definition(agent),
+                encoding="utf-8",
+            )
+        else:
+            data = self._agent_to_yaml_dict(agent)
+            agent.source_path.write_text(
+                yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
         logger.debug("Saved agent '%s' to %s", agent.name, agent.source_path)
 
     def delete(self, name: str) -> Path:
@@ -196,10 +214,10 @@ class CompositeAgentManager:
             agents_dir = plugin_root / "agents"
             if not agents_dir.is_dir():
                 continue
-            for yaml_file in sorted(agents_dir.glob("*.yaml")):
+            for yaml_file in sorted(list(agents_dir.glob("*.yaml")) + list(agents_dir.glob("*.md"))):
                 if self._plugin_agent_file_is_ignored(plugin_root, yaml_file):
                     continue
-                self._load_agent_file(yaml_file, source="plugin")
+                self._load_agent_file(yaml_file, source="plugin", plugin_root=plugin_root)
 
     def _load_workspace_files(self) -> None:
         for resource_root in self._resource_roots:
@@ -211,6 +229,7 @@ class CompositeAgentManager:
                 yaml_files.extend(sorted(legacy_dir.glob("*.yaml")))
             if agents_dir.exists():
                 yaml_files.extend(sorted(agents_dir.glob("*.yaml")))
+                yaml_files.extend(sorted(agents_dir.glob("*.md")))
 
             for yaml_file in yaml_files:
                 if resource_filter.ignores(yaml_file, is_dir=False):
@@ -244,10 +263,61 @@ class CompositeAgentManager:
     def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
         return self._resource_root_filters[resource_root.path.resolve()]
 
-    def _load_agent_file(self, yaml_file: Path, *, source: str) -> None:
+    def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
+        return (self._primary_resource_root.path / "prompts",)
+
+    def _plugin_prompt_fallback_dirs(self, plugin_root: Path) -> tuple[Path, ...]:
+        resolved_root = Path(plugin_root).resolve()
+        return (resolved_root / "prompts", resolved_root, *self._workspace_prompt_fallback_dirs())
+
+    def _build_plugin_context_by_root(self, flow_definitions: Dict[str, Any]) -> Dict[Path, str]:
+        contexts: Dict[Path, str] = {}
+        for qualified_name, definition in flow_definitions.items():
+            metadata = getattr(definition, "metadata", {}) or {}
+            plugin_root = metadata.get("plugin_root")
+            if not isinstance(plugin_root, str) or not plugin_root.strip():
+                continue
+            plugin_name = metadata.get("plugin")
+            if not isinstance(plugin_name, str) or not plugin_name.strip():
+                candidate = str(qualified_name)
+                if "::" in candidate:
+                    plugin_name = candidate.split("::", 1)[0]
+                elif "." in candidate:
+                    plugin_name = candidate.split(".", 1)[0]
+                else:
+                    plugin_name = ""
+            cleaned_name = str(plugin_name).strip()
+            if cleaned_name:
+                contexts[Path(plugin_root).resolve()] = cleaned_name
+        return contexts
+
+    def _plugin_context_for_root(self, plugin_root: Path | None) -> str | None:
+        if plugin_root is None:
+            return None
+        return self._plugin_context_by_root.get(Path(plugin_root).resolve())
+
+    def _load_agent_file(self, yaml_file: Path, *, source: str, plugin_root: Path | None = None) -> None:
         from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
         try:
-            raw = yaml.safe_load(yaml_file.read_text(encoding="utf-8")) or {}
+            if yaml_file.suffix.lower() == ".md":
+                markdown_kwargs: Dict[str, Any] = {}
+                if source == "workspace":
+                    markdown_kwargs = {
+                        "fallback_dirs": self._workspace_prompt_fallback_dirs(),
+                        "prompt_registry": self._prompt_registry,
+                        "context_plugin": WORKSPACE_NAMESPACE,
+                    }
+                elif self._prompt_registry is not None:
+                    context_plugin = self._plugin_context_for_root(plugin_root)
+                    markdown_kwargs = {
+                        "fallback_dirs": self._plugin_prompt_fallback_dirs(plugin_root) if plugin_root is not None else (),
+                        "prompt_registry": self._prompt_registry,
+                        "context_plugin": context_plugin,
+                    }
+                document = load_markdown_asset_document(yaml_file, **markdown_kwargs)
+                raw = compile_markdown_agent_definition(document, default_name=yaml_file.stem)
+            else:
+                raw = yaml.safe_load(yaml_file.read_text(encoding="utf-8")) or {}
             if not isinstance(raw, dict):
                 logger.warning(
                     "Skipping agent file '%s': root must be a YAML mapping.", yaml_file
@@ -330,6 +400,7 @@ class CompositeAgentManager:
                     if has_skills_key and skills_raw is not None
                     else None
                 ),
+                inline_prompt=str(raw.get("inline_prompt") or raw.get("prompt") or "").strip(),
                 tools=(
                     normalized_tools
                     if has_tools_key and normalized_tools is not None

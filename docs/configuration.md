@@ -159,6 +159,7 @@ Each resource root can provide this extension surface:
 ```text
 <resource_root>/
 ├── agents/
+├── flows/
 ├── llm-profiles/
 ├── modes/
 ├── plugins/
@@ -175,14 +176,17 @@ Runtime session state is stored under:
 
 Purpose of each directory:
 
-- `agents/`: workspace-backed agent profiles in YAML
+- `agents/`: workspace-backed agent profiles in YAML or Markdown
+- `flows/`: workspace-backed Markdown flow definitions
 - `llm-profiles/`: workspace-backed LLM profile YAML files
 - `modes/`: Markdown-authored runtime overlays
 - `plugins/`: nested plugin roots under this resource root
 - `prompts/`: shared direct prompt resources for this resource root
 - `state/sessions/`: runtime-managed saved session JSON files under the primary resource root
 - `skills/`: skill packs with `SKILL.md` and optional assets
-- `tools/`: shared direct Python tools auto-registered under `resource_root.<name>`; the default `.pocketcode/` root is also aliased under `workspace`
+- `tools/`: shared direct Python or Markdown-backed tools auto-registered under `resource_root.<name>`; the default `.pocketcode/` root is also aliased under `workspace`
+
+See `markdown_assets.md` for the canonical file formats and validation rules for Markdown-backed assets.
 
 Built-in core filesystem tools are not allowed to operate outside the workspace root itself. Direct tools under `<resource_root>/tools/` can implement their own path rules, but the package-owned `core.read_file`, `core.write_to_file`, `core.create_directory`, `core.list_files`, `core.glob_files`, and staged file-edit helpers are rooted to the current workspace directory.
 
@@ -199,9 +203,9 @@ These files are the editable workspace-backed copies used by the Textual clone/e
 
 ## Workspace Agent Profiles
 
-Workspace agent profiles are loaded from every discovered `<resource_root>/agents/<name>.yaml`. New or cloned profiles are written to the primary resource root.
+Workspace agent profiles are loaded from every discovered `<resource_root>/agents/<name>.yaml` and `<resource_root>/agents/<name>.md`. New or cloned profiles are written to the primary resource root.
 
-Current schema:
+Current YAML schema:
 
 ```yaml
 name: my-review-profile
@@ -227,7 +231,17 @@ Notes:
 - `skills` is optional. When omitted, the profile falls back to the global Textual skill selection order.
 - `tools` is optional. When omitted, the profile inherits the flow tool set.
 - `extra_prompts` are resolved relative to the profile file first, then against plugin and workspace fallback roots.
+- workspace Markdown-backed profiles use the same front matter fields and store their inline guidance in the Markdown body.
+- `{{ include:... }}` and `{{ import:prompt:... }}` directives inside Markdown-backed agent bodies are expanded during load.
 - saving a workspace agent profile rewrites registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries to canonical dotted ids; `prompt:` entries remain typed and file-path prompt entries remain unchanged.
+- saving a Markdown-backed workspace agent profile preserves Markdown format rather than converting it to YAML.
+
+Workspace Markdown asset authoring also uses:
+
+- `<resource_root>/flows/<name>.md` for workspace flow assets
+- `<resource_root>/tools/<name>.md` for workspace tool assets
+
+The `/asset` command group and the Textual editor use those locations when creating, cloning, editing, and deleting workspace Markdown assets.
 
 ## Prompt Loading
 
@@ -243,6 +257,7 @@ Supported features:
 - `{{ import:prompt:resource_root.pocketcode.review }}` expansion
 - cycle detection for nested includes
 - fallback resolution through workspace prompt roots
+- resource-root-relative paths such as `prompts/review.md` when prompt fallback directories are in use
 
 Flow prompt sources are stored on each `FlowDefinition.prompt_sources`.
 

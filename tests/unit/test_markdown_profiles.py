@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from pocketcode.core.markdown_profiles import ModeManager, SkillManager
+from pocketcode.core.namespace_registry import NamespaceRegistry
 
 
 class TestModeManager:
     def test_loads_markdown_mode_frontmatter_and_body(self, tmp_path):
         modes_dir = tmp_path / ".pocketcode" / "modes"
+        prompts_dir = tmp_path / ".pocketcode" / "prompts"
         modes_dir.mkdir(parents=True, exist_ok=True)
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        (prompts_dir / "review.md").write_text("Review prompt", encoding="utf-8")
         (modes_dir / "review.md").write_text(
             """---
 name: review
@@ -54,51 +58,135 @@ Review the code for regressions.
         assert manager.get("hidden") is None
         assert manager.get("keep") is not None
 
-        def test_mode_loader_normalizes_typed_refs(self, tmp_path):
-                modes_dir = tmp_path / ".pocketcode" / "modes"
-                modes_dir.mkdir(parents=True, exist_ok=True)
-                (modes_dir / "review.md").write_text(
-                        """---
+    def test_mode_loader_normalizes_typed_refs(self, tmp_path):
+        modes_dir = tmp_path / ".pocketcode" / "modes"
+        modes_dir.mkdir(parents=True, exist_ok=True)
+        (modes_dir / "review.md").write_text(
+            """---
 name: review
 flow: flow:core.react
 tools:
-    - tool:core.read_file
+  - tool:core.read_file
 extra_prompts:
-    - prompt:resource_root.pocketcode#review
+  - prompt:resource_root.pocketcode#review
 ---
 Review it.
 """,
-                        encoding="utf-8",
-                )
+            encoding="utf-8",
+        )
 
-                manager = ModeManager(tmp_path)
-                manager.load()
+        manager = ModeManager(tmp_path)
+        manager.load()
 
-                mode = manager.get("review")
-                assert mode is not None
-                assert mode.flow == "core.react"
-                assert mode.tools == ["core.read_file"]
-                assert mode.extra_prompts == ["prompt:resource_root.pocketcode.review"]
+        mode = manager.get("review")
+        assert mode is not None
+        assert mode.flow == "core.react"
+        assert mode.tools == ["core.read_file"]
+        assert mode.extra_prompts == ["prompt:resource_root.pocketcode.review"]
 
-        def test_invalid_typed_tool_ref_skips_mode(self, tmp_path):
-                modes_dir = tmp_path / ".pocketcode" / "modes"
-                modes_dir.mkdir(parents=True, exist_ok=True)
-                (modes_dir / "bad.md").write_text(
-                        """---
+    def test_invalid_typed_tool_ref_skips_mode(self, tmp_path):
+        modes_dir = tmp_path / ".pocketcode" / "modes"
+        modes_dir.mkdir(parents=True, exist_ok=True)
+        (modes_dir / "bad.md").write_text(
+            """---
 name: bad
 flow: core::react
 tools:
-    - prompt:resource_root.pocketcode.review
+  - prompt:resource_root.pocketcode.review
 ---
 Bad mode.
 """,
-                        encoding="utf-8",
-                )
+            encoding="utf-8",
+        )
 
-                manager = ModeManager(tmp_path)
-                manager.load()
+        manager = ModeManager(tmp_path)
+        manager.load()
 
-                assert manager.get("bad") is None
+        assert manager.get("bad") is None
+
+    def test_mode_skips_when_flow_ref_is_missing_from_live_registry(self, tmp_path):
+        modes_dir = tmp_path / ".pocketcode" / "modes"
+        modes_dir.mkdir(parents=True, exist_ok=True)
+        (modes_dir / "review.md").write_text(
+            """---
+name: review
+flow: core::react
+---
+Review it.
+""",
+            encoding="utf-8",
+        )
+
+        manager = ModeManager(tmp_path, flow_registry=NamespaceRegistry())
+        manager.load()
+
+        assert manager.get("review") is None
+
+    def test_mode_skips_when_agent_profile_ref_is_missing_from_live_registry(self, tmp_path):
+        modes_dir = tmp_path / ".pocketcode" / "modes"
+        modes_dir.mkdir(parents=True, exist_ok=True)
+        (modes_dir / "review.md").write_text(
+            """---
+name: review
+agent: coder.safe
+---
+Review it.
+""",
+            encoding="utf-8",
+        )
+
+        manager = ModeManager(tmp_path, agent_profile_getter=lambda name: None)
+        manager.load()
+
+        assert manager.get("review") is None
+
+    def test_mode_skips_when_tool_ref_is_missing_from_live_registry(self, tmp_path):
+        modes_dir = tmp_path / ".pocketcode" / "modes"
+        flow_registry = NamespaceRegistry()
+        flow_registry.register("core", "react", object())
+        modes_dir.mkdir(parents=True, exist_ok=True)
+        (modes_dir / "review.md").write_text(
+            """---
+name: review
+flow: core::react
+tools:
+  - core.read_file
+---
+Review it.
+""",
+            encoding="utf-8",
+        )
+
+        manager = ModeManager(tmp_path, flow_registry=flow_registry, tool_registry=NamespaceRegistry())
+        manager.load()
+
+        assert manager.get("review") is None
+
+    def test_mode_skips_when_prompt_ref_is_missing_from_live_registry(self, tmp_path):
+        modes_dir = tmp_path / ".pocketcode" / "modes"
+        flow_registry = NamespaceRegistry()
+        flow_registry.register("core", "react", object())
+        modes_dir.mkdir(parents=True, exist_ok=True)
+        (modes_dir / "review.md").write_text(
+            """---
+name: review
+flow: core::react
+extra_prompts:
+  - prompt:review
+---
+Review it.
+""",
+            encoding="utf-8",
+        )
+
+        manager = ModeManager(
+            tmp_path,
+            flow_registry=flow_registry,
+            prompt_registry=NamespaceRegistry(),
+        )
+        manager.load()
+
+        assert manager.get("review") is None
 
 
 class TestSkillManager:
@@ -182,45 +270,83 @@ def run_pytest(shared_store=None):
         assert skill.references == ["references/keep.md"]
         assert manager.get("hidden") is None
 
-        def test_skill_loader_normalizes_typed_refs(self, tmp_path):
-                skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
-                skill_dir.mkdir(parents=True, exist_ok=True)
-                (skill_dir / "SKILL.md").write_text(
-                        """---
+    def test_skill_loader_normalizes_typed_refs(self, tmp_path):
+        skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            """---
 name: python-testing
 tools:
-    - tool:core.read_file
+  - tool:core.read_file
 extra_prompts:
-    - prompt:resource_root.pocketcode#review
+  - prompt:resource_root.pocketcode#review
 ---
 Use it.
 """,
-                        encoding="utf-8",
-                )
+            encoding="utf-8",
+        )
 
-                manager = SkillManager(tmp_path)
-                manager.load()
+        manager = SkillManager(tmp_path)
+        manager.load()
 
-                skill = manager.get("python-testing")
-                assert skill is not None
-                assert skill.tool_refs == ["core.read_file"]
-                assert skill.extra_prompts == ["prompt:resource_root.pocketcode.review"]
+        skill = manager.get("python-testing")
+        assert skill is not None
+        assert skill.tool_refs == ["core.read_file"]
+        assert skill.extra_prompts == ["prompt:resource_root.pocketcode.review"]
 
-        def test_invalid_typed_prompt_ref_skips_skill(self, tmp_path):
-                skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
-                skill_dir.mkdir(parents=True, exist_ok=True)
-                (skill_dir / "SKILL.md").write_text(
-                        """---
+    def test_invalid_typed_prompt_ref_skips_skill(self, tmp_path):
+        skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            """---
 name: python-testing
 extra_prompts:
-    - tool:core.read_file
+  - tool:core.read_file
 ---
 Use it.
 """,
-                        encoding="utf-8",
-                )
+            encoding="utf-8",
+        )
 
-                manager = SkillManager(tmp_path)
-                manager.load()
+        manager = SkillManager(tmp_path)
+        manager.load()
 
-                assert manager.get("python-testing") is None
+        assert manager.get("python-testing") is None
+
+    def test_skill_skips_when_tool_ref_is_missing_from_live_registry(self, tmp_path):
+        skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            """---
+name: python-testing
+tools:
+  - core.read_file
+---
+Use it.
+""",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(tmp_path, tool_registry=NamespaceRegistry())
+        manager.load()
+
+        assert manager.get("python-testing") is None
+
+    def test_skill_skips_when_prompt_ref_is_missing_from_live_registry(self, tmp_path):
+        skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            """---
+name: python-testing
+extra_prompts:
+  - prompt:review
+---
+Use it.
+""",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(tmp_path, prompt_registry=NamespaceRegistry())
+        manager.load()
+
+        assert manager.get("python-testing") is None

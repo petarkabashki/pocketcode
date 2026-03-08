@@ -11,6 +11,8 @@ PocketCoder is a plugin-driven runtime with four distinct layers:
 3. `ModeDefinition`: a Markdown-authored overlay that resolves into an ephemeral active profile.
 4. `SkillDefinition`: an additive session pack that extends prompts and tool availability.
 
+Markdown-authored flows, tools, prompts, agent profiles, modes, and skills are compilation inputs, not a separate runtime layer. They are normalized into the same registries and runtime models used by manifest YAML and Python factories. See `markdown_assets.md` for the asset-level syntax and validation model.
+
 The engine always executes a flow. Agent profiles, modes, and skills modify how that flow is invoked.
 
 Built-in core tools have a single canonical package location:
@@ -45,12 +47,12 @@ Engine construction in `pocketcode.core.engine.PocketCodeEngine` follows this or
 
 1. Load `pocketcode.yml` from the workspace root.
 2. Build `PluginManager` and load package plugins plus configured plugin roots.
-3. Load direct prompt and tool resources from all discovered resource roots.
+3. Load direct prompt, tool, and flow resources from all discovered resource roots, including Markdown-backed tools and flows.
 4. Build `AgentManager` from loaded flows.
 5. Load modes from all discovered resource roots.
 6. Load skills from all discovered resource roots.
 7. Load workspace LLM profiles from all discovered resource roots.
-8. Validate loaded agent profiles, modes, and skills against the populated registries, canonicalizing resolvable refs and pruning invalid registry-backed targets.
+8. Validate loaded agent profiles, modes, and skills against the populated registries, canonicalizing resolvable refs and pruning or rebinding the remaining contextual targets.
 9. Build `LlmRouter`, `ToolRuntime`, and `AgentRuntime`.
 10. Restore persisted Textual selection state such as active profile, mode, skills, and last-used tool overrides.
 
@@ -58,6 +60,20 @@ This creates a two-phase validation model:
 
 - load-time syntax validation in the individual loaders
 - engine-time existence validation after flows, tools, prompts, and workspace resources are all registered
+
+Markdown asset loading participates in the same two phases:
+
+- Markdown files are expanded and compiled into structured definitions during loader execution.
+- registry-backed refs inside those compiled definitions are then canonicalized and validated against the live registries.
+
+That shared model applies across prompt files, Markdown tool definitions, Markdown flow definitions, Markdown agent profiles, modes, and skills.
+
+For flow Markdown specifically, the loader now has two execution outcomes:
+
+- if the compiled definition provides `module` plus `entry_fn`, PocketCoder loads that Python PocketFlow factory
+- if those fields are absent but the Markdown metadata includes a supported Mermaid or DOT graph plus `nodes:` configuration, PocketCoder generates a deterministic PocketFlow `Flow` directly from the graph
+
+The generated graph flow path executes against the same shared-store contract used by handwritten PocketFlow flows, including `_tool_runtime`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, `results`, and other runtime-managed keys.
 
 ## Key Runtime Types
 
@@ -119,12 +135,13 @@ Skills contribute:
 - references to already-registered tools
 - tool modules loaded from `tools/*.py`
 
-After managers load, the engine performs a second pass over modes and skills:
+Modes and skills now validate most static references during manager load itself because the engine passes the live flow, tool, prompt, and mode-agent profile lookups into those loaders.
 
-- modes with missing target flows or base agent profiles are removed from the loaded registry
+After managers load, the engine still performs a narrow normalization pass over loaded overlays:
+
+- modes are re-bound to the concrete target flow selected by either `mode.flow` or the resolved `mode.agent` base profile
 - mode and skill refs that can be resolved globally are canonicalized to registry form
-- invalid prompt-resource or tool refs are warned and pruned
-- unqualified skill or mode refs that depend on runtime agent context are retained for per-run resolution
+- context-dependent unqualified refs can remain deferred for per-run resolution
 
 ## Registries And Names
 
@@ -140,7 +157,7 @@ Reference parsing is centralized in `pocketcode/core/reference_syntax.py`.
 - `ResourceReference` is the shared parsed representation used for typed-kind detection, canonical target normalization, and qualified versus unqualified checks.
 - manifest loading, workspace agent loading, markdown mode and skill loading, registry normalization, prompt-resource resolution, and engine-side post-load pruning now consume this parsed form instead of duplicating string-splitting logic.
 - runtime tool lookup, allowlist checks, and confirmation-policy maps also normalize legacy and typed tool ids through the same parser-backed path.
-- persistence paths reuse the same normalization layer, so workspace agent YAML, saved session confirmation overrides, persistent tool-confirmation config, and Textual selection presets are written back with canonical dotted registry ids instead of mixed legacy forms.
+- persistence paths reuse the same normalization layer, so workspace agent profile files, saved session confirmation overrides, persistent tool-confirmation config, and Textual selection presets are written back with canonical dotted registry ids instead of mixed legacy forms.
 - permissive compatibility callers that must not reject malformed legacy input now route through the same shared fallback helper in `reference_syntax` instead of re-implementing local `::` normalization branches.
 - compatibility helpers such as `normalize_registry_reference()` remain available, but they are wrappers over the shared parser.
 
@@ -170,11 +187,12 @@ Each discovered resource root contributes a workspace-owned extension surface:
 - `<resource_root>/modes/`
 - `<resource_root>/skills/`
 - `<resource_root>/tools/`
+- `<resource_root>/flows/`
 - `<resource_root>/prompts/`
 
 Runtime session state is persisted under `<primary_resource_root>/state/sessions/`.
 
-Direct resource-root prompts and tools are registered under `resource_root.<name>`. For backward compatibility, the default `.pocketcode/` resource root also exposes direct prompts and tools under the legacy `workspace` namespace.
+Direct resource-root prompts, tools, and flows are registered under resource-root namespaces. For backward compatibility, the default `.pocketcode/` resource root also exposes its direct prompts, tools, and Markdown flows under the legacy `workspace` namespace.
 
 Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/session_manager.py` and scoped to the current workspace root.
 
@@ -258,7 +276,7 @@ Prompt file includes are expanded before the flow `system_prompt` is stored.
 Current enabled-skill resolution order is:
 
 1. active session per-profile skill override
-2. active profile YAML `skills`
+2. active profile file `skills`
 3. active session global skill override
 4. Textual `default_skills`
 
@@ -305,7 +323,7 @@ Current behavior:
 - request lifecycle hooks append user and assistant or system transcript entries to the active saved session after each run
 - session snapshots persist active agent, active profile, active mode, enabled skills, global LLM override, session-scoped profile tool/skill overrides, and session confirmation overrides
 - starting a new session creates a new saved-session file and switches the active session pointer
-- starting a new session clears prior session-only tool and skill overrides, then reseeds the new session from the active agent/profile YAML state
+- starting a new session clears prior session-only tool and skill overrides, then reseeds the new session from the active agent/profile file state
 - resuming a session restores runtime selections from the saved snapshot and marks the active session as history-backed
 - deleting a session is blocked when the target matches the active session id
 - clearing saved sessions removes only non-active saved sessions
@@ -314,8 +332,8 @@ Current behavior:
 
 `AgentManager` loads profiles in this effective precedence order:
 
-1. plugin-declared default agent blocks and plugin-local `agents/*.yaml`
-2. workspace `.pocketcode/agents/*.yaml`
+1. plugin-declared default agent blocks and plugin-local `agents/*.yaml` or `agents/*.md`
+2. workspace resource-root agent profiles from `<resource_root>/agents/*.yaml` and `<resource_root>/agents/*.md`
 3. synthesised defaults built from each flow definition
 
 Name collisions keep the higher-precedence source.

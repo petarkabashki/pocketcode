@@ -9,7 +9,7 @@ It covers:
 - request execution and live event streaming
 - Textual UI layout, controls, persistence, and implementation boundaries
 
-For load order and runtime precedence, see `architecture.md`. For agent, mode, and skill semantics, see `agent_system.md` and `modes_and_skills.md`.
+For load order and runtime precedence, see `architecture.md`. For Markdown asset file formats and validation behavior, see `markdown_assets.md`. For agent, mode, and skill semantics, see `agent_system.md` and `modes_and_skills.md`.
 
 ## Scope
 
@@ -108,10 +108,17 @@ Behavior:
 - Textual side effects are now funneled through dedicated helpers for command execution, request startup, pending-input resolution, and active-run draining so widget event handlers remain thin orchestration code
 - picker-driven mutations such as profile, mode, and LLM selection, system-settings persistence, selection presets, clone/delete flows, and saved-session operations are also routed through dedicated selection-effect helpers instead of calling engine mutation APIs inline from UI handlers
 - edit-screen flows now route workspace-agent saves, LLM-profile updates, mode updates, clone-before-edit flows, and tool-policy/tool-allowlist default persistence through dedicated config-effect helpers instead of mixing those engine writes into the YAML-editing UI code
+- Textual edit and control-center flows now also support workspace markdown flow and tool assets through the shared engine asset API used by the basic CLI
+- workspace markdown flow edits and clones proactively validate executable Mermaid and DOT graph definitions before runtime reload
+- workspace markdown flow and tool edits and clones also resolve Markdown `include` and `import` directives before reload, so broken prompt-file references fail during authoring instead of during a later runtime load
+- workspace markdown flow edits and clones now also validate that referenced tools, handoff targets, composite agents, and prompt-bundle entries resolve before reload
+- workspace markdown agent edits and clones now apply the same pre-reload `include` and `import` validation path as workspace flow and tool assets
+- workspace markdown agent edits and clones also validate that referenced flows, tools, and `prompt:` entries resolve in the live registries before reload
 - modal and picker presentation is now centralized behind a modal coordinator helper so `push_screen`, callback wrapping, error handling, reducer-backed modal open/close dispatch, and post-close UI resync happen in one place instead of being duplicated across view mixins; modal dismissal now participates in the same batched render-commit path as follow-up result handlers
 - slash commands still route through `handle_command()` so the command layer remains shared with the basic CLI
 - skill toggles in the inspector persist against the active agent profile when one is selected; otherwise they persist as the global Textual last-used skill selection
-- the inspector `Save` buttons write the current skill or tool selection into the active workspace agent YAML
+- the inspector `Save` buttons write the current skill or tool selection into the active workspace agent profile file
+- the edit picker can open workspace markdown flow and tool assets in the Textual editor, and the control center can clone or delete those same assets
 
 ## Shared CLI Context
 
@@ -155,6 +162,7 @@ The shared command layer exposes these primary command groups:
 - `/flow`
 - `/prompts`
 - `/agent`
+- `/asset`
 - `/mode`
 - `/skill`
 - `/context`
@@ -226,6 +234,51 @@ Behavior by scope:
 `/tools` requires either an explicit flow name or an active flow selection.
 
 ## Selection And Override Commands
+
+## Asset Scaffolding
+
+Syntax:
+
+```text
+/asset list <agent|flow|tool>
+/asset show <agent|flow|tool> <name>
+/asset clone <agent|flow|tool> <source_name> <new_name>
+/asset edit <agent|flow|tool> <name> <markdown_file>
+/asset delete <agent|flow|tool> <name> --yes
+/asset create <agent|flow|tool> <name>
+```
+
+Behavior:
+
+- `list` shows workspace-backed Markdown assets currently loaded for that kind
+- `show` prints the resolved source path and current Markdown source for a workspace-backed asset
+- `clone` copies a workspace-backed Markdown asset to a new name
+- `edit` replaces a workspace-backed Markdown asset from an external Markdown file
+- `delete` removes a workspace-backed Markdown asset after explicit `--yes` confirmation
+- scaffolds workspace Markdown assets in the primary resource root, typically `.pocketcode/`
+- `agent` creates a Markdown agent profile under `agents/`
+- `flow` creates a Markdown flow scaffold under `flows/` with a minimal executable Mermaid graph and `nodes:` mapping
+- `tool` creates both a Markdown tool definition and a sibling Python handler module under `tools/`
+- cloning a tool also copies a sibling relative Python handler module when the Markdown `handler:` points at a local file
+- editing validates that front matter `name:` still matches the target asset name before saving
+- editing and cloning tool assets also validate that the `handler:` reference resolves before reload
+- deleting a tool removes the Markdown definition but currently leaves any sibling handler module in place
+- successful creation triggers an engine reload so the new asset is immediately visible to runtime discovery
+- names are restricted to letters, numbers, dot, underscore, and hyphen to keep file paths and registry names stable
+- the exact Markdown file formats for these assets are documented in `markdown_assets.md`
+
+Examples:
+
+```text
+/asset list flow
+/asset show tool workspace_echo
+/asset clone tool workspace_echo workspace_echo_copy
+/asset edit flow triage ./drafts/triage.md
+/asset delete tool workspace_echo_copy --yes
+/asset create agent reviewer.safe
+/asset create flow triage
+/asset create tool workspace_echo
+```
 
 ### Flow Selection
 
@@ -544,7 +597,7 @@ Inspector selector behavior:
 
 - the `Skills` list applies a session-scoped skill selection immediately when toggled
 - the `Allowed Tools` list applies a session-scoped tool selection immediately when toggled
-- fresh sessions seed those session-scoped skill and tool selections from the active agent profile YAML
+- fresh sessions seed those session-scoped skill and tool selections from the active agent profile file
 - the `Skills` header `Save` button writes the current selection into the active workspace agent's `skills` field
 - the `Allowed Tools` header `Save` button writes the current effective tool scope into the active workspace agent's `tools` field
 - tool groups and subgroups are derived from tool metadata, preferring the tool source path under `tools/`
