@@ -3,20 +3,23 @@ from __future__ import annotations
 # pyright: reportAttributeAccessIssue=false, reportGeneralTypeIssues=false
 
 from contextlib import contextmanager
+import re
 from typing import Any, Callable, Dict, Iterable, Iterator
 
-from textual.widgets import Input, TextArea
+from textual.widgets import Input
+import yaml
 
 from pocketcode.cli.runtime_events import format_runtime_event
 from pocketcode.cli.user_interaction import describe_interaction_request, interaction_placeholder
 
 from .picker_screens import AssetPickerScreen
-from .selectors import select_output_text
 from .shared import PickerOption, TEXTUAL_VIEWS, WORKSPACE_VIEWS
-from .store import SetCurrentViewAction, SetRightPanelVisibleAction, SetWorkspaceViewAction
+from .store import OutputBlock, SetCurrentViewAction, SetRightPanelVisibleAction, SetWorkspaceViewAction
 
 
 class TextualAppRenderingMixin:
+    _CODE_BLOCK_PATTERN = re.compile(r"```(?P<language>[^\n`]*)\n(?P<code>.*?)```", re.DOTALL)
+
     def _render_profile_policy_summary(self, overrides: dict[str, str]) -> str:
         if not overrides:
             return "No per-tool confirmation overrides. Tools inherit the agent default."
@@ -109,23 +112,104 @@ class TextualAppRenderingMixin:
         self._commit_ui_update()
 
     def _write_info(self, text: str) -> None:
-        self._append_output_line(f"info> {text}")
+        self._append_output_block(OutputBlock(kind="info", text=str(text), title="Info"))
+        self._sync_output_widget()
 
     def _write_error(self, text: str) -> None:
-        self._append_output_line(f"error> {text}")
+        self._append_output_block(OutputBlock(kind="error", text=str(text), title="Error"))
+        self._sync_output_widget()
+
+    def _write_runtime(self, text: str) -> None:
+        self._append_output_block(OutputBlock(kind="runtime", text=str(text), title="Runtime"))
+        self._sync_output_widget()
 
     def _write_user(self, text: str) -> None:
-        self._append_output_line(f"you> {text}")
+        self._append_output_block(OutputBlock(kind="user", text=str(text), title="You"))
+        self._sync_output_widget()
 
     def _write_assistant(self, text: str) -> None:
-        self._append_output_line(f"assistant> {text}", assistant_response=text)
+        response_text = str(text)
+        self._append_output_blocks(
+            self._build_assistant_output_blocks(response_text),
+            plain_text=f"assistant> {response_text}",
+            assistant_response=response_text,
+        )
+        self._sync_output_widget()
 
-    def _append_output_line(self, line: str, *, assistant_response: str | None = None) -> None:
-        self._append_console_line(line, assistant_response=assistant_response)
-        output_widget = self.query_one("#output", TextArea)
-        text = select_output_text(self._runtime_state)
-        self._load_text_area_text(output_widget, text)
-        output_widget.scroll_end(animate=False)
+    def _write_tool_call(self, tool_name: str, arguments: Any) -> None:
+        argument_text = self._serialize_output_payload(arguments)
+        text = argument_text if argument_text else "No arguments provided."
+        self._append_output_block(
+            OutputBlock(kind="tool_call", text=text, title=f"Tool Call: {tool_name}"),
+            plain_text=f"tool> {tool_name}({argument_text})" if argument_text else f"tool> {tool_name}()",
+        )
+        self._sync_output_widget()
+
+    def _write_tool_result(self, tool_name: str, result: Any, *, success: bool) -> None:
+        rendered = self._serialize_output_payload(result)
+        language = "yaml" if isinstance(result, (dict, list, tuple)) else None
+        status_text = "succeeded" if success else "failed"
+        self._append_output_block(
+            OutputBlock(
+                kind="tool_result",
+                text=rendered or "No result returned.",
+                title=f"Tool Result: {tool_name} ({status_text})",
+                language=language,
+            ),
+            plain_text=f"tool-result> {tool_name}: {rendered or status_text}",
+        )
+        self._sync_output_widget()
+
+    def _serialize_output_payload(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, (dict, list, tuple)):
+            dumped = yaml.safe_dump(value, sort_keys=False, allow_unicode=False).strip()
+            return dumped or repr(value)
+        return repr(value)
+
+    def _build_assistant_output_blocks(self, text: str) -> list[OutputBlock]:
+        matches = list(self._CODE_BLOCK_PATTERN.finditer(text))
+        if not matches:
+            return [OutputBlock(kind="assistant", text=text, title="Assistant")]
+
+        blocks: list[OutputBlock] = []
+        cursor = 0
+        for match in matches:
+            prose = text[cursor : match.start()].strip()
+            if prose:
+                blocks.append(OutputBlock(kind="assistant", text=prose, title="Assistant"))
+
+            language = str(match.group("language") or "text").strip() or "text"
+            code = str(match.group("code") or "").strip("\n")
+            if code:
+                title = "Diff" if language.lower() == "diff" else f"Code ({language})"
+                blocks.append(OutputBlock(kind="code", text=code, title=title, language=language))
+            cursor = match.end()
+
+        trailing = text[cursor:].strip()
+        if trailing:
+            blocks.append(OutputBlock(kind="assistant", text=trailing, title="Assistant"))
+        return blocks or [OutputBlock(kind="assistant", text=text, title="Assistant")]
+
+    def _write_event_output(self, event: Dict[str, Any], message: str) -> None:
+        event_type = str(event.get("type") or "")
+        if event_type == "tool_started":
+            self._write_tool_call(str(event.get("tool") or "tool"), event.get("arguments"))
+            return
+        if event_type == "tool_finished":
+            self._write_tool_result(
+                str(event.get("tool") or "tool"),
+                event.get("result"),
+                success=bool(event.get("success")),
+            )
+            return
+        if event_type == "runtime_error":
+            self._write_error(str(event.get("message") or message))
+            return
+        self._write_runtime(message)
 
     def _set_current_view(self, view_name: str, *, announce: bool = False, refresh: bool = True) -> None:
         if view_name not in TEXTUAL_VIEWS:
@@ -182,7 +266,8 @@ class TextualAppRenderingMixin:
         message = self._format_runtime_event(event)
         if message:
             self._remember_run_event(message)
-            self._write_info(message)
+            if event_type not in {"run_completed", "run_failed"}:
+                self._write_event_output(event, message)
 
         if event_type == "interaction_requested":
             self._set_pending_input_request(event)

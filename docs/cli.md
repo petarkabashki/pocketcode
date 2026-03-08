@@ -98,6 +98,7 @@ Behavior:
 - `pocketcode/cli/textual_app.py::run_textual_cli()` remains the stable entrypoint and forwards to the split Textual UI implementation under `pocketcode/cli/textual_ui/`
 - the app owns the screen state, input routing, picker dialogs, editing dialogs, and live run monitor
 - the Textual implementation now keeps two reducer-backed state slices: `TextualCliState` for layout, theme, active view, and engine snapshot, and `TextualRuntimeState` for run status, pending input prompts, console history, the main input placeholder, and the currently presented modal kind/title
+- the runtime console state now stores both plain-text transcript lines and semantic output blocks so the interactive chat pane can render theme-aware Rich content without changing copy/export behavior
 - runtime-derived console text, inspector summary text, modal labels, context/session summaries, prompt summaries, and run preview text are now computed through selector helpers in `pocketcode/cli/textual_ui/selectors.py` so the rendering mixin mostly binds derived values into widgets instead of formatting those runtime strings inline
 - shared skill/tool picker grouping, nested tool tree construction, and selection-list option shaping now live in `pocketcode/cli/textual_ui/picker_model_mixin.py` so rendering, interaction, and asset-management flows reuse one picker-model layer
 - `TextualUIState` construction now lives in `pocketcode/cli/textual_ui/ui_state_mixin.py`, which assembles the view model from reducer state, selector outputs, and picker-model helpers before the rendering mixin applies it to widgets
@@ -559,6 +560,8 @@ Built-in themes are:
 - `forest`
 - `ember`
 
+Each built-in theme resolves through a token palette that currently defines application background, primary and muted text, layered surfaces, border, accent, info, success, warning, error, and input-focus colors. The Textual screen CSS and the semantic output renderer both consume the same palette selection.
+
 Built-in workspace views are:
 
 - `balanced`
@@ -569,6 +572,44 @@ Built-in workspace views are:
 
 Workspace view changes both the default content view and whether the right inspector panel is visible.
 
+The main chat console is rendered through a Rich-capable log surface rather than a plain text area. Current semantic output block kinds are:
+
+- `assistant`
+- `code`
+- `user`
+- `runtime`
+- `info`
+- `warning`
+- `error`
+- `tool_call`
+- `tool_result`
+
+Assistant and user messages render as bordered panels under the active theme. Assistant responses that contain fenced code blocks are decomposed into prose panels plus syntax-highlighted code panels. Fenced `diff` blocks render through a dedicated diff view with line-level add/remove styling. Tool calls and tool results render as dedicated panels, while runtime, info, warning, and error entries render as themed inline log records. The plain-text transcript is still preserved in runtime state for clipboard copy and other text-only flows.
+
+The `run` view now uses the same Rich-capable rendering path as the main chat console. Instead of a plain text dump, the run preview presents semantic overview and summary blocks, including YAML-formatted run metadata and recent live events.
+
+The right-side inspector panel now follows the same pattern for its summary, session context, saved sessions, and prompt-source panes. Those sections render semantic Rich blocks rather than plain text areas, while the profile list, skill selection list, and tool selection list remain interactive list widgets.
+
+Long code, diff, YAML, text-preview, and tool-result panels are now compacted at render time. The underlying runtime state and plain-text transcript remain unchanged, but the visible Rich panels show only the leading portion of oversized content and annotate the panel with a truncation subtitle such as the number of displayed versus total lines.
+
+Compacted Rich blocks can be toggled between compact and expanded rendering with `Ctrl+E`. The toggle now targets the selected compactable block inside the focused Rich surface instead of expanding an entire surface at once, so a single long run-summary block can be expanded without forcing the rest of the run preview or inspector pane open.
+
+Focus can be moved across the currently visible Rich surfaces with `Ctrl+Up` and `Ctrl+Down`. Within the focused Rich surface, `Ctrl+Left` and `Ctrl+Right` move between compactable blocks. The selected compactable block is rendered with an accent border and a prefixed title before `Ctrl+E` expands or restores it.
+
+The header now includes a live navigation strip that reports the current target panel, the selected compactable block position within that panel, and whether that block is in compact or expanded mode.
+
+The header navigation strip now stays strictly keyboard-oriented: it reports the focused panel, current compactable block position, and compact-versus-expanded state without duplicating mouse-specific hints.
+
+When a hovered compactable block exists, a separate hint strip now appears just above the footer with the mouse-specific click and wheel guidance. That keeps the header compact while still surfacing pointer behavior near the command/footer region.
+
+That navigation strip now follows actual Textual focus changes on Rich surfaces, not only the custom panel-navigation shortcuts. If focus moves directly into or out of a Rich panel, the header updates to match the new target surface.
+
+Mouse interaction now participates in the same selection model. Clicking inside a Rich surface focuses that surface and selects the compactable block whose rendered panel actually occupies the clicked line when that measurement is available, falling back to proportional selection only if the render span cache is unavailable. Wheel scrolling over a Rich surface updates the selected block from the rendered viewport center using the same span data.
+
+When the pointer moves over a compactable block, that block now shows a lightweight hover affordance before selection: the title is prefixed and the panel border switches to the secondary highlight color, with an added subtitle hint that the block can be clicked to select.
+
+Terminal font sizing remains outside PocketCoder's control. The terminal emulator owns font family and font size globally, so the Textual UI can theme color, emphasis, borders, padding, and layout, but it cannot apply true per-widget font sizes.
+
 ### Keyboard Shortcuts
 
 Current bindings are:
@@ -578,7 +619,12 @@ Current bindings are:
 - `F4`: open the clone asset picker
 - `F5`: open the global view selector for `chat`, `control`, and `run`
 - `F6`: open the main asset/control picker
+- `Ctrl+Up`: focus the previous visible Rich surface
+- `Ctrl+Down`: focus the next visible Rich surface
+- `Ctrl+Left`: select the previous compactable block in the focused Rich surface
+- `Ctrl+Right`: select the next compactable block in the focused Rich surface
 - `F10`: toggle the right inspector panel
+- `Ctrl+E`: expand or restore the selected compacted block in the focused Rich surface
 - `Ctrl+Shift+A`: copy full output buffer
 - `Ctrl+Y`: copy the last assistant response
 - `Ctrl+R`: reload runtime

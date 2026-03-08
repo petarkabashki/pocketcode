@@ -4,6 +4,7 @@ from .picker_screens import AssetPickerScreen, ToolSelectionScreen
 from .shared import (
     PickerOption,
     SelectViewState,
+    THEME_PALETTES,
     TextualUIState,
     _build_header_agent_text,
     _build_header_llm_text,
@@ -22,6 +23,7 @@ __all__ = [
     "PocketCodeTextualApp",
     "SelectViewState",
     "SystemSettingsScreen",
+    "THEME_PALETTES",
     "TextEditorScreen",
     "TextualUIState",
     "ToolPolicyEditorScreen",

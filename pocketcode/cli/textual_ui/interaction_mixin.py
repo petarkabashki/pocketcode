@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from textual.widgets import Button, Input, OptionList, Select, SelectionList, Switch, TextArea
+from textual import events
+from textual.widget import Widget
+from textual.widgets import Button, Input, OptionList, RichLog, Select, SelectionList, Switch, TextArea
 
 from pocketcode.cli.user_interaction import interaction_placeholder
 
@@ -10,8 +12,75 @@ from .shared import LOADING_OPTION, SKILL_GROUP_PREFIX
 
 logger = logging.getLogger(__name__)
 
+EXPANDABLE_SURFACE_IDS = (
+    "output",
+    "run-preview",
+    "inspector-summary",
+    "inspector-context",
+    "inspector-sessions",
+    "inspector-prompts",
+)
+
 
 class TextualAppInteractionMixin:
+    def on_focus(self, event: events.Focus) -> None:
+        control = getattr(event, "control", None)
+        widget_id = control.id if isinstance(control, Widget) else None
+        focused_surface_id = widget_id if widget_id in EXPANDABLE_SURFACE_IDS else None
+        if getattr(self._cli_state, "focused_surface_id", None) == focused_surface_id:
+            return
+        self._set_cli_focused_surface(focused_surface_id)
+        self._commit_ui_update()
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        control = getattr(event, "control", None)
+        if not isinstance(control, RichLog):
+            return
+        surface_id = control.id or ""
+        if surface_id not in EXPANDABLE_SURFACE_IDS:
+            return
+        control.focus()
+        self._set_cli_focused_surface(surface_id)
+        content_offset = event.get_content_offset(control)
+        self._select_surface_block_from_pointer(
+            surface_id,
+            pointer_y=int(getattr(content_offset, "y", getattr(event, "y", 0))),
+            widget_height=max(1, control.content_region.height or control.size.height),
+            scroll_y=float(getattr(control, "scroll_y", 0.0)),
+        )
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        control = getattr(event, "control", None)
+        if not isinstance(control, RichLog):
+            self._set_hovered_block_if_needed(None)
+            return
+        surface_id = control.id or ""
+        if surface_id not in EXPANDABLE_SURFACE_IDS:
+            self._set_hovered_block_if_needed(None)
+            return
+        content_offset = event.get_content_offset(control)
+        line_number = int(max(0.0, float(getattr(control, "scroll_y", 0.0))) + max(0, int(getattr(content_offset, "y", 0))))
+        block_index = self._surface_block_index_from_line(surface_id, line_number)
+        if block_index is None:
+            self._set_hovered_block_if_needed(None)
+            return
+        self._set_hovered_block_if_needed(f"{surface_id}:{block_index}")
+
+    def on_leave(self, event: events.Leave) -> None:
+        control = getattr(event, "control", None)
+        widget_id = control.id if isinstance(control, Widget) else None
+        hovered_ref = getattr(self._cli_state, "hovered_block_ref", None)
+        if hovered_ref is None:
+            return
+        if widget_id and str(hovered_ref).startswith(f"{widget_id}:"):
+            self._set_hovered_block_if_needed(None)
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        self._handle_surface_scroll_event(event)
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        self._handle_surface_scroll_event(event)
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         widget_id = event.input.id or ""
         if widget_id == "main-input":
@@ -279,8 +348,34 @@ class TextualAppInteractionMixin:
 
     def action_clear_output(self) -> None:
         self._clear_console_state()
-        self._load_text_area_text(self.query_one("#output", TextArea), "")
+        self.query_one("#output", RichLog).clear()
+        self._output_render_cache = None
         self._write_info("Cleared output.")
+
+    def action_toggle_expanded_surface(self) -> None:
+        surface_id = self._resolve_expansion_surface_id()
+        if not surface_id:
+            self._write_info("No expandable Rich panel is active in the current view.")
+            return
+        block_index = self._resolve_selected_compactable_block_index(surface_id)
+        if block_index is None:
+            self._write_info("The current panel has no compacted content to expand.")
+            return
+        self._set_cli_selected_surface_block(surface_id, block_index)
+        self._toggle_cli_expanded_block(surface_id, block_index)
+        self._commit_ui_update()
+
+    def action_focus_next_rich_surface(self) -> None:
+        self._cycle_rich_surface_focus(direction=1)
+
+    def action_focus_previous_rich_surface(self) -> None:
+        self._cycle_rich_surface_focus(direction=-1)
+
+    def action_focus_next_compactable_block(self) -> None:
+        self._cycle_surface_block_selection(direction=1)
+
+    def action_focus_previous_compactable_block(self) -> None:
+        self._cycle_surface_block_selection(direction=-1)
 
     def action_copy_output(self) -> None:
         if not self._runtime_state.output_lines:
@@ -315,3 +410,189 @@ class TextualAppInteractionMixin:
                 input_widget.value = suggestion
                 input_widget.cursor_position = len(suggestion)
                 return
+
+    def _resolve_expansion_surface_id(self) -> str | None:
+        focused_surface_id = getattr(self._cli_state, "focused_surface_id", None)
+        if focused_surface_id in EXPANDABLE_SURFACE_IDS:
+            return str(focused_surface_id)
+        focused = self.focused
+        if isinstance(focused, Widget):
+            widget_id = focused.id or ""
+            if widget_id in EXPANDABLE_SURFACE_IDS:
+                return widget_id
+        if self._current_view == "run":
+            return "run-preview"
+        if self._current_view == "chat":
+            return "output"
+        if self._show_right_panel:
+            return "inspector-summary"
+        return None
+
+    def _surface_blocks(self, surface_id: str) -> tuple:
+        if surface_id == "output":
+            return self._runtime_state.output_blocks
+        if self._ui_state is None:
+            return ()
+        mapping = {
+            "run-preview": self._ui_state.run_preview_blocks,
+            "inspector-summary": self._ui_state.inspector_summary_blocks,
+            "inspector-context": self._ui_state.inspector_context_blocks,
+            "inspector-sessions": self._ui_state.inspector_sessions_blocks,
+            "inspector-prompts": self._ui_state.inspector_prompt_blocks,
+        }
+        return tuple(mapping.get(surface_id, ()))
+
+    def _surface_compactable_block_indices(self, surface_id: str) -> tuple[int, ...]:
+        return self._surface_compactable_indices(self._surface_blocks(surface_id))
+
+    def _resolve_selected_compactable_block_index(self, surface_id: str) -> int | None:
+        compactable_indices = self._surface_compactable_block_indices(surface_id)
+        if not compactable_indices:
+            return None
+        selected_map = dict(self._cli_state.selected_surface_block_indices)
+        selected_index = selected_map.get(surface_id)
+        if selected_index in compactable_indices:
+            return int(selected_index)
+        return compactable_indices[0]
+
+    def _visible_rich_surface_ids(self) -> tuple[str, ...]:
+        surfaces: list[str] = []
+        if self._current_view == "chat":
+            surfaces.append("output")
+        elif self._current_view == "run":
+            surfaces.append("run-preview")
+        if self._show_right_panel:
+            surfaces.extend(
+                [
+                    "inspector-summary",
+                    "inspector-context",
+                    "inspector-sessions",
+                    "inspector-prompts",
+                ]
+            )
+        return tuple(surfaces)
+
+    def _cycle_rich_surface_focus(self, *, direction: int) -> None:
+        surface_ids = self._visible_rich_surface_ids()
+        if not surface_ids:
+            return
+        focused = self.focused
+        focused_id = focused.id if isinstance(focused, Widget) else None
+        if focused_id in surface_ids:
+            current_index = surface_ids.index(str(focused_id))
+            next_index = (current_index + direction) % len(surface_ids)
+        else:
+            next_index = 0 if direction > 0 else -1
+        self.query_one(f"#{surface_ids[next_index]}", RichLog).focus()
+
+    def _cycle_surface_block_selection(self, *, direction: int) -> None:
+        surface_id = self._resolve_expansion_surface_id()
+        if not surface_id:
+            self._write_info("No Rich panel is active for block navigation.")
+            return
+        compactable_indices = self._surface_compactable_block_indices(surface_id)
+        if not compactable_indices:
+            self._write_info("The current panel has no compacted blocks to select.")
+            return
+        selected_map = dict(self._cli_state.selected_surface_block_indices)
+        current_index = selected_map.get(surface_id)
+        if current_index in compactable_indices:
+            current_position = compactable_indices.index(int(current_index))
+            next_position = (current_position + direction) % len(compactable_indices)
+        else:
+            next_position = 0 if direction > 0 else -1
+        self._set_cli_selected_surface_block(surface_id, compactable_indices[next_position])
+        self._commit_ui_update()
+
+    def _handle_surface_scroll_event(self, event: events.MouseEvent) -> None:
+        control = getattr(event, "control", None)
+        if not isinstance(control, RichLog):
+            return
+        surface_id = control.id or ""
+        if surface_id not in EXPANDABLE_SURFACE_IDS:
+            return
+        self._set_cli_focused_surface(surface_id)
+        self.set_timer(0, lambda surface_id=surface_id: self._select_surface_block_from_scroll(surface_id))
+
+    def _compactable_block_index_for_fraction(self, surface_id: str, fraction: float) -> int | None:
+        compactable_indices = self._surface_compactable_block_indices(surface_id)
+        if not compactable_indices:
+            return None
+        normalized = max(0.0, min(1.0, float(fraction)))
+        if len(compactable_indices) == 1:
+            return compactable_indices[0]
+        position = int(round(normalized * (len(compactable_indices) - 1)))
+        return compactable_indices[position]
+
+    def _set_selected_surface_block_if_needed(self, surface_id: str, block_index: int | None) -> None:
+        if block_index is None:
+            return
+        selected_map = dict(self._cli_state.selected_surface_block_indices)
+        if selected_map.get(surface_id) == block_index:
+            return
+        self._set_cli_selected_surface_block(surface_id, block_index)
+        self._commit_ui_update()
+
+    def _set_hovered_block_if_needed(self, block_ref: str | None) -> None:
+        if getattr(self._cli_state, "hovered_block_ref", None) == block_ref:
+            return
+        self._set_cli_hovered_block(block_ref)
+        self._commit_ui_update()
+
+    def _select_surface_block_from_pointer(
+        self,
+        surface_id: str,
+        *,
+        pointer_y: int,
+        widget_height: int,
+        scroll_y: float = 0.0,
+    ) -> None:
+        line_number = int(max(0.0, scroll_y) + max(0, pointer_y))
+        if self._select_surface_block_from_line(surface_id, line_number):
+            return
+        if widget_height <= 1:
+            fraction = 0.0
+        else:
+            fraction = max(0.0, min(1.0, float(pointer_y) / float(widget_height - 1)))
+        self._set_selected_surface_block_if_needed(
+            surface_id,
+            self._compactable_block_index_for_fraction(surface_id, fraction),
+        )
+
+    def _surface_block_index_from_line(self, surface_id: str, line_number: int) -> int | None:
+        spans = self._surface_render_spans(surface_id) if hasattr(self, "_surface_render_spans") else ()
+        compactable_indices = set(self._surface_compactable_block_indices(surface_id))
+        for span in spans:
+            if span.block_index not in compactable_indices:
+                continue
+            if span.start_line <= line_number <= span.end_line:
+                return span.block_index
+        return None
+
+    def _select_surface_block_from_line(self, surface_id: str, line_number: int) -> bool:
+        block_index = self._surface_block_index_from_line(surface_id, line_number)
+        if block_index is None:
+            return False
+        self._set_selected_surface_block_if_needed(surface_id, block_index)
+        return True
+
+    def _select_surface_block_from_scroll(self, surface_id: str) -> None:
+        compactable_indices = self._surface_compactable_block_indices(surface_id)
+        if not compactable_indices:
+            return
+        widget = self.query_one(f"#{surface_id}", RichLog)
+        viewport_height = max(1, widget.content_region.height or widget.size.height)
+        virtual_height = max(viewport_height, int(getattr(widget.virtual_size, "height", viewport_height)))
+        center_line = int(float(getattr(widget, "scroll_y", 0.0)) + (viewport_height / 2.0))
+        if self._select_surface_block_from_line(surface_id, center_line):
+            return
+        if virtual_height <= viewport_height:
+            fraction = 0.0
+        else:
+            scroll_y = float(getattr(widget, "scroll_y", 0.0))
+            center_line = min(float(virtual_height), scroll_y + (viewport_height / 2.0))
+            fraction = center_line / float(virtual_height)
+        self._set_selected_surface_block_if_needed(
+            surface_id,
+            self._compactable_block_index_for_fraction(surface_id, fraction),
+        )

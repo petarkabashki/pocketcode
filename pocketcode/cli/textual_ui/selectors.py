@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+import yaml
 
 from .shared import _build_output_text, _build_stats_text
-from .store import TextualRuntimeState
+from .store import OutputBlock, TextualRuntimeState
 
 
 def select_output_text(state: TextualRuntimeState) -> str:
@@ -48,6 +49,31 @@ def select_inspector_summary_text(
     return "\n".join(summary_lines)
 
 
+def select_inspector_summary_blocks(
+    *,
+    runtime_state: TextualRuntimeState,
+    status: Dict[str, Any],
+    active_profile: Any,
+    active_skill_names: tuple[str, ...],
+    global_llm_override: str | None,
+    auto_confirm_tools: bool,
+) -> tuple[OutputBlock, ...]:
+    return (
+        OutputBlock(
+            kind="info",
+            title="Inspector Summary",
+            text=select_inspector_summary_text(
+                runtime_state=runtime_state,
+                status=status,
+                active_profile=active_profile,
+                active_skill_names=active_skill_names,
+                global_llm_override=global_llm_override,
+                auto_confirm_tools=auto_confirm_tools,
+            ),
+        ),
+    )
+
+
 def select_run_preview_text(state: TextualRuntimeState, status: Dict[str, Any]) -> str:
     run_summary = status.get("last_run_summary", {})
     if not isinstance(run_summary, dict):
@@ -73,6 +99,60 @@ def select_run_preview_text(state: TextualRuntimeState, status: Dict[str, Any]) 
         lines.append("live_events:")
         lines.extend(f"- {item}" for item in state.live_run_events[-8:])
     return "\n".join(lines)
+
+
+def _dump_preview_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list, tuple)):
+        dumped = yaml.safe_dump(value, sort_keys=False, allow_unicode=False).strip()
+        return dumped or repr(value)
+    return repr(value)
+
+
+def select_run_preview_blocks(state: TextualRuntimeState, status: Dict[str, Any]) -> tuple[OutputBlock, ...]:
+    run_summary = status.get("last_run_summary", {})
+    if not isinstance(run_summary, dict):
+        run_summary = {}
+
+    overview_lines = [
+        f"live_run_status: {state.run_status}",
+        f"active_modal: {state.active_modal_kind or 'none'}",
+        f"internal_flow: {status.get('runtime_flow') or 'internal-flow'}",
+        f"active_agent: {status.get('agent') or 'auto'}",
+        f"active_profile: {status.get('active_agent_profile') or 'none'}",
+        f"global_llm_override: {status.get('global_llm_override') or 'none'}",
+    ]
+
+    blocks: list[OutputBlock] = [
+        OutputBlock(kind="info", title="Run Preview", text="\n".join(overview_lines)),
+        OutputBlock(
+            kind="code",
+            title="Run Summary",
+            text=_dump_preview_value(
+                {
+                    "agent_path": run_summary.get("agent_path", []),
+                    "current_llm_profile": run_summary.get("current_llm_profile") or "none",
+                    "current_llm_model": run_summary.get("current_llm_model") or "-",
+                    "llm_usage": run_summary.get("llm_usage", {}),
+                    "llm_cost_usd": run_summary.get("llm_cost_usd", 0.0),
+                    "context_stats": run_summary.get("context_stats", {}),
+                    "session_confirmation": status.get("session_tool_confirmation_overrides", {}),
+                }
+            ),
+            language="yaml",
+        ),
+    ]
+    if state.live_run_events:
+        blocks.append(
+            OutputBlock(
+                kind="code",
+                title="Recent Live Events",
+                text="\n".join(state.live_run_events[-8:]),
+                language="text",
+            )
+        )
+    return tuple(blocks)
 
 
 def select_context_preview(cli_context: Dict[str, Any]) -> str:
@@ -113,6 +193,30 @@ def select_context_summary(status: Dict[str, Any], cli_context: Dict[str, Any]) 
     return "\n".join(lines)
 
 
+def select_context_blocks(status: Dict[str, Any], cli_context: Dict[str, Any]) -> tuple[OutputBlock, ...]:
+    run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
+    context_stats = run_summary.get("context_stats", {}) if isinstance(run_summary, dict) else {}
+    if not isinstance(context_stats, dict):
+        context_stats = {}
+
+    overview = {
+        "session_id": status.get("active_session_id") or "-",
+        "session_title": status.get("active_session_title") or "-",
+        "files": context_stats.get("files", len(cli_context.get("files", set()) or set())),
+        "folders": context_stats.get("folders", len(cli_context.get("folders", set()) or set())),
+        "urls": context_stats.get("urls", len(cli_context.get("urls", set()) or set())),
+        "snippets": context_stats.get("snippets", len(cli_context.get("snippets", {}) or {})),
+        "snippet_chars": context_stats.get("snippet_chars", 0),
+    }
+    preview = select_context_preview(cli_context)
+    blocks = [
+        OutputBlock(kind="code", title="Context Summary", text=_dump_preview_value(overview), language="yaml"),
+    ]
+    if preview.strip():
+        blocks.append(OutputBlock(kind="code", title="Context Preview", text=preview, language="text"))
+    return tuple(blocks)
+
+
 def select_saved_sessions_summary(sessions: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None) -> str:
     if sessions is None:
         return "Saved session history is unavailable."
@@ -129,6 +233,29 @@ def select_saved_sessions_summary(sessions: list[dict[str, Any]] | tuple[dict[st
     return "\n".join(lines)
 
 
+def select_saved_sessions_blocks(
+    sessions: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+) -> tuple[OutputBlock, ...]:
+    if sessions is None:
+        return (OutputBlock(kind="info", title="Saved Sessions", text="Saved session history is unavailable."),)
+    if not sessions:
+        return (OutputBlock(kind="info", title="Saved Sessions", text="No saved sessions."),)
+
+    summary_items = []
+    for item in sessions[:8]:
+        summary_items.append(
+            {
+                "active": bool(item.get("is_active")),
+                "title": item.get("title") or "-",
+                "session_id": item.get("session_id") or "-",
+                "updated_at": item.get("updated_at") or "-",
+            }
+        )
+    return (
+        OutputBlock(kind="code", title="Saved Sessions", text=_dump_preview_value(summary_items), language="yaml"),
+    )
+
+
 def select_prompt_summary(prompt_sources: tuple[str, ...], active_profile: Any) -> str:
     extra_prompts = list(active_profile.extra_prompts) if active_profile else []
     lines: list[str] = []
@@ -141,3 +268,16 @@ def select_prompt_summary(prompt_sources: tuple[str, ...], active_profile: Any) 
     if not lines:
         return "No prompt sources registered."
     return "\n".join(lines)
+
+
+def select_prompt_summary_blocks(prompt_sources: tuple[str, ...], active_profile: Any) -> tuple[OutputBlock, ...]:
+    extra_prompts = list(active_profile.extra_prompts) if active_profile else []
+    payload = {
+        "agent_prompt_sources": list(prompt_sources),
+        "profile_extra_prompts": extra_prompts,
+    }
+    if not prompt_sources and not extra_prompts:
+        return (OutputBlock(kind="info", title="Prompt Sources", text="No prompt sources registered."),)
+    return (
+        OutputBlock(kind="code", title="Prompt Sources", text=_dump_preview_value(payload), language="yaml"),
+    )

@@ -31,11 +31,132 @@ VIEW_TITLES = {
     "control": "Control Center",
     "run": "Run Inspector",
 }
-THEME_OPTIONS = {
-    "ocean": "Ocean",
-    "forest": "Forest",
-    "ember": "Ember",
+
+
+@dataclass(frozen=True)
+class TextualThemePalette:
+    name: str
+    label: str
+    app_bg: str
+    text_primary: str
+    text_muted: str
+    surface_1: str
+    surface_2: str
+    border: str
+    accent: str
+    success: str
+    warning: str
+    error: str
+    info: str
+    input_border: str
+
+
+def _theme_css(palette: TextualThemePalette) -> str:
+    return f"""
+    Screen.theme-{palette.name} {{
+        background: {palette.app_bg};
+        color: {palette.text_primary};
+    }}
+
+    Screen.theme-{palette.name} #topbar {{
+        background: {palette.surface_2};
+        border-bottom: solid {palette.accent};
+    }}
+
+    Screen.theme-{palette.name} Footer {{
+        background: {palette.surface_1};
+        color: {palette.text_primary};
+    }}
+
+    Screen.theme-{palette.name} .view {{
+        background: {palette.surface_1};
+        border: round {palette.border};
+    }}
+
+    Screen.theme-{palette.name} #view-title {{
+        background: {palette.surface_2};
+        color: {palette.text_primary};
+        border: round {palette.accent};
+    }}
+
+    Screen.theme-{palette.name} .card,
+    Screen.theme-{palette.name} #output,
+    Screen.theme-{palette.name} #profile-list,
+    Screen.theme-{palette.name} #profile-tools-summary,
+    Screen.theme-{palette.name} #profile-prompts,
+    Screen.theme-{palette.name} #context-preview,
+    Screen.theme-{palette.name} #run-preview,
+    Screen.theme-{palette.name} #inspector-tools,
+    Screen.theme-{palette.name} #inspector-prompts {{
+        background: {palette.surface_2};
+        border: round {palette.border};
+        color: {palette.text_primary};
+    }}
+
+    Screen.theme-{palette.name} #main-input {{
+        border: round {palette.input_border};
+    }}
+
+    Screen.theme-{palette.name} RichLog:focus {{
+        border: round {palette.input_border};
+    }}
+    """
+
+
+THEME_PALETTES = {
+    "ocean": TextualThemePalette(
+        name="ocean",
+        label="Ocean",
+        app_bg="#0f172a",
+        text_primary="#e2e8f0",
+        text_muted="#93c5fd",
+        surface_1="#111827",
+        surface_2="#082f49",
+        border="#334155",
+        accent="#0ea5e9",
+        success="#22c55e",
+        warning="#f59e0b",
+        error="#f87171",
+        info="#38bdf8",
+        input_border="#f59e0b",
+    ),
+    "forest": TextualThemePalette(
+        name="forest",
+        label="Forest",
+        app_bg="#0b1510",
+        text_primary="#ecfccb",
+        text_muted="#bef264",
+        surface_1="#102018",
+        surface_2="#16351f",
+        border="#365314",
+        accent="#65a30d",
+        success="#84cc16",
+        warning="#eab308",
+        error="#fb7185",
+        info="#4ade80",
+        input_border="#84cc16",
+    ),
+    "ember": TextualThemePalette(
+        name="ember",
+        label="Ember",
+        app_bg="#1a120c",
+        text_primary="#ffedd5",
+        text_muted="#fdba74",
+        surface_1="#22140d",
+        surface_2="#3b1d10",
+        border="#9a3412",
+        accent="#fb923c",
+        success="#f59e0b",
+        warning="#fb923c",
+        error="#f97316",
+        info="#fdba74",
+        input_border="#fb923c",
+    ),
 }
+
+THEME_OPTIONS = {name: palette.label for name, palette in THEME_PALETTES.items()}
+THEME_CSS = "\n".join(_theme_css(palette) for palette in THEME_PALETTES.values())
+
 WORKSPACE_VIEWS = {
     "balanced": {"label": "Balanced", "view": "chat", "right": True},
     "chat_focus": {"label": "Chat Focus", "view": "chat", "right": True},
@@ -119,6 +240,58 @@ def _build_header_llm_text(status: Dict[str, Any]) -> str:
     return f"LLM: {current_llm_profile} ({current_llm_model})"
 
 
+def _surface_label(surface_id: str | None) -> str:
+    labels = {
+        "output": "Chat",
+        "run-preview": "Run Preview",
+        "inspector-summary": "Inspector Summary",
+        "inspector-context": "Session Context",
+        "inspector-sessions": "Saved Sessions",
+        "inspector-prompts": "Prompt Sources",
+    }
+    return labels.get(str(surface_id or ""), "No panel")
+
+
+def _build_navigation_status_text(
+    *,
+    surface_id: str | None,
+    selected_position: int | None,
+    compactable_count: int,
+    expanded: bool,
+) -> str:
+    label = _surface_label(surface_id)
+    if surface_id is None:
+        return "Panel: none | Ctrl+Up/Down surfaces | Ctrl+Left/Right blocks | Ctrl+E expand"
+    if compactable_count <= 0:
+        return f"Panel: {label} | No compacted blocks | Ctrl+Up/Down surfaces"
+    block_text = (
+        f"Block {selected_position} of {compactable_count}"
+        if selected_position is not None
+        else f"Block 1 of {compactable_count}"
+    )
+    mode_text = "expanded" if expanded else "compact"
+    status = (
+        f"Panel: {label} | {block_text} | {mode_text} | "
+        "Ctrl+Left/Right blocks | Ctrl+E toggle"
+    )
+    return status
+
+
+def _build_pointer_hint_text(
+    *,
+    surface_id: str | None,
+    hovered_position: int | None,
+    compactable_count: int,
+) -> str:
+    if surface_id is None or hovered_position is None or compactable_count <= 0:
+        return ""
+    label = _surface_label(surface_id)
+    return (
+        f"Pointer: {label} hover on block {hovered_position} of {compactable_count}. "
+        "Click selects it, wheel keeps selection aligned with the visible viewport."
+    )
+
+
 def _build_view_title_text(view_name: str) -> str:
     return VIEW_TITLES.get(view_name, "")
 
@@ -174,6 +347,7 @@ class TextualUIState:
     right_panel_visible: bool
     main_input_placeholder: str
     status_text: str
+    footer_hint_text: str
     header_agent_text: str
     header_llm_text: str
     view_title_text: str
@@ -183,14 +357,19 @@ class TextualUIState:
     llm_select: SelectViewState
     session_confirm_select: SelectViewState
     auto_confirm_tools: bool
+    inspector_summary_blocks: tuple[Any, ...]
     inspector_summary_text: str
+    inspector_context_blocks: tuple[Any, ...]
     inspector_context_text: str
+    inspector_sessions_blocks: tuple[Any, ...]
     inspector_sessions_text: str
     skill_list_options: tuple[tuple[str, str, bool], ...]
     tool_list_options: tuple[tuple[str, str, bool], ...]
+    inspector_prompt_blocks: tuple[Any, ...]
     inspector_prompts_text: str
     profile_list_names: tuple[str, ...]
     profile_list_labels: tuple[str, ...]
+    run_preview_blocks: tuple[Any, ...]
     run_preview_text: str
 
 

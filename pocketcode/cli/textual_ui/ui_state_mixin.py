@@ -3,10 +3,15 @@ from __future__ import annotations
 # pyright: reportAttributeAccessIssue=false, reportGeneralTypeIssues=false
 
 from .selectors import (
+    select_context_blocks,
     select_context_summary,
+    select_inspector_summary_blocks,
     select_inspector_summary_text,
+    select_prompt_summary_blocks,
     select_prompt_summary,
+    select_run_preview_blocks,
     select_run_preview_text,
+    select_saved_sessions_blocks,
     select_saved_sessions_summary,
 )
 from .shared import (
@@ -20,11 +25,71 @@ from .shared import (
     WORKSPACE_VIEWS,
     _build_header_agent_text,
     _build_header_llm_text,
+    _build_navigation_status_text,
+    _build_pointer_hint_text,
     _build_view_title_text,
 )
 
 
 class TextualAppUiStateMixin:
+    def _build_navigation_status_text(self, *, status: dict, run_preview_blocks: tuple[Any, ...]) -> str:
+        surface_id = getattr(self._cli_state, "focused_surface_id", None)
+        if surface_id is None and hasattr(self, "_resolve_expansion_surface_id"):
+            surface_id = self._resolve_expansion_surface_id()
+        surface_blocks = self._surface_blocks(surface_id) if surface_id and hasattr(self, "_surface_blocks") else ()
+        if surface_id == "run-preview":
+            surface_blocks = run_preview_blocks
+        compactable_indices = (
+            self._surface_compactable_indices(surface_blocks)
+            if surface_blocks and hasattr(self, "_surface_compactable_indices")
+            else ()
+        )
+        selected_index = (
+            self._resolve_selected_compactable_block_index(surface_id)
+            if surface_id and hasattr(self, "_resolve_selected_compactable_block_index")
+            else None
+        )
+        selected_position = None
+        if selected_index in compactable_indices:
+            selected_position = compactable_indices.index(int(selected_index)) + 1
+        expanded = False
+        if surface_id and selected_index is not None:
+            expanded_refs = set(getattr(self._cli_state, "expanded_block_refs", ()))
+            expanded = f"{surface_id}:{int(selected_index)}" in expanded_refs
+        return _build_navigation_status_text(
+            surface_id=surface_id,
+            selected_position=selected_position,
+            compactable_count=len(compactable_indices),
+            expanded=expanded,
+        )
+
+    def _build_pointer_hint_text(self, *, run_preview_blocks: tuple[Any, ...]) -> str:
+        surface_id = getattr(self._cli_state, "focused_surface_id", None)
+        if surface_id is None and hasattr(self, "_resolve_expansion_surface_id"):
+            surface_id = self._resolve_expansion_surface_id()
+        surface_blocks = self._surface_blocks(surface_id) if surface_id and hasattr(self, "_surface_blocks") else ()
+        if surface_id == "run-preview":
+            surface_blocks = run_preview_blocks
+        compactable_indices = (
+            self._surface_compactable_indices(surface_blocks)
+            if surface_blocks and hasattr(self, "_surface_compactable_indices")
+            else ()
+        )
+        hovered_position = None
+        hovered_ref = getattr(self._cli_state, "hovered_block_ref", None)
+        if surface_id and hovered_ref and str(hovered_ref).startswith(f"{surface_id}:"):
+            try:
+                hovered_index = int(str(hovered_ref).split(":", 1)[1])
+            except (TypeError, ValueError):
+                hovered_index = None
+            if hovered_index in compactable_indices:
+                hovered_position = compactable_indices.index(int(hovered_index)) + 1
+        return _build_pointer_hint_text(
+            surface_id=surface_id,
+            hovered_position=hovered_position,
+            compactable_count=len(compactable_indices),
+        )
+
     def _build_ui_state(self) -> TextualUIState:
         snapshot = self._cli_state.engine
         status = snapshot.status
@@ -72,6 +137,7 @@ class TextualAppUiStateMixin:
         status_for_display = dict(status)
         status_for_display.setdefault("selected_agent", active_profile_name or "none")
         status_for_display.setdefault("selected_llm_profile", effective_llm_profile)
+        run_preview_blocks = select_run_preview_blocks(self._runtime_state, status)
         profile_select_options = (
             tuple((profile_name, profile_name) for profile_name in all_profile_names)
             if all_profile_names
@@ -83,7 +149,8 @@ class TextualAppUiStateMixin:
             current_view=self._cli_state.current_view,
             right_panel_visible=self._cli_state.right_panel_visible,
             main_input_placeholder=self._runtime_state.main_input_placeholder,
-            status_text="",
+            status_text=self._build_navigation_status_text(status=status, run_preview_blocks=run_preview_blocks),
+            footer_hint_text=self._build_pointer_hint_text(run_preview_blocks=run_preview_blocks),
             header_agent_text=_build_header_agent_text(status_for_display),
             header_llm_text=_build_header_llm_text(status_for_display),
             view_title_text=_build_view_title_text(self._cli_state.current_view),
@@ -113,6 +180,14 @@ class TextualAppUiStateMixin:
                 value=session_default,
             ),
             auto_confirm_tools=bool(self._engine.auto_confirm_tools),
+            inspector_summary_blocks=select_inspector_summary_blocks(
+                runtime_state=self._runtime_state,
+                status=status,
+                active_profile=active_profile,
+                active_skill_names=active_skill_names,
+                global_llm_override=self._engine.global_llm_override,
+                auto_confirm_tools=bool(self._engine.auto_confirm_tools),
+            ),
             inspector_summary_text=select_inspector_summary_text(
                 runtime_state=self._runtime_state,
                 status=status,
@@ -121,7 +196,11 @@ class TextualAppUiStateMixin:
                 global_llm_override=self._engine.global_llm_override,
                 auto_confirm_tools=bool(self._engine.auto_confirm_tools),
             ),
+            inspector_context_blocks=select_context_blocks(status, self._cli_context),
             inspector_context_text=select_context_summary(status, self._cli_context),
+            inspector_sessions_blocks=select_saved_sessions_blocks(
+                self._engine.list_saved_sessions() if hasattr(self._engine, "list_saved_sessions") else None
+            ),
             inspector_sessions_text=select_saved_sessions_summary(
                 self._engine.list_saved_sessions() if hasattr(self._engine, "list_saved_sessions") else None
             ),
@@ -132,8 +211,10 @@ class TextualAppUiStateMixin:
             if skill_picker_options
             else (("No skills available", LOADING_OPTION, False),),
             tool_list_options=tool_list_options,
+            inspector_prompt_blocks=select_prompt_summary_blocks(prompt_sources, active_profile),
             inspector_prompts_text=select_prompt_summary(prompt_sources, active_profile),
             profile_list_names=all_profile_names,
             profile_list_labels=profile_list_labels,
+            run_preview_blocks=run_preview_blocks,
             run_preview_text=select_run_preview_text(self._runtime_state, status),
         )

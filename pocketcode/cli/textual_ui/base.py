@@ -9,15 +9,16 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import SuggestFromList
-from textual.widgets import Button, ContentSwitcher, Footer, Input, OptionList, Select, SelectionList, Static, Switch, TextArea
+from textual.widgets import Button, ContentSwitcher, Footer, Input, OptionList, RichLog, Select, SelectionList, Static, Switch, TextArea
 
 from pocketcode.cli.command_handler import list_command_suggestions
 from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.core.run_handle import RunHandle
 
-from .shared import INHERIT_POLICY, LOADING_OPTION, THEME_OPTIONS, TextualUIState, WORKSPACE_VIEWS
+from .shared import INHERIT_POLICY, LOADING_OPTION, THEME_CSS, THEME_OPTIONS, TextualUIState, WORKSPACE_VIEWS
 from .store import (
     AppendConsoleLineAction,
+    AppendOutputBlockAction,
     CloseModalAction,
     ClearConsoleAction,
     HydrateEngineAction,
@@ -25,14 +26,19 @@ from .store import (
     RememberRunEventAction,
     SetBusyAction,
     SetCurrentViewAction,
+    SetFocusedSurfaceAction,
+    SetHoveredBlockAction,
     SetMainInputPlaceholderAction,
     SetPendingInputRequestAction,
     SetRightPanelVisibleAction,
     SetRunStatusAction,
+    SetSelectedSurfaceBlockAction,
     SetThemeAction,
+    ToggleExpandedBlockAction,
     SetWorkspaceViewAction,
     TextualCliAction,
     TextualCliState,
+    OutputBlock,
     TextualRuntimeAction,
     TextualRuntimeState,
     capture_engine_snapshot,
@@ -52,10 +58,15 @@ class TextualAppBase(App[None]):
         Binding("f4", "clone_asset", "Clone", priority=True),
         Binding("f5", "pick_view", "Views", priority=True),
         Binding("f6", "pick_asset", "Control", priority=True),
+        Binding("ctrl+up", "focus_previous_rich_surface", "Prev Panel"),
+        Binding("ctrl+down", "focus_next_rich_surface", "Next Panel"),
+        Binding("ctrl+left", "focus_previous_compactable_block", "Prev Block"),
+        Binding("ctrl+right", "focus_next_compactable_block", "Next Block"),
         Binding("f10", "toggle_right_panel", "Toggle Inspector"),
         Binding("ctrl+shift+a", "copy_output", "Copy Output"),
         Binding("ctrl+y", "copy_last_response", "Copy Last"),
         Binding("ctrl+r", "reload_runtime", "Reload"),
+        Binding("ctrl+e", "toggle_expanded_surface", "Expand Panel"),
         Binding("ctrl+l", "clear_output", "Clear Output"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
@@ -66,139 +77,7 @@ class TextualAppBase(App[None]):
         background: #0f172a;
         color: #e2e8f0;
     }
-
-    Screen.theme-ocean {
-        background: #0f172a;
-        color: #e2e8f0;
-    }
-
-    Screen.theme-ocean #topbar {
-        background: #082f49;
-        border-bottom: solid #0ea5e9;
-    }
-
-    Screen.theme-ocean Footer {
-        background: #111827;
-        color: #dbeafe;
-    }
-
-    Screen.theme-ocean .view {
-        background: #111827;
-        border: round #334155;
-    }
-
-    Screen.theme-ocean #view-title {
-        background: #082f49;
-        color: #e0f2fe;
-        border: round #0ea5e9;
-    }
-
-    Screen.theme-ocean .card,
-    Screen.theme-ocean #output,
-    Screen.theme-ocean #profile-list,
-    Screen.theme-ocean #profile-tools-summary,
-    Screen.theme-ocean #profile-prompts,
-    Screen.theme-ocean #context-preview,
-    Screen.theme-ocean #run-preview,
-    Screen.theme-ocean #inspector-tools,
-    Screen.theme-ocean #inspector-prompts {
-        background: #020617;
-        border: round #334155;
-        color: #e2e8f0;
-    }
-
-    Screen.theme-ocean #main-input {
-        border: round #f59e0b;
-    }
-
-    Screen.theme-forest {
-        background: #0b1510;
-        color: #ecfccb;
-    }
-
-    Screen.theme-forest #topbar {
-        background: #16351f;
-        border-bottom: solid #65a30d;
-    }
-
-    Screen.theme-forest Footer {
-        background: #14532d;
-        color: #dcfce7;
-    }
-
-
-    Screen.theme-forest .view {
-        background: #102018;
-        border: round #365314;
-    }
-
-    Screen.theme-forest #view-title {
-        background: #16351f;
-        color: #dcfce7;
-        border: round #65a30d;
-    }
-
-    Screen.theme-forest .card,
-    Screen.theme-forest #output,
-    Screen.theme-forest #profile-list,
-    Screen.theme-forest #profile-tools-summary,
-    Screen.theme-forest #profile-prompts,
-    Screen.theme-forest #context-preview,
-    Screen.theme-forest #run-preview,
-    Screen.theme-forest #inspector-tools,
-    Screen.theme-forest #inspector-prompts {
-        background: #09110d;
-        border: round #365314;
-        color: #ecfccb;
-    }
-
-    Screen.theme-forest #main-input {
-        border: round #84cc16;
-    }
-
-    Screen.theme-ember {
-        background: #1a120c;
-        color: #ffedd5;
-    }
-
-    Screen.theme-ember #topbar {
-        background: #3b1d10;
-        border-bottom: solid #fb923c;
-    }
-
-    Screen.theme-ember Footer {
-        background: #7c2d12;
-        color: #ffedd5;
-    }
-
-    Screen.theme-ember .view {
-        background: #22140d;
-        border: round #9a3412;
-    }
-
-    Screen.theme-ember #view-title {
-        background: #3b1d10;
-        color: #ffedd5;
-        border: round #fb923c;
-    }
-
-    Screen.theme-ember .card,
-    Screen.theme-ember #output,
-    Screen.theme-ember #profile-list,
-    Screen.theme-ember #profile-tools-summary,
-    Screen.theme-ember #profile-prompts,
-    Screen.theme-ember #context-preview,
-    Screen.theme-ember #run-preview,
-    Screen.theme-ember #inspector-tools,
-    Screen.theme-ember #inspector-prompts {
-        background: #120b07;
-        border: round #9a3412;
-        color: #ffedd5;
-    }
-
-    Screen.theme-ember #main-input {
-        border: round #fb923c;
-    }
+    """ + THEME_CSS + """
 
     Footer {
         height: 1;
@@ -218,6 +97,26 @@ class TextualAppBase(App[None]):
         height: 1;
         padding: 0;
         content-align: right middle;
+    }
+
+    #header-status {
+        width: 1fr;
+        color: #e0f2fe;
+        text-style: bold;
+    }
+
+    #header-agent,
+    #header-llm {
+        width: auto;
+        margin-left: 2;
+    }
+
+    #footer-hint {
+        height: auto;
+        min-height: 1;
+        padding: 0 1;
+        background: #0b1220;
+        color: #93c5fd;
     }
 
     #workspace {
@@ -400,6 +299,13 @@ class TextualAppBase(App[None]):
         self._syncing_controls = False
         self._select_state_cache: dict[str, tuple[tuple[tuple[str, str], ...], str]] = {}
         self._text_state_cache: dict[str, str] = {}
+        self._rich_surface_line_span_cache: dict[str, tuple[Any, ...]] = {}
+        self._output_render_cache: tuple[str, tuple[OutputBlock, ...]] | None = None
+        self._run_preview_render_cache: tuple[str, tuple[Any, ...]] | None = None
+        self._inspector_summary_render_cache: tuple[str, tuple[Any, ...]] | None = None
+        self._inspector_context_render_cache: tuple[str, tuple[Any, ...]] | None = None
+        self._inspector_sessions_render_cache: tuple[str, tuple[Any, ...]] | None = None
+        self._inspector_prompts_render_cache: tuple[str, tuple[Any, ...]] | None = None
         self._option_list_state_cache: dict[str, tuple[str, ...]] = {}
         self._selection_list_state_cache: dict[str, tuple[tuple[str, str, bool], ...]] = {}
         self._ui_commit_batch_depth = 0
@@ -421,12 +327,17 @@ class TextualAppBase(App[None]):
         self._apply_workspace_view(self._cli_state.workspace_view, announce=False)
 
     def compose(self) -> ComposeResult:
+        with Vertical(id="topbar"):
+            with Horizontal(id="topbar-main"):
+                yield Static(id="header-status")
+                yield Static(id="header-agent")
+                yield Static(id="header-llm")
         with Horizontal(id="workspace"):
             with Vertical(id="main-column"):
                 yield Static(id="view-title")
                 with ContentSwitcher(initial="view-chat", id="view-switcher"):
                     with Vertical(id="view-chat", classes="view"):
-                        yield TextArea("", id="output", read_only=True)
+                        yield RichLog(id="output", auto_scroll=False, wrap=True, markup=False)
                     with VerticalScroll(id="view-control", classes="view view-scroll"):
                         yield Static("Runtime controls apply immediately.", classes="hint")
                         yield Static("Workspace View", classes="field-label")
@@ -466,18 +377,18 @@ class TextualAppBase(App[None]):
                             yield Button("Reload Runtime", id="reload-button", variant="primary")
                     with VerticalScroll(id="view-run", classes="view view-scroll"):
                         yield Static("Last run summary and effective runtime state.", classes="hint")
-                        yield TextArea("", id="run-preview", read_only=True)
+                        yield RichLog(id="run-preview", auto_scroll=False, wrap=True, markup=False)
                 yield Input(
                     id="main-input",
                     placeholder="Type a request or /command. F3 edit F4 clone F5 views F6 control",
                 )
             with VerticalScroll(id="right-panel", classes="view"):
                 yield Static("Inspector", classes="panel-title")
-                yield Static("", id="inspector-summary", classes="card")
+                yield RichLog(id="inspector-summary", auto_scroll=False, wrap=True, markup=False, classes="card")
                 yield Static("Session Context", classes="section-title")
-                yield TextArea("", id="inspector-context", read_only=True)
+                yield RichLog(id="inspector-context", auto_scroll=False, wrap=True, markup=False)
                 yield Static("Saved Sessions", classes="section-title")
-                yield TextArea("", id="inspector-sessions", read_only=True)
+                yield RichLog(id="inspector-sessions", auto_scroll=False, wrap=True, markup=False)
                 yield Static("Available Agent Profiles", classes="section-title")
                 yield OptionList(id="profile-list")
                 with Horizontal(classes="section-header"):
@@ -489,7 +400,8 @@ class TextualAppBase(App[None]):
                     yield Button("Save", id="inspector-tool-save-button", classes="section-save-button")
                 yield SelectionList(id="inspector-tools")
                 yield Static("Prompt Sources", classes="section-title")
-                yield TextArea("", id="inspector-prompts", read_only=True)
+                yield RichLog(id="inspector-prompts", auto_scroll=False, wrap=True, markup=False)
+            yield Static(id="footer-hint")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -546,6 +458,22 @@ class TextualAppBase(App[None]):
     def _set_cli_right_panel_visible(self, visible: bool) -> None:
         self._dispatch_cli_action(SetRightPanelVisibleAction(visible=bool(visible)))
 
+    def _set_cli_focused_surface(self, surface_id: str | None) -> None:
+        self._dispatch_cli_action(SetFocusedSurfaceAction(surface_id=surface_id))
+
+    def _set_cli_hovered_block(self, block_ref: str | None) -> None:
+        self._dispatch_cli_action(SetHoveredBlockAction(block_ref=block_ref))
+
+    def _set_cli_selected_surface_block(self, surface_id: str, block_index: int) -> None:
+        self._dispatch_cli_action(
+            SetSelectedSurfaceBlockAction(surface_id=str(surface_id), block_index=int(block_index))
+        )
+
+    def _toggle_cli_expanded_block(self, surface_id: str, block_index: int) -> None:
+        self._dispatch_cli_action(
+            ToggleExpandedBlockAction(surface_id=str(surface_id), block_index=int(block_index))
+        )
+
     def _set_runtime_busy(self, busy: bool) -> None:
         self._dispatch_runtime_action(SetBusyAction(busy=bool(busy)))
 
@@ -570,6 +498,44 @@ class TextualAppBase(App[None]):
         self._dispatch_runtime_action(
             AppendConsoleLineAction(line=str(line), assistant_response=assistant_response)
         )
+
+    def _append_output_block(
+        self,
+        block: OutputBlock,
+        *,
+        plain_text: str | None = None,
+        assistant_response: str | None = None,
+        include_in_transcript: bool = True,
+    ) -> None:
+        self._dispatch_runtime_action(
+            AppendOutputBlockAction(
+                block=block,
+                plain_text=plain_text,
+                assistant_response=assistant_response,
+                include_in_transcript=bool(include_in_transcript),
+            )
+        )
+
+    def _append_output_blocks(
+        self,
+        blocks: list[OutputBlock] | tuple[OutputBlock, ...],
+        *,
+        plain_text: str | None = None,
+        assistant_response: str | None = None,
+    ) -> None:
+        if not blocks:
+            return
+        actions = []
+        for index, block in enumerate(blocks):
+            actions.append(
+                AppendOutputBlockAction(
+                    block=block,
+                    plain_text=plain_text if index == 0 else None,
+                    assistant_response=assistant_response if index == 0 else None,
+                    include_in_transcript=(index == 0),
+                )
+            )
+        self._dispatch_runtime_actions(*actions)
 
     def _clear_console_state(self) -> None:
         self._dispatch_runtime_action(ClearConsoleAction())

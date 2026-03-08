@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Literal
 
 from .shared import DEFAULT_MAIN_INPUT_PLACEHOLDER, MAX_OUTPUT_LINES, _trim_output_lines
 
@@ -20,6 +20,10 @@ class TextualCliState:
     workspace_view: str
     current_view: str
     right_panel_visible: bool
+    focused_surface_id: str | None
+    hovered_block_ref: str | None
+    selected_surface_block_indices: tuple[tuple[str, int], ...]
+    expanded_block_refs: tuple[str, ...]
     engine: TextualEngineSnapshot
 
 
@@ -31,10 +35,32 @@ class TextualRuntimeState:
     active_modal_title: str | None
     pending_input_request: dict[str, Any] | None
     live_run_events: tuple[str, ...]
+    output_blocks: tuple["OutputBlock", ...]
     output_lines: tuple[str, ...]
     trimmed_output_line_count: int
     last_assistant_response: str
     main_input_placeholder: str
+
+
+OutputKind = Literal[
+    "assistant",
+    "code",
+    "error",
+    "info",
+    "runtime",
+    "tool_call",
+    "tool_result",
+    "user",
+    "warning",
+]
+
+
+@dataclass(frozen=True)
+class OutputBlock:
+    kind: OutputKind
+    text: str
+    title: str | None = None
+    language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -63,8 +89,30 @@ class SetRightPanelVisibleAction:
 
 
 @dataclass(frozen=True)
+class SetFocusedSurfaceAction:
+    surface_id: str | None
+
+
+@dataclass(frozen=True)
 class ToggleRightPanelAction:
     pass
+
+
+@dataclass(frozen=True)
+class SetHoveredBlockAction:
+    block_ref: str | None
+
+
+@dataclass(frozen=True)
+class SetSelectedSurfaceBlockAction:
+    surface_id: str
+    block_index: int
+
+
+@dataclass(frozen=True)
+class ToggleExpandedBlockAction:
+    surface_id: str
+    block_index: int
 
 
 @dataclass(frozen=True)
@@ -105,6 +153,14 @@ class AppendConsoleLineAction:
 
 
 @dataclass(frozen=True)
+class AppendOutputBlockAction:
+    block: OutputBlock
+    plain_text: str | None = None
+    assistant_response: str | None = None
+    include_in_transcript: bool = True
+
+
+@dataclass(frozen=True)
 class ClearConsoleAction:
     pass
 
@@ -120,8 +176,16 @@ TextualCliAction = (
     | SetWorkspaceViewAction
     | SetCurrentViewAction
     | SetRightPanelVisibleAction
+    | SetFocusedSurfaceAction
     | ToggleRightPanelAction
+    | SetHoveredBlockAction
+    | SetSelectedSurfaceBlockAction
+    | ToggleExpandedBlockAction
 )
+
+
+def make_surface_block_ref(surface_id: str, block_index: int) -> str:
+    return f"{surface_id}:{int(block_index)}"
 
 
 TextualRuntimeAction = (
@@ -131,10 +195,97 @@ TextualRuntimeAction = (
     | CloseModalAction
     | SetPendingInputRequestAction
     | RememberRunEventAction
+    | AppendOutputBlockAction
     | AppendConsoleLineAction
     | ClearConsoleAction
     | SetMainInputPlaceholderAction
 )
+
+
+def _trim_output_blocks(blocks: list[OutputBlock], max_items: int) -> tuple[list[OutputBlock], int]:
+    if max_items <= 0:
+        return [], len(blocks)
+    overflow = max(0, len(blocks) - max_items)
+    if overflow == 0:
+        return list(blocks), 0
+    return list(blocks[overflow:]), overflow
+
+
+def _normalize_output_block(block: OutputBlock) -> OutputBlock:
+    return OutputBlock(
+        kind=str(block.kind),
+        text=str(block.text),
+        title=str(block.title) if block.title else None,
+        language=str(block.language) if block.language else None,
+    )
+
+
+def _infer_output_block_from_line(line: str) -> OutputBlock:
+    normalized = str(line)
+    prefixes: tuple[tuple[str, OutputKind, str | None], ...] = (
+        ("assistant> ", "assistant", "Assistant"),
+        ("you> ", "user", "You"),
+        ("error> ", "error", "Error"),
+        ("warning> ", "warning", "Warning"),
+        ("info> ", "info", "Info"),
+        ("runtime> ", "runtime", "Runtime"),
+    )
+    for prefix, kind, title in prefixes:
+        if normalized.startswith(prefix):
+            return OutputBlock(kind=kind, text=normalized[len(prefix) :], title=title)
+    return OutputBlock(kind="info", text=normalized, title=None)
+
+
+def _plain_text_for_output_block(block: OutputBlock) -> str:
+    prefixes = {
+        "assistant": "assistant> ",
+        "code": "code> ",
+        "user": "you> ",
+        "error": "error> ",
+        "warning": "warning> ",
+        "runtime": "runtime> ",
+        "info": "info> ",
+        "tool_call": "tool> ",
+        "tool_result": "tool-result> ",
+    }
+    return f"{prefixes.get(block.kind, '')}{block.text}"
+
+
+def _append_output_state(
+    state: TextualRuntimeState,
+    *,
+    block: OutputBlock,
+    plain_text: str | None = None,
+    assistant_response: str | None = None,
+    include_in_transcript: bool = True,
+) -> TextualRuntimeState:
+    next_block = _normalize_output_block(block)
+    next_blocks, trimmed_blocks = _trim_output_blocks([*state.output_blocks, next_block], MAX_OUTPUT_LINES)
+    if include_in_transcript:
+        next_lines, trimmed_lines = _trim_output_lines(
+            [*state.output_lines, plain_text if plain_text is not None else _plain_text_for_output_block(next_block)],
+            MAX_OUTPUT_LINES,
+        )
+    else:
+        next_lines, trimmed_lines = list(state.output_lines), 0
+    response_text = state.last_assistant_response
+    if assistant_response is not None:
+        response_text = str(assistant_response)
+    elif next_block.kind == "assistant":
+        response_text = next_block.text
+    return TextualRuntimeState(
+        busy=state.busy,
+        run_status=state.run_status,
+        active_modal_kind=state.active_modal_kind,
+        active_modal_title=state.active_modal_title,
+        pending_input_request=state.pending_input_request,
+        live_run_events=state.live_run_events,
+        output_blocks=tuple(next_blocks),
+        output_lines=tuple(next_lines),
+        trimmed_output_line_count=state.trimmed_output_line_count + max(trimmed_blocks, trimmed_lines),
+        last_assistant_response=response_text,
+        main_input_placeholder=state.main_input_placeholder,
+    )
 
 
 def capture_engine_snapshot(engine: Any) -> TextualEngineSnapshot:
@@ -166,6 +317,10 @@ def make_initial_cli_state(
         workspace_view=str(workspace_view),
         current_view=str(current_view),
         right_panel_visible=bool(right_panel_visible),
+        focused_surface_id=None,
+        hovered_block_ref=None,
+        selected_surface_block_indices=(),
+        expanded_block_refs=(),
         engine=capture_engine_snapshot(engine),
     )
 
@@ -178,6 +333,7 @@ def make_initial_runtime_state() -> TextualRuntimeState:
         active_modal_title=None,
         pending_input_request=None,
         live_run_events=(),
+        output_blocks=(),
         output_lines=(),
         trimmed_output_line_count=0,
         last_assistant_response="",
@@ -192,6 +348,10 @@ def reduce_textual_cli_state(state: TextualCliState, action: TextualCliAction) -
             workspace_view=state.workspace_view,
             current_view=state.current_view,
             right_panel_visible=state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
             engine=action.snapshot,
         )
     if isinstance(action, SetThemeAction):
@@ -200,6 +360,10 @@ def reduce_textual_cli_state(state: TextualCliState, action: TextualCliAction) -
             workspace_view=state.workspace_view,
             current_view=state.current_view,
             right_panel_visible=state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
             engine=state.engine,
         )
     if isinstance(action, SetWorkspaceViewAction):
@@ -208,6 +372,10 @@ def reduce_textual_cli_state(state: TextualCliState, action: TextualCliAction) -
             workspace_view=str(action.workspace_view),
             current_view=state.current_view,
             right_panel_visible=state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
             engine=state.engine,
         )
     if isinstance(action, SetCurrentViewAction):
@@ -216,6 +384,10 @@ def reduce_textual_cli_state(state: TextualCliState, action: TextualCliAction) -
             workspace_view=state.workspace_view,
             current_view=str(action.current_view),
             right_panel_visible=state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
             engine=state.engine,
         )
     if isinstance(action, SetRightPanelVisibleAction):
@@ -224,6 +396,22 @@ def reduce_textual_cli_state(state: TextualCliState, action: TextualCliAction) -
             workspace_view=state.workspace_view,
             current_view=state.current_view,
             right_panel_visible=bool(action.visible),
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
+            engine=state.engine,
+        )
+    if isinstance(action, SetFocusedSurfaceAction):
+        return TextualCliState(
+            theme_name=state.theme_name,
+            workspace_view=state.workspace_view,
+            current_view=state.current_view,
+            right_panel_visible=state.right_panel_visible,
+            focused_surface_id=str(action.surface_id) if action.surface_id else None,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
             engine=state.engine,
         )
     if isinstance(action, ToggleRightPanelAction):
@@ -232,6 +420,54 @@ def reduce_textual_cli_state(state: TextualCliState, action: TextualCliAction) -
             workspace_view=state.workspace_view,
             current_view=state.current_view,
             right_panel_visible=not state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
+            engine=state.engine,
+        )
+    if isinstance(action, SetHoveredBlockAction):
+        return TextualCliState(
+            theme_name=state.theme_name,
+            workspace_view=state.workspace_view,
+            current_view=state.current_view,
+            right_panel_visible=state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=str(action.block_ref) if action.block_ref else None,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=state.expanded_block_refs,
+            engine=state.engine,
+        )
+    if isinstance(action, SetSelectedSurfaceBlockAction):
+        selected_map = dict(state.selected_surface_block_indices)
+        selected_map[str(action.surface_id)] = int(action.block_index)
+        return TextualCliState(
+            theme_name=state.theme_name,
+            workspace_view=state.workspace_view,
+            current_view=state.current_view,
+            right_panel_visible=state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=tuple(sorted(selected_map.items())),
+            expanded_block_refs=state.expanded_block_refs,
+            engine=state.engine,
+        )
+    if isinstance(action, ToggleExpandedBlockAction):
+        block_ref = make_surface_block_ref(str(action.surface_id), int(action.block_index))
+        expanded_block_refs = set(state.expanded_block_refs)
+        if block_ref in expanded_block_refs:
+            expanded_block_refs.remove(block_ref)
+        else:
+            expanded_block_refs.add(block_ref)
+        return TextualCliState(
+            theme_name=state.theme_name,
+            workspace_view=state.workspace_view,
+            current_view=state.current_view,
+            right_panel_visible=state.right_panel_visible,
+            focused_surface_id=state.focused_surface_id,
+            hovered_block_ref=state.hovered_block_ref,
+            selected_surface_block_indices=state.selected_surface_block_indices,
+            expanded_block_refs=tuple(sorted(expanded_block_refs)),
             engine=state.engine,
         )
     return state
@@ -259,6 +495,7 @@ def reduce_textual_runtime_state(
             active_modal_title=state.active_modal_title,
             pending_input_request=state.pending_input_request,
             live_run_events=state.live_run_events,
+            output_blocks=state.output_blocks,
             output_lines=state.output_lines,
             trimmed_output_line_count=state.trimmed_output_line_count,
             last_assistant_response=state.last_assistant_response,
@@ -272,6 +509,7 @@ def reduce_textual_runtime_state(
             active_modal_title=state.active_modal_title,
             pending_input_request=state.pending_input_request,
             live_run_events=state.live_run_events,
+            output_blocks=state.output_blocks,
             output_lines=state.output_lines,
             trimmed_output_line_count=state.trimmed_output_line_count,
             last_assistant_response=state.last_assistant_response,
@@ -285,6 +523,7 @@ def reduce_textual_runtime_state(
             active_modal_title=str(action.modal_title) if action.modal_title else None,
             pending_input_request=state.pending_input_request,
             live_run_events=state.live_run_events,
+            output_blocks=state.output_blocks,
             output_lines=state.output_lines,
             trimmed_output_line_count=state.trimmed_output_line_count,
             last_assistant_response=state.last_assistant_response,
@@ -298,6 +537,7 @@ def reduce_textual_runtime_state(
             active_modal_title=None,
             pending_input_request=state.pending_input_request,
             live_run_events=state.live_run_events,
+            output_blocks=state.output_blocks,
             output_lines=state.output_lines,
             trimmed_output_line_count=state.trimmed_output_line_count,
             last_assistant_response=state.last_assistant_response,
@@ -315,6 +555,7 @@ def reduce_textual_runtime_state(
                 else None
             ),
             live_run_events=state.live_run_events,
+            output_blocks=state.output_blocks,
             output_lines=state.output_lines,
             trimmed_output_line_count=state.trimmed_output_line_count,
             last_assistant_response=state.last_assistant_response,
@@ -329,32 +570,26 @@ def reduce_textual_runtime_state(
             active_modal_title=state.active_modal_title,
             pending_input_request=state.pending_input_request,
             live_run_events=next_events,
+            output_blocks=state.output_blocks,
             output_lines=state.output_lines,
             trimmed_output_line_count=state.trimmed_output_line_count,
             last_assistant_response=state.last_assistant_response,
             main_input_placeholder=state.main_input_placeholder,
         )
+    if isinstance(action, AppendOutputBlockAction):
+        return _append_output_state(
+            state,
+            block=action.block,
+            plain_text=action.plain_text,
+            assistant_response=action.assistant_response,
+            include_in_transcript=action.include_in_transcript,
+        )
     if isinstance(action, AppendConsoleLineAction):
-        trimmed_lines, trimmed_now = _trim_output_lines(
-            list((*state.output_lines, str(action.line))),
-            MAX_OUTPUT_LINES,
-        )
-        assistant_response = (
-            str(action.assistant_response)
-            if action.assistant_response is not None
-            else state.last_assistant_response
-        )
-        return TextualRuntimeState(
-            busy=state.busy,
-            run_status=state.run_status,
-            active_modal_kind=state.active_modal_kind,
-            active_modal_title=state.active_modal_title,
-            pending_input_request=state.pending_input_request,
-            live_run_events=state.live_run_events,
-            output_lines=tuple(trimmed_lines),
-            trimmed_output_line_count=state.trimmed_output_line_count + trimmed_now,
-            last_assistant_response=assistant_response,
-            main_input_placeholder=state.main_input_placeholder,
+        return _append_output_state(
+            state,
+            block=_infer_output_block_from_line(str(action.line)),
+            plain_text=str(action.line),
+            assistant_response=action.assistant_response,
         )
     if isinstance(action, ClearConsoleAction):
         return TextualRuntimeState(
@@ -364,6 +599,7 @@ def reduce_textual_runtime_state(
             active_modal_title=state.active_modal_title,
             pending_input_request=state.pending_input_request,
             live_run_events=state.live_run_events,
+            output_blocks=(),
             output_lines=(),
             trimmed_output_line_count=0,
             last_assistant_response="",
@@ -378,6 +614,7 @@ def reduce_textual_runtime_state(
             active_modal_title=state.active_modal_title,
             pending_input_request=state.pending_input_request,
             live_run_events=state.live_run_events,
+            output_blocks=state.output_blocks,
             output_lines=state.output_lines,
             trimmed_output_line_count=state.trimmed_output_line_count,
             last_assistant_response=state.last_assistant_response,

@@ -25,3 +25,6 @@ Use these canonical docs:
 - `docs/configuration.md` for workspace paths and config structure
 - `docs/cli.md` for the command and Textual UI surface
 - `docs/pocketflow_agents.md` for the flow versus profile model
+
+--- 
+NEVER EVER keep api keys outside the .env file, but use environment variables and substitution or templating instead
