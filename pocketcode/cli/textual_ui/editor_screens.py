@@ -11,6 +11,19 @@ from textual.widgets import Button, Input, Select, Static, TextArea
 from .shared import THEME_OPTIONS, UNSET_OPTION, WORKSPACE_MODES
 
 
+def _normalize_agent_select_value(value: str | None, available_agents: Iterable[str]) -> str:
+    option_values = {str(name) for name in available_agents}
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return UNSET_OPTION
+    if clean_value in option_values:
+        return clean_value
+    canonical_value = clean_value.replace("::", ".")
+    if canonical_value in option_values:
+        return canonical_value
+    return UNSET_OPTION
+
+
 class ToolPolicyEditorScreen(ModalScreen[dict[str, str] | None]):
     BINDINGS = [
         Binding("escape", "cancel", "Close", show=False),
@@ -304,10 +317,10 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
         super().__init__()
         self._theme_name = str(theme_name)
         self._workspace_mode = str(workspace_mode)
-        self._default_agent = str(default_agent) if default_agent else UNSET_OPTION
-        self._default_llm_profile = str(default_llm_profile) if default_llm_profile else UNSET_OPTION
         self._available_agents = tuple(str(name) for name in available_agents)
         self._available_llm_profiles = tuple(str(name) for name in available_llm_profiles)
+        self._default_agent = _normalize_agent_select_value(default_agent, self._available_agents)
+        self._default_llm_profile = str(default_llm_profile) if default_llm_profile else UNSET_OPTION
 
     def compose(self) -> ComposeResult:
         with Vertical(id="system-settings-modal"):

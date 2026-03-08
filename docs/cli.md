@@ -643,6 +643,8 @@ Current values returned are:
 
 `save_system_settings()` writes these values back into the runtime and LLM sections of `pocketcode.yml`, then reloads LLM runtime state.
 
+When the Textual system-settings editor opens, it normalizes legacy `plugin::resource` agent ids from config to the registry's canonical `plugin.resource` form so older saved defaults continue to load without crashing the agent select widget.
+
 ## Output Model
 
 The basic CLI writes directly to stdout.

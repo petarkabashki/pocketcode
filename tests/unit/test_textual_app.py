@@ -21,7 +21,7 @@ from pocketcode.cli.textual_app import (
     _build_view_title_text,
     _trim_output_lines,
 )
-from textual.widgets import Input, SelectionList, Static, TextArea
+from textual.widgets import Input, Select, SelectionList, Static, TextArea
 
 
 class TestTopStatsText:
@@ -1011,6 +1011,40 @@ class TestTextualSelectStability:
                 await pilot.pause(0.1)
 
                 assert isinstance(app.screen, SystemSettingsScreen)
+
+        asyncio.run(exercise())
+
+    def test_f6_system_settings_normalizes_legacy_agent_alias(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.list_agents = lambda: ["core.react", "workspace.review"]
+            engine.get_system_settings = lambda: {
+                "theme_name": "ocean",
+                "workspace_mode": "balanced",
+                "default_agent": "core::react",
+                "default_llm_profile": "fast",
+            }
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                await pilot.press("f6")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("system_settings")
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("open")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, SystemSettingsScreen)
+                assert app.screen.query_one("#system-default-agent-select", Select).value == "core.react"
 
         asyncio.run(exercise())
 

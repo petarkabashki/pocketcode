@@ -35,7 +35,7 @@ llm:
   default_profile: gemini-3.1-pro-preview
 runtime:
   log_level: INFO
-  default_agent: core::react
+  default_agent: core.react
   llm_overrides:
     agents: {}
     nodes: {}
@@ -48,7 +48,8 @@ runtime:
   auto_confirm_tools: false
   tool_confirmation:
     default_policy: confirm
-    tool_policies: {}
+    tool_policies:
+      core.ask_user_checklist: allow
     agent_policies: {}
   textual:
     last_used:
@@ -67,6 +68,6 @@ runtime:
           - core.select_filesystem_entry
           - core.stage_text_replace
       active_profile: my-react
-      skills:
-      - pocketcode-profiles-prompts
       global_llm_profile: gemini-3-flash-preview
+    theme_name: forest
+    workspace_mode: control_desk
