@@ -70,6 +70,7 @@ class TextualAppInteractionMixin:
                 command_output, should_exit = await asyncio.to_thread(self._run_command_capture, text)
                 if command_output:
                     self._write_info(command_output)
+                self._drain_queued_textual_actions()
                 if should_exit:
                     self.exit()
                     return
@@ -110,10 +111,8 @@ class TextualAppInteractionMixin:
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
-        if button_id == "view-control-button":
-            self.action_view_control()
-        elif button_id == "view-run-button":
-            self.action_view_run()
+        if button_id == "open-view-button":
+            self.action_pick_view()
         elif button_id == "control-center-button":
             self.action_pick_asset()
         elif button_id in {"edit-asset-button", "edit-asset-button-secondary"}:
@@ -122,8 +121,6 @@ class TextualAppInteractionMixin:
             self.action_clone_asset()
         elif button_id == "reload-button":
             self.action_reload_runtime()
-        elif button_id == "goto-chat-button":
-            self.action_view_chat()
         elif button_id == "inspector-skill-save-button":
             self._save_inspector_skill_selection()
         elif button_id == "inspector-tool-save-button":
@@ -141,8 +138,8 @@ class TextualAppInteractionMixin:
         if value == LOADING_OPTION:
             return
         try:
-            if widget_id == "workspace-mode-select":
-                self._apply_workspace_mode_selection(value)
+            if widget_id == "workspace-view-select":
+                self._apply_workspace_view_selection(value)
             elif widget_id == "theme-select":
                 self._apply_theme_selection(value)
             elif widget_id == "profile-select":
@@ -285,17 +282,8 @@ class TextualAppInteractionMixin:
             self._refresh_suggestions()
             self._sync_ui_from_engine()
 
-    def action_view_chat(self) -> None:
-        self._current_view = "chat"
-        self._refresh_ui()
-
-    def action_view_control(self) -> None:
-        self._current_view = "control"
-        self._refresh_ui()
-
-    def action_view_run(self) -> None:
-        self._current_view = "run"
-        self._refresh_ui()
+    def action_pick_view(self) -> None:
+        self._open_view_picker()
 
     def action_edit_asset(self) -> None:
         self._open_edit_asset_picker()
@@ -308,7 +296,7 @@ class TextualAppInteractionMixin:
 
     def action_toggle_right_panel(self) -> None:
         self._show_right_panel = not self._show_right_panel
-        self._workspace_mode = "balanced"
+        self._workspace_view = "balanced"
         self._write_info(f"Inspector panel {'shown' if self._show_right_panel else 'hidden'}.")
         self._refresh_ui()
 

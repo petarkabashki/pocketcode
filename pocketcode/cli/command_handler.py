@@ -8,7 +8,16 @@ from pocketcode.core.engine import PocketCodeEngine
 
 logger = logging.getLogger(__name__)
 
-TEXTUAL_ONLY_COMMANDS = {"/copy", "/copy-all"}
+TEXTUAL_ONLY_COMMANDS = {"/copy", "/copy-all", "/view"}
+TEXTUAL_VIEWS = ("chat", "control", "run")
+TEXTUAL_COMMAND_SUGGESTIONS = [
+    "/view",
+    "/view list",
+    "/view show",
+    "/view switch chat",
+    "/view switch control",
+    "/view switch run",
+]
 
 BASE_COMMAND_SUGGESTIONS = [
     "/help",
@@ -176,12 +185,58 @@ def _handle_interface_specific_command(command: str, interface_name: str) -> Opt
     return None
 
 
-def list_command_suggestions(engine: PocketCodeEngine) -> list[str]:
+def _handle_view_command(args: list[str], cli_context: Dict[str, Any], interface_name: str) -> Optional[str]:
+    if interface_name != "textual":
+        return _handle_interface_specific_command("/view", interface_name)
+
+    open_picker = cli_context.get("textual_open_view_picker") if isinstance(cli_context, dict) else None
+    set_view = cli_context.get("textual_set_view") if isinstance(cli_context, dict) else None
+    get_view = cli_context.get("textual_get_current_view") if isinstance(cli_context, dict) else None
+
+    if not args:
+        if callable(open_picker):
+            open_picker()
+            print("Opened the view selector.")
+        else:
+            print("Textual view selector is unavailable.")
+        return None
+
+    subcommand = args[0].lower()
+    current_view = str(get_view() or "") if callable(get_view) else ""
+
+    if subcommand in {"list", "ls"}:
+        print("Available views:")
+        for view_name in TEXTUAL_VIEWS:
+            marker = "*" if view_name == current_view else " "
+            print(f"  {marker} {view_name}")
+        return None
+
+    if subcommand in {"show", "current"}:
+        print(f"Current view: {current_view or 'unknown'}")
+        return None
+
+    target_view = args[1].lower() if subcommand in {"switch", "go"} and len(args) > 1 else subcommand
+    if target_view not in TEXTUAL_VIEWS:
+        print("Usage: /view [list|show|switch <chat|control|run>]")
+        return None
+    if not callable(set_view):
+        print("Textual view switching is unavailable.")
+        return None
+
+    set_view(target_view, announce=True)
+    print(f"View selected: {target_view}")
+    return None
+
+
+def list_command_suggestions(engine: PocketCodeEngine, interface_name: str | None = None) -> list[str]:
     flow_names = _list_flow_names(engine)
     agent_names = _list_agent_names(engine)
+    suggestions = list(BASE_COMMAND_SUGGESTIONS)
+    if str(interface_name or "").strip().lower() == "textual":
+        suggestions += TEXTUAL_COMMAND_SUGGESTIONS
     return sorted(
         set(
-            BASE_COMMAND_SUGGESTIONS
+            suggestions
             + flow_names
             + agent_names
             + (engine.list_modes() if hasattr(engine, "list_modes") else [])
@@ -208,6 +263,9 @@ def handle_command(
     command = _normalize_command(parts[0].lower())
     args = parts[1:]
     interface_name = _get_interface_name(cli_context)
+
+    if command == "/view":
+        return _handle_view_command(args, cli_context, interface_name)
 
     if command in TEXTUAL_ONLY_COMMANDS:
         return _handle_interface_specific_command(command, interface_name)
@@ -844,15 +902,15 @@ Shortcut aliases:
 Textual-only commands:
   /copy                         Copy last assistant response.
   /copy-all                     Copy full response console output.
+  /view [cmd]                   Open or control the Textual view selector.
 
 Textual UI shortcuts:
   Tab                           Complete current prompt input.
-  F1 / F5                       Switch Chat / Run views.
+  F5                            Open the global view selector (Chat, Control, Run).
   F3                            Open the popup edit selector (agent, mode, LLM, tools, tool policies).
   F4                            Open the popup clone selector (agent, mode, LLM).
   F6                            Open the Control Center (agent, mode, LLM, skills, tools, policies, presets, confirm, system settings).
   F10                           Toggle the right inspector panel.
-  Alt+1 / Alt+2 / Alt+5         Switch Chat / Control / Run views.
   Ctrl+Shift+A                  Copy full response console output.
   Ctrl+Y                        Copy last assistant response.
   Ctrl+Q                        Quit Textual UI.

@@ -63,7 +63,7 @@ runtime:
       - pocketcode-workspace-builder
       - pocketcode-graph-authoring
     theme_name: forest
-    workspace_mode: control_desk
+    workspace_view: control_desk
     default_skills:
     - pocketcode-plugin-authoring
     - pocketcode-profiles-prompts

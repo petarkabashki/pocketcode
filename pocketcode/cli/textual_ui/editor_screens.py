@@ -8,7 +8,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Select, Static, TextArea
 
-from .shared import THEME_OPTIONS, UNSET_OPTION, WORKSPACE_MODES
+from .shared import THEME_OPTIONS, UNSET_OPTION, WORKSPACE_VIEWS
 
 
 def _normalize_agent_select_value(value: str | None, available_agents: Iterable[str]) -> str:
@@ -308,7 +308,7 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
         self,
         *,
         theme_name: str,
-        workspace_mode: str,
+        workspace_view: str,
         default_agent: str | None,
         default_llm_profile: str | None,
         available_agents: Iterable[str],
@@ -316,7 +316,7 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
     ) -> None:
         super().__init__()
         self._theme_name = str(theme_name)
-        self._workspace_mode = str(workspace_mode)
+        self._workspace_view = str(workspace_view)
         self._available_agents = tuple(str(name) for name in available_agents)
         self._available_llm_profiles = tuple(str(name) for name in available_llm_profiles)
         self._default_agent = _normalize_agent_select_value(default_agent, self._available_agents)
@@ -336,12 +336,12 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
                 allow_blank=False,
                 value=self._theme_name,
             )
-            yield Static("Workspace Mode", classes="field-label")
+            yield Static("Workspace View", classes="field-label")
             yield Select(
-                [(item["label"], key) for key, item in WORKSPACE_MODES.items()],
-                id="system-workspace-mode-select",
+                [(item["label"], key) for key, item in WORKSPACE_VIEWS.items()],
+                id="system-workspace-view-select",
                 allow_blank=False,
-                value=self._workspace_mode,
+                value=self._workspace_view,
             )
             yield Static("Default Agent", classes="field-label")
             yield Select(
@@ -373,7 +373,7 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
         self.dismiss(
             {
                 "theme_name": str(self.query_one("#system-theme-select", Select).value),
-                "workspace_mode": str(self.query_one("#system-workspace-mode-select", Select).value),
+                "workspace_view": str(self.query_one("#system-workspace-view-select", Select).value),
                 "default_agent": None if str(default_agent) == UNSET_OPTION else str(default_agent),
                 "default_llm_profile": None if str(default_llm_profile) == UNSET_OPTION else str(default_llm_profile),
             }

@@ -156,6 +156,43 @@ class TestTextualOutputRendering:
         asyncio.run(exercise())
 
 
+class TestTextualViewSwitching:
+    def test_view_picker_opens_selector_screen(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.action_pick_view()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                assert app.screen._title == "Select View"
+
+        asyncio.run(exercise())
+
+    def test_slash_view_command_switches_current_view(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}, "interface": "textual"},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await app._handle_main_input("/view switch run")
+                await pilot.pause(0.05)
+
+                assert app._current_view == "run"
+
+        asyncio.run(exercise())
+
+
 class TestTextualInteractionRequests:
     def test_pending_button_interaction_accepts_scope_value(self):
         async def exercise() -> None:
@@ -522,16 +559,16 @@ class _TextualEngineStub:
     def get_system_settings(self):
         return {
             "theme_name": "ocean",
-            "workspace_mode": "balanced",
+            "workspace_view": "balanced",
             "default_agent": "a",
             "default_llm_profile": "fast",
         }
 
-    def save_system_settings(self, *, theme_name, workspace_mode, default_agent, default_llm_profile):
+    def save_system_settings(self, *, theme_name, workspace_view, default_agent, default_llm_profile):
         self.save_system_settings_calls.append(
             {
                 "theme_name": theme_name,
-                "workspace_mode": workspace_mode,
+                "workspace_view": workspace_view,
                 "default_agent": default_agent,
                 "default_llm_profile": default_llm_profile,
             }
@@ -1068,7 +1105,7 @@ class TestTextualSelectStability:
             engine.list_agents = lambda: ["core.react", "workspace.review"]
             engine.get_system_settings = lambda: {
                 "theme_name": "ocean",
-                "workspace_mode": "balanced",
+                "workspace_view": "balanced",
                 "default_agent": "core::react",
                 "default_llm_profile": "fast",
             }
@@ -1632,7 +1669,7 @@ class TestProfileCloneAndSave:
                 app._apply_system_settings(
                     {
                         "theme_name": "forest",
-                        "workspace_mode": "review",
+                        "workspace_view": "review",
                         "default_agent": "b",
                         "default_llm_profile": "smart",
                     }
@@ -1642,7 +1679,7 @@ class TestProfileCloneAndSave:
                 assert engine.save_system_settings_calls == [
                     {
                         "theme_name": "forest",
-                        "workspace_mode": "review",
+                        "workspace_view": "review",
                         "default_agent": "b",
                         "default_llm_profile": "smart",
                     }

@@ -167,6 +167,7 @@ Textual-only commands:
 
 - `/copy`: copy the last assistant response
 - `/copy-all`: copy the full response console output
+- `/view`: open the popup view selector, or run `/view list|show|switch <chat|control|run>`
 
 Textual-only commands are intentionally excluded from universal `/help` output and shared prompt suggestions.
 
@@ -190,12 +191,11 @@ Listing behavior:
 Textual keyboard shortcuts:
 
 - `Tab`: complete current prompt input
-- `F1`, `F2`, `F5`: switch `Chat`, `Control`, and `Run` views
+- `F5`: open the global view selector for `Chat`, `Control`, and `Run`
 - `F3`: open the asset editor picker
 - `F4`: open the asset clone picker
-- `F6`: open the popup asset picker for active flow, agent profile, LLM override, workspace mode, theme, and session confirmation; use arrow keys plus `Enter` to choose
+- `F6`: open the popup asset picker for active flow, agent profile, LLM override, workspace view, theme, and session confirmation; use arrow keys plus `Enter` to choose
 - `F10`: toggle the right inspector panel
-- `Alt+1`, `Alt+2`, `Alt+5`: fallback view switching
 - `Ctrl+R`: reload runtime
 - `Ctrl+L`: clear output
 - `Ctrl+Shift+A`: copy full response console output
@@ -206,7 +206,7 @@ Textual keyboard shortcuts:
 Interactive workspace views:
 
 - `Chat`: conversation and command entry
-- `Control`: runtime/session selectors and toggles for workspace mode, theme, active agent profile, global LLM override, and session confirmation
+- `Control`: runtime/session selectors and toggles for workspace view, theme, active agent profile, global LLM override, and session confirmation
 - `Control`: includes popup pickers for profile, LLM, skills, tools, tool policies, session confirmation, and system settings
 - top header chips mirror the current `Agent` and `LLM` selection
 - `Control` selectors apply only to live user selections; placeholder values used during refresh are ignored so flow/agent cycling does not re-enter itself

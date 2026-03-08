@@ -14,21 +14,17 @@ from pocketcode.cli.command_handler import list_command_suggestions
 from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.core.run_handle import RunHandle
 
-from .shared import INHERIT_POLICY, LOADING_OPTION, THEME_OPTIONS, TextualUIState, WORKSPACE_MODES
+from .shared import INHERIT_POLICY, LOADING_OPTION, THEME_OPTIONS, TextualUIState, WORKSPACE_VIEWS
 
 
 class TextualAppBase(App[None]):
     BINDINGS = [
         Binding("tab", "complete_input", "Complete Input", priority=True),
-        Binding("f1", "view_chat", "Chat", priority=True),
         Binding("f3", "edit_asset", "Edit", priority=True),
         Binding("f4", "clone_asset", "Clone", priority=True),
-        Binding("f5", "view_run", "Run", priority=True),
+        Binding("f5", "pick_view", "Views", priority=True),
         Binding("f6", "pick_asset", "Control", priority=True),
         Binding("f10", "toggle_right_panel", "Toggle Inspector"),
-        Binding("alt+1", "view_chat", "Chat", show=False),
-        Binding("alt+2", "view_control", "Control", show=False),
-        Binding("alt+5", "view_run", "Run", show=False),
         Binding("ctrl+shift+a", "copy_output", "Copy Output"),
         Binding("ctrl+y", "copy_last_response", "Copy Last"),
         Binding("ctrl+r", "reload_runtime", "Reload"),
@@ -363,7 +359,7 @@ class TextualAppBase(App[None]):
             if hasattr(engine, "get_system_settings")
             else {
                 "theme_name": "ocean",
-                "workspace_mode": "balanced",
+                "workspace_view": "balanced",
                 "default_agent": None,
                 "default_llm_profile": None,
             }
@@ -376,11 +372,14 @@ class TextualAppBase(App[None]):
         self._show_right_panel = True
         self._current_view = "chat"
         self._theme_name = str(system_settings.get("theme_name") or "ocean")
-        self._workspace_mode = str(system_settings.get("workspace_mode") or "balanced")
+        self._workspace_view = str(
+            system_settings.get("workspace_view") or system_settings.get("workspace_mode") or "balanced"
+        )
         self._output_lines: list[str] = []
         self._trimmed_output_line_count = 0
         self._last_assistant_response: str = ""
         self._suggestions: list[str] = []
+        self._queued_textual_actions: list[tuple[Any, ...]] = []
         self._profile_list_names: list[str] = []
         self._syncing_controls = False
         self._select_state_cache: dict[str, tuple[tuple[tuple[str, str], ...], str]] = {}
@@ -388,7 +387,11 @@ class TextualAppBase(App[None]):
         self._option_list_state_cache: dict[str, tuple[str, ...]] = {}
         self._selection_list_state_cache: dict[str, tuple[tuple[str, str, bool], ...]] = {}
         self._ui_state: TextualUIState | None = None
-        self._apply_workspace_mode(self._workspace_mode, announce=False)
+        if isinstance(self._cli_context, dict):
+            self._cli_context["textual_open_view_picker"] = self._queue_open_view_picker
+            self._cli_context["textual_set_view"] = self._queue_set_view
+            self._cli_context["textual_get_current_view"] = lambda: self._current_view
+        self._apply_workspace_view(self._workspace_view, announce=False)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="workspace"):
@@ -399,12 +402,12 @@ class TextualAppBase(App[None]):
                         yield TextArea("", id="output", read_only=True)
                     with VerticalScroll(id="view-control", classes="view view-scroll"):
                         yield Static("Runtime controls apply immediately.", classes="hint")
-                        yield Static("Workspace Mode", classes="field-label")
+                        yield Static("Workspace View", classes="field-label")
                         yield Select(
-                            [(item["label"], key) for key, item in WORKSPACE_MODES.items()],
-                            id="workspace-mode-select",
+                            [(item["label"], key) for key, item in WORKSPACE_VIEWS.items()],
+                            id="workspace-view-select",
                             allow_blank=False,
-                            value=self._workspace_mode,
+                            value=self._workspace_view,
                         )
                         yield Static("Theme Preset", classes="field-label")
                         yield Select(
@@ -431,15 +434,15 @@ class TextualAppBase(App[None]):
                         yield Static("Auto-Confirm Tools", classes="field-label")
                         yield Switch(value=False, id="auto-confirm-switch")
                         with Horizontal(classes="button-row"):
+                            yield Button("Switch View", id="open-view-button", variant="primary")
                             yield Button("Control Center", id="control-center-button", variant="primary")
                             yield Button("Reload Runtime", id="reload-button", variant="primary")
-                            yield Button("Return to Chat", id="goto-chat-button")
                     with VerticalScroll(id="view-run", classes="view view-scroll"):
                         yield Static("Last run summary and effective runtime state.", classes="hint")
                         yield TextArea("", id="run-preview", read_only=True)
                 yield Input(
                     id="main-input",
-                    placeholder="Type a request or /command. F1 chat F3 edit F4 clone F5 run F6 control",
+                    placeholder="Type a request or /command. F3 edit F4 clone F5 views F6 control",
                 )
             with VerticalScroll(id="right-panel", classes="view"):
                 yield Static("Inspector", classes="panel-title")
@@ -468,7 +471,24 @@ class TextualAppBase(App[None]):
         self.set_interval(0.1, self._drain_run_events)
         self.query_one("#main-input", Input).focus()
 
+    def _queue_open_view_picker(self) -> None:
+        self._queued_textual_actions.append(("open_view_picker",))
+
+    def _queue_set_view(self, view_name: str, *, announce: bool = False) -> None:
+        self._queued_textual_actions.append(("set_view", view_name, announce))
+
+    def _drain_queued_textual_actions(self) -> None:
+        while self._queued_textual_actions:
+            action = self._queued_textual_actions.pop(0)
+            action_name = str(action[0]) if action else ""
+            if action_name == "open_view_picker":
+                self._open_view_picker()
+            elif action_name == "set_view":
+                _, view_name, announce = action
+                self._set_current_view(str(view_name), announce=bool(announce))
+
     def _refresh_suggestions(self) -> None:
-        words = list_command_suggestions(self._engine)
+        interface_name = self._cli_context.get("interface") if isinstance(self._cli_context, dict) else None
+        words = list_command_suggestions(self._engine, interface_name=interface_name)
         self._suggestions = words
         self.query_one("#main-input", Input).suggester = SuggestFromList(words, case_sensitive=False)

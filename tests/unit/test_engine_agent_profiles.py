@@ -510,7 +510,7 @@ class TestEngineAgentProfiles:
 
         saved_path = engine.save_system_settings(
             theme_name="forest",
-            workspace_mode="review",
+            workspace_view="review",
             default_agent="asker::asker",
             default_llm_profile="fast",
         )
@@ -519,7 +519,7 @@ class TestEngineAgentProfiles:
         assert saved["runtime"]["default_agent"] == "asker::asker"
         assert saved["runtime"]["textual"] == {
             "theme_name": "forest",
-            "workspace_mode": "review",
+            "workspace_view": "review",
         }
         assert saved["llm"]["default_profile"] == "fast"
 
@@ -563,7 +563,7 @@ class TestEngineAgentProfiles:
 
         saved_path = engine.save_system_settings(
             theme_name="forest",
-            workspace_mode="review",
+            workspace_view="review",
             default_agent="core::react",
             default_llm_profile="fast",
         )

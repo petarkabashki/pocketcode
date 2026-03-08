@@ -479,7 +479,7 @@ Core state owned by the app includes:
 - the engine and shared CLI context
 - the current view (`chat`, `control`, or `run`)
 - right-panel visibility
-- theme name and workspace mode
+- theme name and workspace view
 - active run handle
 - pending interaction request
 - live run status and recent run events
@@ -499,7 +499,7 @@ The app renders:
 The content switcher exposes three views:
 
 - `chat`: read-only output console
-- `control`: immediate runtime controls such as workspace mode, theme, active profile, LLM, session confirm default, and auto-confirm switch
+- `control`: immediate runtime controls such as workspace view, theme, active profile, LLM, session confirm default, and auto-confirm switch
 - `run`: a structured preview of the last run summary and current live-run state
 
 The right inspector panel shows:
@@ -523,7 +523,7 @@ Inspector selector behavior:
 
 The F6 Control Center includes a `Sessions` category that can start a fresh session, resume saved history, delete a saved non-active session, or clear all previous sessions while keeping the active session.
 
-### Themes And Workspace Modes
+### Themes And Workspace Views
 
 Built-in themes are:
 
@@ -531,7 +531,7 @@ Built-in themes are:
 - `forest`
 - `ember`
 
-Built-in workspace modes are:
+Built-in workspace views are:
 
 - `balanced`
 - `chat_focus`
@@ -539,22 +539,18 @@ Built-in workspace modes are:
 - `minimal`
 - `review`
 
-Workspace mode changes both the default view and whether the right inspector panel is visible.
+Workspace view changes both the default content view and whether the right inspector panel is visible.
 
 ### Keyboard Shortcuts
 
 Current bindings are:
 
 - `Tab`: complete the current input from the suggestion list
-- `F1`: switch to chat view
 - `F3`: open the edit asset picker
 - `F4`: open the clone asset picker
-- `F5`: switch to run view
+- `F5`: open the global view selector for `chat`, `control`, and `run`
 - `F6`: open the main asset/control picker
 - `F10`: toggle the right inspector panel
-- `Alt+1`: switch to chat view
-- `Alt+2`: switch to control view
-- `Alt+5`: switch to run view
 - `Ctrl+Shift+A`: copy full output buffer
 - `Ctrl+Y`: copy the last assistant response
 - `Ctrl+R`: reload runtime
@@ -569,6 +565,8 @@ These commands are available only from the Textual input box:
 
 - `/copy`: copy the last assistant response to the clipboard
 - `/copy-all`: copy the full visible console output to the clipboard
+- `/view`: open the popup view selector
+- `/view list|show|switch <chat|control|run>`: inspect or change the active Textual view
 
 Outside the Textual interface, the shared command layer prints a message explaining that these commands are UI-only.
 
@@ -604,7 +602,7 @@ Current capabilities implemented across `pocketcode/cli/textual_ui/` include:
 - selecting the active agent profile
 - selecting a mode
 - selecting a global LLM override
-- selecting a workspace mode
+- selecting a workspace view
 - toggling skills, including grouped skill toggles
 - editing allowed tools for a profile, including selectable groups and subgroups
 - editing per-tool confirmation policy
@@ -622,7 +620,7 @@ The Textual UI persists both defaults and last-used selections into `runtime.tex
 Persisted settings currently include:
 
 - `theme_name`
-- `workspace_mode`
+- `workspace_view`
 - `default_skills`
 - `selection_presets`
 - `last_used.active_profile`
@@ -649,7 +647,7 @@ Important behavior:
 Current values returned are:
 
 - `theme_name`
-- `workspace_mode`
+- `workspace_view`
 - `default_agent`
 - `default_llm_profile`
 

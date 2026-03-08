@@ -12,6 +12,20 @@ INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
 MAX_OUTPUT_LINES = 400
 SKILL_GROUP_PREFIX = "__skill_group__:"
+TEXTUAL_VIEWS = {
+    "chat": {
+        "label": "Chat",
+        "description": "Output console and conversation history",
+    },
+    "control": {
+        "label": "Control",
+        "description": "Runtime controls and Textual workspace settings",
+    },
+    "run": {
+        "label": "Run",
+        "description": "Run inspector and effective runtime state",
+    },
+}
 VIEW_TITLES = {
     "control": "Control Center",
     "run": "Run Inspector",
@@ -21,7 +35,7 @@ THEME_OPTIONS = {
     "forest": "Forest",
     "ember": "Ember",
 }
-WORKSPACE_MODES = {
+WORKSPACE_VIEWS = {
     "balanced": {"label": "Balanced", "view": "chat", "right": True},
     "chat_focus": {"label": "Chat Focus", "view": "chat", "right": True},
     "control_desk": {"label": "Control Desk", "view": "control", "right": True},
@@ -161,7 +175,7 @@ class TextualUIState:
     header_agent_text: str
     header_llm_text: str
     view_title_text: str
-    workspace_mode_select: SelectViewState
+    workspace_view_select: SelectViewState
     theme_select: SelectViewState
     profile_select: SelectViewState
     llm_select: SelectViewState

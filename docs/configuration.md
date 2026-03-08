@@ -109,10 +109,12 @@ The `runtime.textual` section stores both defaults and last-used runtime state.
 Common keys include:
 
 - `theme_name`
-- `workspace_mode`
+- `workspace_view`
 - `default_skills`
 - `selection_presets`
 - `last_used`
+
+The engine still reads legacy `workspace_mode` values from older configs, but `workspace_view` is the canonical persisted key.
 
 `last_used` can persist:
 

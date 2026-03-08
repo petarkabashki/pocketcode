@@ -229,7 +229,7 @@ class PocketCodeEngine:
             textual_config = {}
         return {
             "theme_name": str(textual_config.get("theme_name") or "ocean"),
-            "workspace_mode": str(textual_config.get("workspace_mode") or "balanced"),
+            "workspace_view": str(textual_config.get("workspace_view") or textual_config.get("workspace_mode") or "balanced"),
             "default_agent": self._normalize_agent_name(self._runtime_config.get("default_agent")),
             "default_llm_profile": self._llm_config.get("default_profile"),
         }
@@ -263,7 +263,7 @@ class PocketCodeEngine:
         self,
         *,
         theme_name: str,
-        workspace_mode: str,
+        workspace_view: str,
         default_agent: Optional[str],
         default_llm_profile: Optional[str],
     ) -> Path:
@@ -292,7 +292,8 @@ class PocketCodeEngine:
         if not isinstance(textual_section, dict):
             textual_section = {}
         textual_section["theme_name"] = str(theme_name)
-        textual_section["workspace_mode"] = str(workspace_mode)
+        textual_section["workspace_view"] = str(workspace_view)
+        textual_section.pop("workspace_mode", None)
         runtime_section["textual"] = textual_section
 
         if default_llm_profile:

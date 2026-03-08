@@ -21,9 +21,10 @@ from .shared import (
     PickerOption,
     SKILL_GROUP_PREFIX,
     SelectViewState,
+    TEXTUAL_VIEWS,
     THEME_OPTIONS,
     TextualUIState,
-    WORKSPACE_MODES,
+    WORKSPACE_VIEWS,
     _build_header_agent_text,
     _build_header_llm_text,
     _build_output_text,
@@ -205,9 +206,9 @@ class TextualAppRenderingMixin:
             header_agent_text=_build_header_agent_text(status_for_display),
             header_llm_text=_build_header_llm_text(status_for_display),
             view_title_text=_build_view_title_text(self._current_view),
-            workspace_mode_select=SelectViewState(
-                options=tuple((item["label"], key) for key, item in WORKSPACE_MODES.items()),
-                value=self._workspace_mode,
+            workspace_view_select=SelectViewState(
+                options=tuple((item["label"], key) for key, item in WORKSPACE_VIEWS.items()),
+                value=self._workspace_view,
             ),
             theme_select=SelectViewState(
                 options=tuple((label, key) for key, label in THEME_OPTIONS.items()),
@@ -277,9 +278,9 @@ class TextualAppRenderingMixin:
         self._syncing_controls = True
         try:
             self._set_select_options(
-                self.query_one("#workspace-mode-select", Select),
-                state.workspace_mode_select.options,
-                state.workspace_mode_select.value,
+                self.query_one("#workspace-view-select", Select),
+                state.workspace_view_select.options,
+                state.workspace_view_select.value,
             )
             self._set_select_options(
                 self.query_one("#theme-select", Select),
@@ -344,15 +345,26 @@ class TextualAppRenderingMixin:
         self._load_text_area_text(output_widget, text)
         output_widget.scroll_end(animate=False)
 
-    def _apply_workspace_mode(self, mode_name: str, *, announce: bool) -> None:
-        config = WORKSPACE_MODES.get(mode_name)
+    def _set_current_view(self, view_name: str, *, announce: bool = False, refresh: bool = True) -> None:
+        if view_name not in TEXTUAL_VIEWS:
+            raise ValueError(f"Unknown view '{view_name}'. Available: {sorted(TEXTUAL_VIEWS)}")
+        if view_name == self._current_view:
+            return
+        self._current_view = view_name
+        if announce:
+            self._write_info(f"View: {TEXTUAL_VIEWS[view_name]['label']}.")
+        if refresh:
+            self._refresh_ui()
+
+    def _apply_workspace_view(self, view_name: str, *, announce: bool) -> None:
+        config = WORKSPACE_VIEWS.get(view_name)
         if config is None:
             return
-        self._workspace_mode = mode_name
+        self._workspace_view = view_name
         self._show_right_panel = bool(config["right"])
-        self._current_view = str(config["view"])
+        self._set_current_view(str(config["view"]), refresh=False)
         if announce:
-            self._write_info(f"Workspace mode: {config['label']}.")
+            self._write_info(f"Workspace View: {config['label']}.")
 
     def _render_context_preview(self) -> str:
         if not any(self._cli_context.values()):
@@ -596,7 +608,7 @@ class TextualAppRenderingMixin:
 
     def _set_main_input_placeholder(self, prompt: str | None = None) -> None:
         input_widget = self.query_one("#main-input", Input)
-        input_widget.placeholder = prompt or "Type a request or /command. F1 chat F3 edit F4 clone F5 run F6 control"
+        input_widget.placeholder = prompt or "Type a request or /command. F3 edit F4 clone F5 views F6 control"
 
     def _profile_cycle(self) -> list[str]:
         profile_names: list[str] = []

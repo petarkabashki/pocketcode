@@ -88,8 +88,8 @@ class TextualAppControlCenterMixin:
             PickerOption(
                 value="system_settings",
                 label="System Settings",
-                description="Theme, workspace mode, and default agent/LLM saved to pocketcode.yml",
-                search_text="system settings theme workspace mode default agent llm config save",
+                description="Theme, workspace view, and default agent/LLM saved to pocketcode.yml",
+                search_text="system settings theme workspace view default agent llm config save",
             ),
         )
 

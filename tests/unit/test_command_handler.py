@@ -29,6 +29,23 @@ class _EngineStub:
         return []
 
 
+class _ViewCommandRecorder:
+    def __init__(self):
+        self.current_view = "chat"
+        self.opened = 0
+        self.set_calls: list[tuple[str, bool]] = []
+
+    def open_picker(self):
+        self.opened += 1
+
+    def set_view(self, view_name, *, announce=False):
+        self.current_view = view_name
+        self.set_calls.append((view_name, announce))
+
+    def get_view(self):
+        return self.current_view
+
+
 class _SessionCommandEngineStub(_EngineStub):
     def __init__(self):
         self._sessions = [
@@ -303,6 +320,13 @@ class TestCommandHandlerParsing:
         assert "/agent" in suggestions
         assert "/copy" not in suggestions
         assert "/copy-all" not in suggestions
+        assert "/view" not in suggestions
+
+    def test_textual_command_suggestions_include_view_commands(self):
+        suggestions = list_command_suggestions(_EngineStub(), interface_name="textual")
+
+        assert "/view" in suggestions
+        assert "/view switch run" in suggestions
 
     def test_universal_help_excludes_textual_only_commands(self, capsys):
         cli_context = {
@@ -342,6 +366,7 @@ class TestCommandHandlerParsing:
         assert "Textual-only commands:" in captured.out
         assert "/copy" in captured.out
         assert "/copy-all" in captured.out
+        assert "/view" in captured.out
 
     def test_textual_only_command_reports_interface_scope_outside_textual(self, capsys):
         cli_context = {
@@ -360,6 +385,44 @@ class TestCommandHandlerParsing:
 
         captured = capsys.readouterr()
         assert "available only in the Textual UI" in captured.out
+
+    def test_view_command_opens_textual_picker(self, capsys):
+        recorder = _ViewCommandRecorder()
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "textual",
+            "textual_open_view_picker": recorder.open_picker,
+            "textual_set_view": recorder.set_view,
+            "textual_get_current_view": recorder.get_view,
+        }
+
+        handle_command("/view", engine=_EngineStub(), cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert recorder.opened == 1
+        assert "Opened the view selector." in captured.out
+
+    def test_view_switch_command_updates_textual_view(self, capsys):
+        recorder = _ViewCommandRecorder()
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "textual",
+            "textual_open_view_picker": recorder.open_picker,
+            "textual_set_view": recorder.set_view,
+            "textual_get_current_view": recorder.get_view,
+        }
+
+        handle_command("/view switch run", engine=_EngineStub(), cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert recorder.set_calls == [("run", True)]
+        assert "View selected: run" in captured.out
 
     def test_status_output_uses_internal_flow_label(self, capsys):
         cli_context = {
