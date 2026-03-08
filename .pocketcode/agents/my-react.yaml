@@ -8,5 +8,28 @@ skills:
 - pocketcode-tools-runtime
 - pocketcode-workspace-assets
 - pocketcode-workspace-builder
+tools:
+- core.apply_staged_edit
+- core.ask_user_buttons
+- core.ask_user_checklist
+- core.ask_user_input
+- core.ask_user_radio_group
+- core.cancel_staged_edit
+- core.confirm_user_input
+- core.create_directory
+- core.execute_command
+- core.extract_text
+- core.glob_files
+- core.list_files
+- core.read_file
+- core.search_code
+- core.select_filesystem_entry
+- core.stage_text_replace
+- core.write_to_file
+- workspace_context.append_to_context_elephant_store_file
+- workspace_context.check_context_elephant_store_status
+- workspace_context.get_context_elephant_store_summary
+- workspace_context.read_context_elephant_store_file
+- workspace_context.write_context_elephant_store_file
 tool_confirmation:
   default: confirm
