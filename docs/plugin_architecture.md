@@ -235,6 +235,8 @@ Workspace-local shared assets are not declared through plugin manifests.
 - `.pocketcode/prompts/` files are auto-registered under `workspace`
 - `.pocketcode/tools/*.py` modules are auto-discovered and registered under `workspace`
 
+Built-in core tools are separate from these workspace resources. Their canonical implementation lives under `pocketcode/plugins/core/tools/`, while `pocketcode/tools/` is retained as a compatibility import surface.
+
 These are separate from manifest plugin loading, but they join the same global registries.
 
 ## Discovery Controls

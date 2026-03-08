@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from pocketcode.core.interfaces import BaseTool
-from pocketcode.tools.user_input import ConfirmUserInputTool
+from pocketcode.plugins.core.tools import ConfirmUserInputTool
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ try:
     from .system import execute_shell_command
 except ImportError:
     # Fallback for potential execution context issues, adjust as needed
-    from pocketcode.tools.system import execute_shell_command
+    from pocketcode.plugins.core.tools import execute_shell_command
 
 # Import BaseTool
 from pocketcode.core.interfaces import BaseTool

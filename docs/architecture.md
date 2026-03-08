@@ -13,6 +13,14 @@ PocketCoder is a plugin-driven runtime with four distinct layers:
 
 The engine always executes a flow. Agent profiles, modes, and skills modify how that flow is invoked.
 
+Built-in core tools have a single canonical package location:
+
+- `pocketcode/plugins/core/tools/` contains the package-owned implementations and shared exports.
+- `pocketcode/tools/` is a compatibility facade for older imports plus workspace-owned shim exports.
+- `.pocketcode/tools/` remains the workspace-local tool surface registered under `workspace`.
+
+Workspace-owned compatibility shims are loaded through the shared helper in `pocketcode/core/workspace_module_loader.py`.
+
 ## Startup Sequence
 
 Engine construction in `pocketcode.core.engine.PocketCodeEngine` follows this order:

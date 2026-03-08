@@ -927,7 +927,7 @@ class TestModeAndSkillCommands:
 class TestWorkspaceCanonicalToolImports:
     def test_tools_package_exports_workspace_owned_git_class(self):
         from pocketcode.tools import GitStatusTool
-        from pocketcode.tools._workspace_plugin_loader import load_workspace_plugin_module
+        from pocketcode.core.workspace_module_loader import load_workspace_plugin_module
 
         workspace_git = load_workspace_plugin_module(".pocketcode", "plugins", "workspace_git", "tools", "git.py")
 
@@ -936,5 +936,11 @@ class TestWorkspaceCanonicalToolImports:
     def test_legacy_context_shim_resolves_workspace_owned_class(self):
         from pocketcode.tools.context_elephant_store_tools import ReadContextElephantStoreFileTool
         from pocketcode.plugins.core.tools.context_elephant_store_tools import ReadContextElephantStoreFileTool as CoreTool
+        from pocketcode.core.workspace_module_loader import load_workspace_plugin_module
+
+        workspace_context = load_workspace_plugin_module(
+            ".pocketcode", "plugins", "workspace_context", "tools", "context_elephant_store_tools.py"
+        )
 
         assert ReadContextElephantStoreFileTool is CoreTool
+        assert CoreTool is workspace_context.ReadContextElephantStoreFileTool

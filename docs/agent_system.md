@@ -93,6 +93,8 @@ The agent-profile system uses these workspace paths:
 - `.pocketcode/tools/` for shared workspace tools under the `workspace` namespace
 - `.pocketcode/prompts/` for shared workspace prompts and prompt fallback resolution
 
+Built-in core tools are package resources under `pocketcode/plugins/core/tools/`. The older `pocketcode/tools/` package remains available only as a backward-compatible import facade.
+
 ## Workspace LLM Profile Schema
 
 Workspace LLM profiles are stored in `.pocketcode/llm-profiles/<name>.yaml`.

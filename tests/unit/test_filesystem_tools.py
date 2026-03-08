@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pocketcode.plugins.core.tools import filesystem as core_filesystem
 from pocketcode.plugins.core.tools import file_ops as core_file_ops
-from pocketcode.tools._workspace_plugin_loader import load_workspace_plugin_module
+from pocketcode.core.workspace_module_loader import load_workspace_plugin_module
 
 
 architect_filesystem = load_workspace_plugin_module(

@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.core.engine import PocketCodeEngine
+from pocketcode.core.workspace_module_loader import load_workspace_plugin_module
 from pocketcode.config.loader import load_settings
 from pocketflow import Flow
 from pocketcode.tools import GitStatusTool as PublicGitStatusTool
@@ -136,5 +137,9 @@ def test_workspace_builder_profile_is_available_from_engine(monkeypatch):
 
 
 def test_core_tool_import_paths_are_workspace_shims():
+    workspace_context = load_workspace_plugin_module(
+        ".pocketcode", "plugins", "workspace_context", "tools", "context_elephant_store_tools.py"
+    )
+
     assert "workspace_loader" in PublicGitStatusTool.__module__
-    assert "workspace_loader" in CoreReadContextTool.__module__
+    assert CoreReadContextTool is workspace_context.ReadContextElephantStoreFileTool
