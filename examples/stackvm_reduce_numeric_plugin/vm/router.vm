@@ -1,0 +1,31 @@
+[ "score" dict-get? dup none? [ drop 0 ] [ int> ] if ] "item-score" define
+
+[
+  last-tool-result none?
+  [
+    "core.read_file"
+    "{path: reduce_numeric_payload.yaml}" yaml>
+    tool-request
+  ]
+  [
+    last-tool-result failure?
+    [ "Numeric reduce failed: missing tool payload file." answer ]
+    [
+      payload-data "payload" store-set
+      "payload" store-get "items" dict-get? dup none?
+      [ drop "[]" yaml> ]
+      [ ]
+      if
+      [ item-score ]
+      parallel-map
+      0
+      [ + ]
+      reduce
+      dup "normalized.total" shared!? drop
+      str>
+      "numeric total: " swap concat answer
+    ]
+    if
+  ]
+  if
+] "decide" define

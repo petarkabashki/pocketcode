@@ -1,0 +1,15 @@
+[
+  "{kind: radio, prompt: placeholder, options: [{id: concise, label: Concise, value: concise}, {id: detailed, label: Detailed, value: detailed}, {id: blocked, label: Blocked, value: blocked}]}" yaml>
+  dup "prompt" "Choose finalization mode for " "normalized.summary" shared@ concat dict-set
+  prompt-interaction
+  dup "normalized.delegate_choice" shared!? drop
+  dup "concise" =
+  [ drop "{mode: concise, message: concise summary requested}" answer ]
+  [
+    dup "detailed" =
+    [ drop "{mode: detailed, message: detailed summary requested}" answer ]
+    [ drop "{mode: blocked, message: blocked by delegate}" answer ]
+    if
+  ]
+  if
+] "decide" define

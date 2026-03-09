@@ -1,0 +1,1 @@
+[ last-tool-result "content" dict-get yaml> ] "config-data" define

@@ -1,0 +1,9 @@
+[ "item=" swap concat ] "label-item" define
+
+[
+  "[alpha, beta, gamma]" yaml>
+  [ label-item ]
+  parallel-map
+  ", " join
+  "parallel results: " swap concat answer
+] "decide" define

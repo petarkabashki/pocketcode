@@ -1,0 +1,36 @@
+[ "score" dict-get? dup none? [ drop 0 ] [ int> ] if ] "item-score" define
+
+[
+  last-tool-result none?
+  [
+    "core.read_file"
+    "{path: threshold_payload.yaml}" yaml>
+    tool-request
+  ]
+  [
+    last-tool-result failure?
+    [ "Could not load the threshold payload." answer ]
+    [
+      payload-data "payload" store-set
+      "payload" store-get "items" dict-get? dup none?
+      [ drop "[]" yaml> ]
+      [ ]
+      if
+      [ item-score ]
+      parallel-map
+      0
+      [ + ]
+      reduce
+      dup "normalized.total" shared!? drop
+
+      [
+        [ "normalized.total" shared@ 10 >= ] [ "high" "normalized.band" shared! "stackvm_threshold_router_example.high_route" handoff ]
+        [ "normalized.total" shared@ 5 >= ] [ "review" "normalized.band" shared! "stackvm_threshold_router_example.review_route" handoff ]
+        [ True ] [ "low" "normalized.band" shared! "stackvm_threshold_router_example.low_route" handoff ]
+      ]
+      cond
+    ]
+    if
+  ]
+  if
+] "decide" define

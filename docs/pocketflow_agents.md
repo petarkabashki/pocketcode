@@ -55,15 +55,20 @@ flows:
     description: Analyze the current workspace.
 ```
 
-Markdown can also author executable deterministic flows. In that case the Markdown file contributes the flow fields directly, and if it omits `module` and `entry_fn` but includes a supported Mermaid or DOT graph plus a `nodes:` mapping, PocketCoder compiles that graph into a generated PocketFlow `Flow` instance.
+Markdown can also author executable flows directly. In that case the Markdown file contributes the flow fields, and PocketCoder currently supports three execution backends from that one authoring surface:
 
-That generated path is intended for lightweight orchestration and routing. It does not replace handwritten Python factories when you need custom logic, loops with complex side effects, or richer PocketFlow node behavior.
+- Python factory flow via `module` plus `entry_fn`
+- generated graph flow when the file omits `module` and `entry_fn` but includes a supported Mermaid or DOT graph plus a `nodes:` mapping
+- StackVM flow when the file contributes fenced `vm` or `stackvm` blocks, or explicit `vm_*` source fields
+
+The generated-graph path is intended for lightweight orchestration and routing. The StackVM path restores a broader executable flow surface for multi-step orchestration while still running inside the same shared-store and handoff contract. Neither path replaces handwritten Python factories when you need custom logic tightly coupled to Python objects or richer PocketFlow node classes.
 
 ## What A Flow Definition Can Do
 
 A flow definition can supply:
 
 - a PocketFlow `flow_instance`
+- StackVM source metadata such as `vm_source`, `vm_entry`, `vm_module`, and `vm_file`
 - an `llm_profile`
 - a base tool list
 - handoff targets and policies
@@ -188,7 +193,7 @@ For a given flow turn, the effective tool surface is:
 
 ## Programmatic Flow Runtime Helpers
 
-When a PocketFlow `flow_instance` runs, the runtime injects services into the shared store, including:
+When a PocketFlow `flow_instance` or StackVM-backed flow runs, the runtime injects services into the shared store, including:
 
 - `_llm_router`
 - `_tool_runtime`

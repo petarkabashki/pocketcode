@@ -1,0 +1,6 @@
+schema_version: 1
+name: stackvm_tool_normalize_example
+description: Tool-result normalization StackVM example
+flows:
+  normalize:
+    markdown: flows/normalize.md

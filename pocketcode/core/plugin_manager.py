@@ -495,7 +495,10 @@ class PluginManager:
             tools = coerce_str_list(definition.get("tools"))
             handoff_agents = coerce_str_list(definition.get("handoff_agents"))
             composite_agents = coerce_str_list(definition.get("composite_agents"))
-            execution_mode = str(definition.get("execution_mode") or "llm").strip() or "llm"
+            execution_mode = str(
+                definition.get("execution_mode")
+                or ("vm" if any(definition.get(key) for key in ("vm_source", "vm_file", "vm_module", "vm_files", "vm_modules")) else "llm")
+            ).strip() or "llm"
             deterministic_handler = definition.get("deterministic_handler") or definition.get("handler")
             pre_handlers = list(
                 dict.fromkeys(
@@ -527,15 +530,17 @@ class PluginManager:
             if not isinstance(raw_default_handoff_policy, dict):
                 raw_default_handoff_policy = {}
 
-            flow_instance = self._load_agent_flow(
-                module_ref=definition.get("module"),
-                entry_fn_name=definition.get("entry_fn"),
-                plugin_root=flow_file.parent,
-                agent_name=flow_name,
-                plugin_name=WORKSPACE_NAMESPACE,
-            )
-            if flow_instance is None:
-                flow_instance = build_graph_flow_from_metadata(definition)
+            flow_instance = None
+            if execution_mode.lower() != "vm":
+                flow_instance = self._load_agent_flow(
+                    module_ref=definition.get("module"),
+                    entry_fn_name=definition.get("entry_fn"),
+                    plugin_root=flow_file.parent,
+                    agent_name=flow_name,
+                    plugin_name=WORKSPACE_NAMESPACE,
+                )
+                if flow_instance is None:
+                    flow_instance = build_graph_flow_from_metadata(definition)
         except Exception as exc:
             logger.error(
                 "Failed loading workspace markdown flow '%s': %s",
@@ -571,6 +576,12 @@ class PluginManager:
                 module=str(definition["module"]).strip() if definition.get("module") else None,
                 entry_fn=str(definition["entry_fn"]).strip() if definition.get("entry_fn") else None,
                 flow_instance=flow_instance,
+                vm_entry=str(definition["vm_entry"]).strip() if definition.get("vm_entry") else None,
+                vm_module=str(definition["vm_module"]).strip() if definition.get("vm_module") else None,
+                vm_modules=coerce_str_list(definition.get("vm_modules")),
+                vm_file=str(definition["vm_file"]).strip() if definition.get("vm_file") else None,
+                vm_files=coerce_str_list(definition.get("vm_files")),
+                vm_source=str(definition["vm_source"]).strip() if definition.get("vm_source") else None,
                 metadata={
                     **metadata_base,
                     "plugin": namespace,
@@ -1051,13 +1062,19 @@ class PluginManager:
         if not isinstance(handoff_agents, list):
             handoff_agents = []
 
-        raw_mode = str(definition.get("execution_mode") or definition.get("mode") or "llm").strip().lower()
+        raw_mode = str(
+            definition.get("execution_mode")
+            or definition.get("mode")
+            or ("vm" if any(definition.get(key) for key in ("vm_source", "vm_file", "vm_module", "vm_files", "vm_modules")) else "llm")
+        ).strip().lower()
         if raw_mode in {"node", "llm"}:
             execution_mode = "llm"
         elif raw_mode in {"deterministic", "python"}:
             execution_mode = "deterministic"
         elif raw_mode in {"composite"}:
             execution_mode = "composite"
+        elif raw_mode in {"vm", "stackvm"}:
+            execution_mode = "vm"
         else:
             execution_mode = "llm"
 
@@ -1126,15 +1143,17 @@ class PluginManager:
         if not isinstance(raw_default_handoff_policy, dict):
             raw_default_handoff_policy = {}
 
-        flow_instance = self._load_agent_flow(
-            module_ref=definition.get("module"),
-            entry_fn_name=definition.get("entry_fn"),
-            plugin_root=plugin_root,
-            agent_name=flow_name,
-            plugin_name=plugin_name,
-        )
-        if flow_instance is None:
-            flow_instance = build_graph_flow_from_metadata(definition)
+        flow_instance = None
+        if execution_mode != "vm":
+            flow_instance = self._load_agent_flow(
+                module_ref=definition.get("module"),
+                entry_fn_name=definition.get("entry_fn"),
+                plugin_root=plugin_root,
+                agent_name=flow_name,
+                plugin_name=plugin_name,
+            )
+            if flow_instance is None:
+                flow_instance = build_graph_flow_from_metadata(definition)
 
         flow_def = FlowDefinition(
             name=flow_name,
@@ -1155,6 +1174,12 @@ class PluginManager:
             module=str(definition["module"]).strip() if definition.get("module") else None,
             entry_fn=str(definition["entry_fn"]).strip() if definition.get("entry_fn") else None,
             flow_instance=flow_instance,
+            vm_entry=str(definition["vm_entry"]).strip() if definition.get("vm_entry") else None,
+            vm_module=str(definition["vm_module"]).strip() if definition.get("vm_module") else None,
+            vm_modules=coerce_str_list(definition.get("vm_modules")),
+            vm_file=str(definition["vm_file"]).strip() if definition.get("vm_file") else None,
+            vm_files=coerce_str_list(definition.get("vm_files")),
+            vm_source=str(definition["vm_source"]).strip() if definition.get("vm_source") else None,
             metadata={
                 **dict(definition.get("metadata") or {}),
                 "plugin": plugin_name,

@@ -10,6 +10,7 @@ from pocketcode.plugins.core.tools.context_elephant_store_tools import (
     ReadContextElephantStoreFileTool as CoreReadContextTool,
 )
 
+
 def test_pocketflow_plugin_discovery(monkeypatch):
     """
     Verify that PluginManager can discover and load factory-based plugins

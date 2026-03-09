@@ -26,6 +26,354 @@ def _make_workspace_plugin_manager(tmp_path: Path) -> PluginManager:
 
 
 class TestPluginManagerRuntimeLoading:
+    def test_repo_stackvm_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        flow_def = manager.agents.resolve("stackvm_example.review")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.vm_entry == "decide"
+        assert flow_def.vm_modules == ["vm/common"]
+        assert flow_def.vm_files == ["vm/tool_loop.md"]
+
+    def test_repo_stackvm_handoff_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        router_def = manager.agents.resolve("stackvm_handoff_example.router")
+        delegate_def = manager.agents.resolve("stackvm_handoff_example.delegate")
+        assert router_def.execution_mode == "vm"
+        assert router_def.vm_entry == "route"
+        assert router_def.vm_modules == ["vm/router"]
+        assert delegate_def.flow_instance is not None
+
+    def test_repo_stackvm_resilient_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        router_def = manager.agents.resolve("stackvm_resilient_example.router")
+        fallback_def = manager.agents.resolve("stackvm_resilient_example.fallback")
+        assert router_def.execution_mode == "vm"
+        assert router_def.vm_entry == "decide"
+        assert router_def.vm_modules == ["vm/common", "vm/router"]
+        assert fallback_def.flow_instance is not None
+
+    def test_repo_stackvm_config_router_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        router_def = manager.agents.resolve("stackvm_config_router_example.router")
+        delegate_def = manager.agents.resolve("stackvm_config_router_example.delegate")
+        fallback_def = manager.agents.resolve("stackvm_config_router_example.fallback")
+        assert router_def.execution_mode == "vm"
+        assert router_def.vm_entry == "decide"
+        assert router_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.flow_instance is not None
+        assert fallback_def.flow_instance is not None
+
+    def test_repo_stackvm_nested_router_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        router_def = manager.agents.resolve("stackvm_nested_router_example.router")
+        delegate_def = manager.agents.resolve("stackvm_nested_router_example.delegate")
+        fallback_def = manager.agents.resolve("stackvm_nested_router_example.fallback")
+        assert router_def.execution_mode == "vm"
+        assert router_def.vm_entry == "decide"
+        assert router_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.flow_instance is not None
+        assert fallback_def.flow_instance is not None
+
+    def test_repo_stackvm_tool_normalize_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        flow_def = manager.agents.resolve("stackvm_tool_normalize_example.normalize")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.vm_entry == "decide"
+        assert flow_def.vm_modules == ["vm/common", "vm/router"]
+
+    def test_repo_stackvm_normalize_handoff_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        router_def = manager.agents.resolve("stackvm_normalize_handoff_example.normalize")
+        enabled_def = manager.agents.resolve("stackvm_normalize_handoff_example.enabled_delegate")
+        disabled_def = manager.agents.resolve("stackvm_normalize_handoff_example.disabled_delegate")
+        assert router_def.execution_mode == "vm"
+        assert router_def.vm_entry == "decide"
+        assert router_def.vm_modules == ["vm/common", "vm/router"]
+        assert enabled_def.flow_instance is not None
+        assert disabled_def.flow_instance is not None
+
+    def test_repo_stackvm_normalize_ask_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        flow_def = manager.agents.resolve("stackvm_normalize_ask_example.normalize")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.vm_entry == "decide"
+        assert flow_def.vm_modules == ["vm/common", "vm/router"]
+
+    def test_repo_stackvm_normalize_confirm_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        flow_def = manager.agents.resolve("stackvm_normalize_confirm_example.normalize")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.vm_entry == "decide"
+        assert flow_def.vm_modules == ["vm/common", "vm/router"]
+
+    def test_repo_stackvm_buttons_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        flow_def = manager.agents.resolve("stackvm_buttons_example.normalize")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.vm_entry == "decide"
+        assert flow_def.vm_modules == ["vm/common", "vm/router"]
+
+    def test_repo_stackvm_prompt_return_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_prompt_return_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_prompt_return_example.confirm_delegate")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+
+    def test_repo_stackvm_checklist_return_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_checklist_return_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_checklist_return_example.checklist_delegate")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+
+    def test_repo_stackvm_radio_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        flow_def = manager.agents.resolve("stackvm_radio_example.normalize")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.vm_entry == "decide"
+        assert flow_def.vm_modules == ["vm/common", "vm/router"]
+
+    def test_repo_stackvm_checklist_handoff_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_checklist_handoff_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_checklist_handoff_example.delegate_route")
+        approve_def = manager.agents.resolve("stackvm_checklist_handoff_example.approve_route")
+        review_def = manager.agents.resolve("stackvm_checklist_handoff_example.review_route")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.flow_instance is not None
+        assert approve_def.flow_instance is not None
+        assert review_def.flow_instance is not None
+
+    def test_repo_stackvm_structured_return_routing_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_structured_return_routing_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_structured_return_routing_example.confirm_delegate")
+        approve_def = manager.agents.resolve("stackvm_structured_return_routing_example.approve_route")
+        escalate_def = manager.agents.resolve("stackvm_structured_return_routing_example.escalate_route")
+        review_def = manager.agents.resolve("stackvm_structured_return_routing_example.review_route")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+        assert approve_def.flow_instance is not None
+        assert escalate_def.flow_instance is not None
+        assert review_def.flow_instance is not None
+
+    def test_repo_stackvm_structured_return_finalize_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_structured_return_finalize_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_structured_return_finalize_example.confirm_delegate")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+
+    def test_repo_stackvm_nested_structured_return_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_nested_structured_return_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_nested_structured_return_example.confirm_delegate")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+
+    def test_repo_stackvm_nested_structured_return_routing_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_nested_structured_return_routing_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_nested_structured_return_routing_example.confirm_delegate")
+        approve_def = manager.agents.resolve("stackvm_nested_structured_return_routing_example.approve_route")
+        escalate_def = manager.agents.resolve("stackvm_nested_structured_return_routing_example.escalate_route")
+        review_def = manager.agents.resolve("stackvm_nested_structured_return_routing_example.review_route")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+        assert approve_def.flow_instance is not None
+        assert escalate_def.flow_instance is not None
+        assert review_def.flow_instance is not None
+
+    def test_repo_stackvm_multistage_pipeline_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_multistage_pipeline_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_multistage_pipeline_example.confirm_delegate")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+
     def test_disabled_plugin_directory_is_not_loaded(self, tmp_path):
         plugin_root = tmp_path / "plugins" / "hidden.disabled"
         _write(
@@ -178,32 +526,110 @@ graph TD
         assert flow_def.system_prompt == "Plan carefully."
         assert flow_def.metadata["markdown_graphs"][0]["language"] == "mermaid"
 
-        def test_manifest_markdown_graph_flow_builds_executable_flow_instance(self, tmp_path):
-                plugin_root = tmp_path / "plugins" / "graphflow"
-                _write(
-                        plugin_root / "plugin.yaml",
-                        "\n".join(
-                                [
-                                        "schema_version: 1",
-                                        "name: graphflow",
-                                        'description: "markdown graph flow test"',
-                                        "flows:",
-                                        "  planner:",
-                                        '    markdown: "flows/planner.md"',
-                                ]
-                        ),
-                )
-                _write(
-                        plugin_root / "flows" / "planner.md",
-                        """---
+    def test_manifest_markdown_vm_flow_loads_vm_definition(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "vmflow"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: vmflow",
+                    'description: "markdown vm flow test"',
+                    "flows:",
+                    "  planner:",
+                    '    markdown: "flows/planner.md"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.md",
+            """---
+name: planner
+llm_profile: fast
+---
+Plan carefully.
+
+```vm
+"done" answer
+```
+""",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        flow_def = manager.agents.resolve("vmflow.planner")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.flow_instance is None
+        assert flow_def.vm_source == '"done" answer'
+
+    def test_manifest_markdown_vm_flow_preserves_module_refs(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "vmflowrefs"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: vmflowrefs",
+                    'description: "markdown vm flow refs test"',
+                    "flows:",
+                    "  planner:",
+                    '    markdown: "flows/planner.md"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.md",
+            """---
+name: planner
+vm_entry: decide
+vm_modules:
+  - vm/common
+vm_files:
+  - vm/tail.md
+---
+
+```vm
+[ "ok" answer ] "decide" define
+```
+""",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        flow_def = manager.agents.resolve("vmflowrefs.planner")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.vm_entry == "decide"
+        assert flow_def.vm_modules == ["vm/common"]
+        assert flow_def.vm_files == ["vm/tail.md"]
+
+    def test_manifest_markdown_graph_flow_builds_executable_flow_instance(self, tmp_path):
+        plugin_root = tmp_path / "plugins" / "graphflow"
+        _write(
+            plugin_root / "plugin.yaml",
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    "name: graphflow",
+                    'description: "markdown graph flow test"',
+                    "flows:",
+                    "  planner:",
+                    '    markdown: "flows/planner.md"',
+                ]
+            ),
+        )
+        _write(
+            plugin_root / "flows" / "planner.md",
+            """---
 nodes:
     route:
         kind: route
         transition_key: requested_path
-    yes:
+    "yes":
         kind: output
         message: Approved
-    no:
+    "no":
         kind: output
         message: Rejected
 ---
@@ -214,17 +640,17 @@ graph TD
     route -->|no| no
 ```
 """,
-                )
+        )
 
-                manager = _make_manager(tmp_path)
-                manager.load()
+        manager = _make_manager(tmp_path)
+        manager.load()
 
-                flow_def = manager.agents.resolve("graphflow.planner")
-                shared = {"requested_path": "yes"}
+        flow_def = manager.agents.resolve("graphflow.planner")
+        shared = {"requested_path": "yes"}
 
-                assert flow_def.flow_instance is not None
-                assert flow_def.flow_instance.run(shared) == "final_answer"
-                assert shared["final_answer"] == "Approved"
+        assert flow_def.flow_instance is not None
+        assert flow_def.flow_instance.run(shared) == "final_answer"
+        assert shared["final_answer"] == "Approved"
 
     def test_workspace_markdown_tool_is_loaded(self, tmp_path):
         _write(
@@ -254,10 +680,32 @@ required:
 
         assert manager.tools.resolve("workspace.helpers.echo").execute(text="ok") == {"text": "ok"}
 
-        def test_workspace_markdown_flow_is_loaded(self, tmp_path):
-                _write(
-                        tmp_path / ".pocketcode" / "flows" / "triage.md",
-                        """---
+    def test_workspace_markdown_vm_flow_is_loaded(self, tmp_path):
+        _write(
+            tmp_path / ".pocketcode" / "flows" / "triage.md",
+            """---
+name: triage
+description: Workspace VM flow
+---
+
+```vm
+"Workspace flow ready" answer
+```
+""",
+        )
+
+        manager = _make_manager(tmp_path)
+        manager.load()
+
+        flow_def = manager.flows.resolve("workspace.triage")
+        assert flow_def.execution_mode == "vm"
+        assert flow_def.flow_instance is None
+        assert flow_def.vm_source == '"Workspace flow ready" answer'
+
+    def test_workspace_markdown_flow_is_loaded(self, tmp_path):
+        _write(
+            tmp_path / ".pocketcode" / "flows" / "triage.md",
+            """---
 name: triage
 nodes:
     start:
@@ -272,16 +720,16 @@ graph TD
     start --> done
 ```
 """,
-                )
+        )
 
-                manager = _make_manager(tmp_path)
-                manager.load()
+        manager = _make_manager(tmp_path)
+        manager.load()
 
-                flow_def = manager.flows.resolve("workspace.triage")
-                shared = {}
-                assert flow_def.flow_instance is not None
-                assert flow_def.flow_instance.run(shared) == "final_answer"
-                assert shared["final_answer"] == "Workspace flow ready"
+        flow_def = manager.flows.resolve("workspace.triage")
+        shared = {}
+        assert flow_def.flow_instance is not None
+        assert flow_def.flow_instance.run(shared) == "final_answer"
+        assert shared["final_answer"] == "Workspace flow ready"
 
     def test_prompt_registry_loads_manifest_prompts(self, tmp_path):
         plugin_root = tmp_path / "plugins" / "promptplug"

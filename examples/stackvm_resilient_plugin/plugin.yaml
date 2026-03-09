@@ -1,0 +1,9 @@
+schema_version: 1
+name: stackvm_resilient_example
+description: Example StackVM flow with failure branching and handoff
+flows:
+  router:
+    markdown: flows/router.md
+  fallback:
+    module: flows/fallback.py
+    entry_fn: create_flow

@@ -32,8 +32,12 @@ The runtime also accepts `plugin::resource` in user-facing configuration, manife
 - `cli.md`: startup flags, commands, aliases, and Textual controls
 - `plugin_architecture.md`: plugin discovery, manifest schema, flow fields, and prompt/tool registration
 - `pocketflow_agents.md`: flow authoring and agent profile behavior
+- `stackvm_cookbook.md`: copyable StackVM authoring snippets for common runtime patterns
+- `stackvm_patterns.md`: checked-in StackVM example patterns grouped by orchestration style
 - `modes_and_skills.md`: Markdown-authored runtime overlays and skill-provided tools
 - `run_cancellation.md`: current cancellation model and managed subprocess behavior
+
+Checked-in example assets live outside `docs/` under `examples/`. Current StackVM examples are `examples/stackvm_review_plugin/`, `examples/stackvm_handoff_plugin/`, `examples/stackvm_resilient_plugin/`, `examples/stackvm_config_router_plugin/`, `examples/stackvm_nested_router_plugin/`, `examples/stackvm_threshold_router_plugin/`, `examples/stackvm_parallel_map_plugin/`, `examples/stackvm_parallel_tool_map_plugin/`, `examples/stackvm_reduce_plugin/`, `examples/stackvm_reduce_tool_plugin/`, `examples/stackvm_reduce_numeric_plugin/`, `examples/stackvm_tool_normalize_plugin/`, `examples/stackvm_normalize_handoff_plugin/`, `examples/stackvm_normalize_ask_plugin/`, `examples/stackvm_normalize_confirm_plugin/`, `examples/stackvm_buttons_plugin/`, `examples/stackvm_radio_plugin/`, `examples/stackvm_prompt_return_plugin/`, `examples/stackvm_checklist_return_plugin/`, `examples/stackvm_structured_return_routing_plugin/`, `examples/stackvm_structured_return_finalize_plugin/`, `examples/stackvm_nested_structured_return_plugin/`, `examples/stackvm_nested_structured_return_routing_plugin/`, `examples/stackvm_checklist_handoff_plugin/`, and `examples/stackvm_multistage_pipeline_plugin/`.
 
 ## Practical Reading Order
 
@@ -42,7 +46,7 @@ The runtime also accepts `plugin::resource` in user-facing configuration, manife
 3. Read `configuration.md` for workspace setup and discovery behavior.
 4. Read `markdown_assets.md` when working on any Markdown-authored asset.
 5. Read `cli.md` for the user-facing control surface.
-6. Read `plugin_architecture.md` and `pocketflow_agents.md` when changing runtime resources.
+6. Read `plugin_architecture.md`, `pocketflow_agents.md`, `stackvm_patterns.md`, and `stackvm_cookbook.md` when changing runtime resources.
 7. Read `modes_and_skills.md` when working on session overlays.
 8. Read `run_cancellation.md` when changing long-running tools or stop behavior.
 

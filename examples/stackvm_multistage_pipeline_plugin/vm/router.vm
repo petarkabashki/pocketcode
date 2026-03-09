@@ -1,0 +1,73 @@
+[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
+
+[
+  "last_delegated_result" shared@ none?
+  [
+    last-tool-result none?
+    [
+      "core.read_file"
+      "{path: multistage_payload.yaml}" yaml>
+      tool-request
+    ]
+    [
+      last-tool-result failure?
+      [ "Could not load the payload." answer ]
+      [
+        payload-data "payload" store-set
+
+        "payload" store-get "items" dict-get? dup none?
+        [ drop "[]" yaml> ]
+        [ ]
+        if
+        [ item-title ]
+        parallel-map
+        dup "normalized.titles" shared!? drop
+        ", " join
+        dup "normalized.title" shared!? drop
+
+        "payload" store-get "meta.source" get-in? dup none?
+        [ drop "unknown" ]
+        [ ]
+        if
+        dup "normalized.source" shared!? drop
+
+        "normalized.title" shared@ " from " concat "normalized.source" shared@ concat dup "normalized.summary" shared!? drop
+
+        "{kind: checklist, prompt: placeholder, options: [{id: delegate, label: Delegate, value: delegate}, {id: review, label: Review, value: review}, {id: approve, label: Approve, value: approve}], min_selected: 1}" yaml>
+        dup "prompt" "Choose actions for " "normalized.summary" shared@ concat dict-set
+        prompt-interaction
+        dup "normalized.selected_actions" shared!? drop
+        dup ", " join dup "normalized.selected_actions_text" shared!? drop
+        dup "delegate" contains?
+        [
+          swap drop drop
+          "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
+          "pending_handoff_policy" store-set
+          "stackvm_multistage_pipeline_example.confirm_delegate" handoff
+        ]
+        [
+          swap drop drop
+          "pipeline complete: "
+          "normalized.summary" shared@ concat
+          " | actions=" concat
+          "normalized.selected_actions_text" shared@ concat
+          " | delegate=skipped" concat
+          answer
+        ]
+        if
+      ]
+      if
+    ]
+    if
+  ]
+  [
+    "pipeline complete: "
+    "normalized.summary" shared@ concat
+    " | actions=" concat
+    "normalized.selected_actions_text" shared@ concat
+    " | delegate=" concat
+    "last_delegated_result" shared@ "answer" dict-get concat
+    answer
+  ]
+  if
+] "decide" define

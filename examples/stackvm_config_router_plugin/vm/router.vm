@@ -1,0 +1,50 @@
+[
+  last-tool-result none?
+  [
+    "core.read_file"
+    "{path: route_config.yaml}" yaml>
+    tool-request
+  ]
+  [
+    last-tool-result failure?
+    [
+      "tool_failure" "route_reason" shared!
+      "stackvm_config_router_example.fallback" handoff
+    ]
+    [
+      config-data
+      dup "config" store-set
+      dup "enabled" dict-get? bool>
+      [
+        "config" store-get "message" dict-get? dup none?
+        [ drop "delegate" ]
+        [ ]
+        if
+        "route_message" shared!
+        "config" store-get "target_index" dict-get? dup none?
+        [ drop 0 ]
+        [ int> ]
+        if
+        "selected_index" store-set
+        "config" store-get "routes" dict-get? "selected_index" store-get list-get? dup none?
+        [
+          drop
+          "missing_route" "route_reason" shared!
+          "stackvm_config_router_example.fallback" handoff
+        ]
+        [ handoff ]
+        if
+      ]
+      [
+        "disabled" "route_reason" shared!
+        "config" store-get "routes" dict-get? 1 list-get? dup none?
+        [ drop "stackvm_config_router_example.fallback" handoff ]
+        [ handoff ]
+        if
+      ]
+      if
+    ]
+    if
+  ]
+  if
+] "decide" define

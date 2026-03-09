@@ -135,6 +135,14 @@ def compile_markdown_flow_definition(
         metadata = _mapping_copy(definition.get("metadata"))
         metadata["markdown_graphs"] = graphs
         definition["metadata"] = metadata
+    vm_sections = [
+        block.content.strip()
+        for block in document.find_blocks(languages=("vm", "stackvm"))
+        if block.content.strip()
+    ]
+    if vm_sections:
+        definition["vm_source"] = "\n\n".join(vm_sections).strip()
+        definition.setdefault("execution_mode", "vm")
     return definition
 
 

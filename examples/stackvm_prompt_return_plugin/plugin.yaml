@@ -1,0 +1,8 @@
+schema_version: 1
+name: stackvm_prompt_return_example
+description: Normalize tool data, prompt in a delegate, and return to the caller in StackVM
+flows:
+  normalize:
+    markdown: flows/normalize.md
+  confirm_delegate:
+    markdown: flows/confirm_delegate.md

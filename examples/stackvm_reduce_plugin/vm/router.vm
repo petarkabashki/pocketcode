@@ -1,0 +1,12 @@
+[ "item=" swap concat ] "label-item" define
+[ "current_item" store-set "current_acc" store-set "current_acc" store-get dup empty? [ drop "current_item" store-get ] [ "; " concat "current_item" store-get concat ] if ] "append-summary" define
+
+[
+  "[alpha, beta, gamma]" yaml>
+  [ label-item ]
+  parallel-map
+  ""
+  [ append-summary ]
+  reduce
+  "reduced summary: " swap concat answer
+] "decide" define

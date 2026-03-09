@@ -1,0 +1,17 @@
+schema_version: 1
+name: stackvm_nested_structured_return_routing_example
+description: Normalize tool data, let a VM delegate return nested YAML, and route from nested fields in the caller
+flows:
+  normalize:
+    markdown: flows/normalize.md
+  confirm_delegate:
+    markdown: flows/confirm_delegate.md
+  approve_route:
+    module: flows/approve_route.py
+    entry_fn: create_flow
+  escalate_route:
+    module: flows/escalate_route.py
+    entry_fn: create_flow
+  review_route:
+    module: flows/review_route.py
+    entry_fn: create_flow

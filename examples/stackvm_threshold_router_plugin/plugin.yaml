@@ -1,0 +1,15 @@
+schema_version: 1
+name: stackvm_threshold_router_example
+description: Aggregate-then-route StackVM example
+flows:
+  router:
+    markdown: flows/router.md
+  low_route:
+    module: flows/low_route.py
+    entry_fn: create_flow
+  review_route:
+    module: flows/review_route.py
+    entry_fn: create_flow
+  high_route:
+    module: flows/high_route.py
+    entry_fn: create_flow

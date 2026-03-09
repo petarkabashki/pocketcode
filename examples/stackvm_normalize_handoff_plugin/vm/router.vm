@@ -1,0 +1,50 @@
+[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
+
+[
+  last-tool-result none?
+  [
+    "core.read_file"
+    "{path: handoff_payload.yaml}" yaml>
+    tool-request
+  ]
+  [
+    last-tool-result failure?
+    [ "stackvm_normalize_handoff_example.disabled_delegate" handoff ]
+    [
+      payload-data "payload" store-set
+
+      "payload" store-get "items" dict-get? dup none?
+      [ drop "[]" yaml> ]
+      [ ]
+      if
+      [ item-title ]
+      parallel-map
+      dup "normalized.titles" shared!? drop
+      ", " join
+      dup "normalized.title" shared!? drop
+
+      "payload" store-get "items.0.enabled" get-in? dup none?
+      [ drop false ]
+      [ bool> ]
+      if
+      dup "normalized.enabled" shared!? drop
+
+      "payload" store-get "meta.source" get-in? dup none?
+      [ drop "unknown" ]
+      [ ]
+      if
+      dup "normalized.source" shared!? drop
+
+      "normalized.title" shared@ " from " concat "normalized.source" shared@ concat "normalized.summary" shared!? drop
+
+      "normalized.enabled" shared@
+      [
+        True [ "stackvm_normalize_handoff_example.enabled_delegate" handoff ]
+        False [ "stackvm_normalize_handoff_example.disabled_delegate" handoff ]
+        "default" [ "stackvm_normalize_handoff_example.disabled_delegate" handoff ]
+      ] switch
+    ]
+    if
+  ]
+  if
+] "decide" define

@@ -1,0 +1,12 @@
+---
+name: normalize
+description: Normalize all payload item titles from tool-derived YAML, hand off to a prompted delegate, and finalize from the delegate return payload
+tools:
+  - core.read_file
+vm_entry: decide
+vm_modules:
+  - vm/common
+  - vm/router
+---
+
+Read a YAML payload through `core.read_file`, normalize all payload item titles plus selected fields into shared state, hand off to a prompted delegate with `return_to_caller`, and finalize from `last_delegated_result` when the delegate returns.

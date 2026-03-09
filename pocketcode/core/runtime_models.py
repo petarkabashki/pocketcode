@@ -88,6 +88,12 @@ class FlowDefinition:
     module: Optional[str] = None
     entry_fn: Optional[str] = None
     flow_instance: Any = None
+    vm_entry: Optional[str] = None
+    vm_module: Optional[str] = None
+    vm_modules: List[str] = field(default_factory=list)
+    vm_file: Optional[str] = None
+    vm_files: List[str] = field(default_factory=list)
+    vm_source: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     default_agent_profile: Optional[CompositeAgent] = None
 

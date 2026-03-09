@@ -68,12 +68,13 @@ Markdown asset loading participates in the same two phases:
 
 That shared model applies across prompt files, Markdown tool definitions, Markdown flow definitions, Markdown agent profiles, modes, and skills.
 
-For flow Markdown specifically, the loader now has two execution outcomes:
+For flow Markdown specifically, the loader now has three execution outcomes:
 
 - if the compiled definition provides `module` plus `entry_fn`, PocketCoder loads that Python PocketFlow factory
 - if those fields are absent but the Markdown metadata includes a supported Mermaid or DOT graph plus `nodes:` configuration, PocketCoder generates a deterministic PocketFlow `Flow` directly from the graph
+- if the compiled definition carries StackVM source fields such as `vm_source`, `vm_module`, or `vm_file`, PocketCoder registers a VM-backed flow with `execution_mode: vm`
 
-The generated graph flow path executes against the same shared-store contract used by handwritten PocketFlow flows, including `_tool_runtime`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, `results`, and other runtime-managed keys.
+The generated graph flow path and StackVM flow path execute against the same shared-store contract used by handwritten PocketFlow flows, including `_tool_runtime`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, `results`, and other runtime-managed keys.
 
 ## Key Runtime Types
 
@@ -94,6 +95,8 @@ Important fields:
 - `pre_handlers`, `step_handlers`, `post_handlers`
 - `handoff_policies`, `default_handoff_policy`
 - `module`, `entry_fn`, `flow_instance`
+- `vm_entry`, `vm_module`, `vm_modules`
+- `vm_file`, `vm_files`, `vm_source`
 - `default_agent_profile`
 
 ### `CompositeAgent`
@@ -204,6 +207,7 @@ Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/
 2. Run configured pre-handlers.
 3. Execute one of:
    - a programmatic PocketFlow flow instance
+   - a StackVM-backed flow
    - a deterministic Python handler
    - a composite flow handoff plan
    - an LLM turn
@@ -213,7 +217,11 @@ Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/
 7. If the transition requests a handoff, update active flow and handoff context.
 8. Continue until final answer, user question, error, or step limit.
 
+Tool results with `success: false` are kept in `last_tool_result` and do not automatically terminate the run. Flows may inspect the failure and decide whether to retry, answer, or hand off. Runtime errors are reserved for malformed tool requests, missing tool targets, unhandled exceptions, and other engine-level failures.
+
 Programmatic PocketFlow flows are loaded from manifest `module` plus `entry_fn` and stored as `flow_instance`.
+
+StackVM-backed flows are resolved from VM source metadata on the flow definition. At runtime, `AgentRuntime` loads inline and file-backed VM sources, injects the same prompt/tool/LLM services used by PocketFlow agents, and runs the selected StackVM entry word when configured.
 
 LLM decision parsing uses a shared YAML-mapping parser. It accepts fenced YAML blocks and also trims leading prose before the first YAML key so responses like `Here is the YAML:` followed by a valid mapping do not abort the run.
 

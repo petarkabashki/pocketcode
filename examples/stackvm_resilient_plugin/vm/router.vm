@@ -1,0 +1,14 @@
+[ 
+  [
+    [ last-tool-result none? ]
+    [
+      "core.read_file"
+      "{path: definitely_missing.md}" yaml>
+      tool-request
+    ]
+    [ last-tool-result failure? ]
+    [ "stackvm_resilient_example.fallback" handoff ]
+    [ True ]
+    [ last-tool-result "content" get-in answer ]
+  ] cond
+] "decide" define

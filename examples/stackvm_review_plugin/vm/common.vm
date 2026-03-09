@@ -1,0 +1,2 @@
+[ last-tool-result "content" dict-get ] "tool-content" define
+[ request "request_text" store-set ] "capture-request" define

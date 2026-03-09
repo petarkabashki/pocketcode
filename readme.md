@@ -48,6 +48,30 @@ Pocketcode also loads workspace-local resources from the workspace root:
 For shared workspace tools, Pocketcode auto-discovers public tool exports from Python files in `.pocketcode/tools/`. A module can expose tools either through a `TOOLS` export or through public top-level callables / `BaseTool` classes.
 The repo now ships `.pocketcode/tools/file_ops.py` as the reference pattern for workspace tool re-exports, making the same file selection and staged editing tools available as `workspace::select_filesystem_entry`, `workspace::extract_text`, `workspace::stage_text_replace`, `workspace::apply_staged_edit`, and `workspace::cancel_staged_edit`.
 
+## Examples
+
+Checked-in examples live under `examples/`.
+
+- `examples/stackvm_review_plugin/`: a multi-file StackVM-backed plugin flow using `vm_entry`, `vm_modules`, and Markdown-backed VM modules.
+- `examples/stackvm_handoff_plugin/`: a StackVM-backed router flow that hands off to a normal PocketFlow delegate.
+- `examples/stackvm_resilient_plugin/`: a StackVM-backed flow that requests a tool, branches on failure, and hands off to a fallback flow.
+- `examples/stackvm_config_router_plugin/`: a config-driven StackVM router that reads YAML from the workspace, uses conversion helpers, selects a route from a list, and hands off accordingly.
+- `examples/stackvm_nested_router_plugin/`: a nested-data StackVM router that uses safe nested traversal and safe nested updates over mixed dict/list YAML config.
+- `examples/stackvm_tool_normalize_plugin/`: a StackVM flow that normalizes tool-derived YAML into shared state with safe helpers before producing the final answer.
+- `examples/stackvm_normalize_handoff_plugin/`: a StackVM flow that normalizes tool-derived YAML into shared state and then hands off to different delegates based on the normalized result.
+- `examples/stackvm_normalize_ask_plugin/`: a StackVM flow that normalizes tool-derived YAML into shared state and then surfaces a user question from the normalized result.
+- `examples/stackvm_normalize_confirm_plugin/`: a StackVM flow that normalizes tool-derived YAML, prompts for a bridged user reply, and continues to a final answer in the same VM turn.
+- `examples/stackvm_buttons_plugin/`: a StackVM flow that normalizes tool-derived YAML, presents structured button choices through the bridged interaction channel, and continues from the selected option.
+- `examples/stackvm_radio_plugin/`: a StackVM flow that normalizes tool-derived YAML, presents a radio-style structured choice through the bridged interaction channel, and continues from the selected mode.
+- `examples/stackvm_prompt_return_plugin/`: a StackVM caller/delegate pair where the delegate prompts for a structured choice and returns the resulting decision to the caller through the handoff stack.
+- `examples/stackvm_checklist_return_plugin/`: a StackVM caller/delegate pair where the delegate collects multiple checklist selections and returns the resulting decision to the caller through the handoff stack.
+- `examples/stackvm_structured_return_routing_plugin/`: a StackVM caller/delegate pair where the delegate returns a YAML decision string and the caller parses that returned value to choose the final downstream route.
+- `examples/stackvm_structured_return_finalize_plugin/`: a StackVM caller/delegate pair where the delegate returns a YAML decision string and the caller parses that returned value into the final answer directly.
+- `examples/stackvm_nested_structured_return_plugin/`: a StackVM caller/delegate pair where the delegate returns nested YAML and the caller uses `get-in?` with defaults before composing the final answer.
+- `examples/stackvm_nested_structured_return_routing_plugin/`: a StackVM caller/delegate pair where the delegate returns nested YAML and the caller uses `get-in?` to choose the final downstream route, with defaults for optional nested fields.
+- `examples/stackvm_checklist_handoff_plugin/`: a StackVM flow that normalizes tool-derived YAML, collects checklist actions, formats them with `join`, and hands off to different delegates based on the selected list.
+- `examples/stackvm_multistage_pipeline_plugin/`: a StackVM caller/delegate pair where the caller collects checklist actions, the delegate asks a second structured question, and the caller finalizes from both decisions after the delegate returns.
+
 ## Discovery Controls
 
 Pocketcode supports two ways to make discovered resources unavailable without deleting them:

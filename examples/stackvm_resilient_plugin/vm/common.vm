@@ -1,0 +1,3 @@
+[ last-tool-result "error" dict-get ] "tool-error" define
+[ last-tool-result "result" dict-get ] "tool-result" define
+[ last-tool-result success? ] "tool-ok?" define

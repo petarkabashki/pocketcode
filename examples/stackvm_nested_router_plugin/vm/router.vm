@@ -1,0 +1,57 @@
+[
+  last-tool-result none?
+  [
+    "core.read_file"
+    "{path: nested_route_config.yaml}" yaml>
+    tool-request
+  ]
+  [
+    last-tool-result failure?
+    [
+      "tool_failure" "route_reason" shared!
+      "stackvm_nested_router_example.fallback" handoff
+    ]
+    [
+      config-data
+      dup "config" store-set
+      dup "routing.enabled" get-in? bool>
+      [
+        "config" store-get "routing.selected.index" get-in? dup none?
+        [ drop 0 ]
+        [ int> ]
+        if
+        "selected_index" store-set
+        "config" store-get "routing.targets" get-in? "selected_index" store-get list-get? dup none?
+        [
+          drop
+          "missing_target" "route_reason" shared!
+          "stackvm_nested_router_example.fallback" handoff
+        ]
+        [
+          dup "message" dict-get? dup none?
+          [ drop "nested delegate" ]
+          [ ]
+          if
+          "route_message" shared!
+          "config" store-get "selected" "routing.audit.status" set-in? "updated_config" store-set
+          "agent" dict-get? dup none?
+          [
+            drop
+            "missing_target" "route_reason" shared!
+            "stackvm_nested_router_example.fallback" handoff
+          ]
+          [ handoff ]
+          if
+        ]
+        if
+      ]
+      [
+        "disabled" "route_reason" shared!
+        "stackvm_nested_router_example.fallback" handoff
+      ]
+      if
+    ]
+    if
+  ]
+  if
+] "decide" define

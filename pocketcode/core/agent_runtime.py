@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import asyncio
 import inspect
 import logging
 import sys
@@ -16,6 +17,7 @@ from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
 from pocketcode.core.run_handle import RunCancelledError
+from pocketcode.core.agent_stack_vm import AgentStackVM, StackVmExecutionResult, StackVmHostContext, load_stackvm_program_source
 from pocketcode.core.runtime_models import AgentDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
 
@@ -200,15 +202,21 @@ class AgentRuntime:
             )
             return str(transition or "error")
 
-        if agent_definition.flow_instance:
+        execution_mode = str(agent_definition.execution_mode or "llm").strip().lower()
+
+        if execution_mode == "vm":
+            transition = self._run_vm_agent(
+                agent_name=agent_name,
+                agent_definition=agent_definition,
+                shared_store=shared_store,
+            )
+        elif agent_definition.flow_instance:
             transition = self._run_pocketflow_agent(
                 agent_name=agent_name,
                 agent_definition=agent_definition,
                 shared_store=shared_store,
             )
         else:
-            execution_mode = str(agent_definition.execution_mode or "llm").strip().lower()
-
             if execution_mode == "deterministic":
                 transition = self._run_deterministic_agent(
                     agent_name=agent_name,
@@ -303,6 +311,118 @@ class AgentRuntime:
             logger.exception(f"Error executing PocketFlow agent '{agent_name}': {e}")
             shared_store["error_message"] = f"Flow execution failed: {e}"
             return "error"
+
+    def _run_vm_agent(
+        self,
+        *,
+        agent_name: str,
+        agent_definition: AgentDefinition,
+        shared_store: Dict[str, Any],
+    ) -> str:
+        try:
+            shared_store.setdefault("_llm_router", self._llm_router)
+            shared_store.setdefault("_tool_runtime", self._tool_runtime)
+            active_profile = self._get_active_profile_for_agent(agent_name, shared_store)
+
+            try:
+                allowed_tools = self._resolve_effective_tool_names(
+                    agent_name=agent_name,
+                    active_profile=active_profile,
+                    shared_store=shared_store,
+                )
+                shared_store["active_allowed_tools"] = list(allowed_tools)
+                shared_store["_agent_tool_definitions"] = self._tool_runtime.describe_tools(allowed_tools)
+            except Exception:
+                shared_store.setdefault("_agent_tool_definitions", [])
+
+            try:
+                shared_store["_agent_llm_profile"] = self._resolve_llm_profile(
+                    agent_name, agent_definition, shared_store
+                )
+            except Exception:
+                pass
+
+            base_prompt = self._build_agent_system_prompt(agent_name=agent_name)
+            extra_prompt = self._resolve_overlay_prompt_content(
+                active_profile=active_profile,
+                shared_store=shared_store,
+            )
+            shared_store["_agent_system_prompt"] = (
+                base_prompt + "\n\n" + extra_prompt if extra_prompt else base_prompt
+            )
+
+            metadata = dict(agent_definition.metadata or {})
+            search_roots: list[Path] = []
+            markdown_path = metadata.get("markdown_path")
+            plugin_root = metadata.get("plugin_root")
+            resource_root = metadata.get("resource_root")
+            if markdown_path:
+                search_roots.append(Path(str(markdown_path)).resolve().parent)
+            if plugin_root:
+                search_roots.append(Path(str(plugin_root)).resolve())
+            if resource_root:
+                search_roots.append(Path(str(resource_root)).resolve())
+
+            source, source_files = load_stackvm_program_source(
+                vm_source=agent_definition.vm_source,
+                vm_entry=agent_definition.vm_entry,
+                vm_module=agent_definition.vm_module,
+                vm_modules=agent_definition.vm_modules,
+                vm_file=agent_definition.vm_file,
+                vm_files=agent_definition.vm_files,
+                base_dir=search_roots[0] if search_roots else Path.cwd(),
+                search_roots=search_roots,
+            )
+            if not source.strip() and not agent_definition.vm_entry:
+                raise ValueError(f"VM agent '{agent_name}' has no executable StackVM source.")
+
+            result = StackVmExecutionResult(source_files=source_files)
+            host_context = StackVmHostContext(
+                agent_name=agent_name,
+                llm_router=self._llm_router,
+                tool_runtime=self._tool_runtime,
+                llm_profile=shared_store.get("_agent_llm_profile"),
+                system_prompt=shared_store.get("_agent_system_prompt", ""),
+                tool_definitions=list(shared_store.get("_agent_tool_definitions", [])),
+            )
+            vm = AgentStackVM(shared_store=shared_store)
+            vm.register_host_words(host_context=host_context, result=result)
+            self._run_stackvm_program(vm=vm, source=source, entry=agent_definition.vm_entry)
+            shared_store["last_vm_sources"] = list(source_files)
+
+            if result.transition:
+                return result.transition
+            if shared_store.get("pending_tool"):
+                return "call_tool"
+            if shared_store.get("pending_handoff_agent"):
+                return "handoff"
+            if shared_store.get("question_to_ask"):
+                return "ask_user"
+            if shared_store.get("final_answer"):
+                return "final_answer"
+            if vm.stack and isinstance(vm.stack[-1], str):
+                return str(vm.stack[-1])
+            return "continue"
+        except Exception as exc:
+            logger.exception("Error executing StackVM agent '%s': %s", agent_name, exc)
+            shared_store["error_message"] = f"VM execution failed: {exc}"
+            return "error"
+
+    def _run_stackvm_program(self, *, vm: AgentStackVM, source: str, entry: str | None) -> None:
+        async def _runner() -> None:
+            if source.strip():
+                await vm.eval(source)
+            if entry:
+                await vm.execute_word(entry)
+
+        try:
+            asyncio.run(_runner())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_runner())
+            finally:
+                loop.close()
 
     def _run_deterministic_agent(
         self,
@@ -577,8 +697,10 @@ class AgentRuntime:
             "arguments": arguments,
             "result": result,
         }
+        shared_store["last_tool_result"] = result
         shared_store["last_tool_route"] = route_payload
         shared_store["last_tool_route_yaml"] = self._to_yaml(route_payload)
+        shared_store["last_tool_failed"] = bool(isinstance(result, dict) and result.get("success") is False)
         shared_store.setdefault("tool_history", []).append(route_payload)
         shared_store.pop("pending_tool", None)
         self._emit_event(
@@ -589,10 +711,6 @@ class AgentRuntime:
             success=not (isinstance(result, dict) and result.get("success") is False),
             result=result,
         )
-
-        if isinstance(result, dict) and result.get("success") is False:
-            shared_store["error_message"] = str(result.get("error") or "Tool reported failure.")
-            self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
 
     def _run_handoff(self, shared_store: Dict[str, Any]) -> None:
         source_agent = str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None

@@ -1,0 +1,6 @@
+schema_version: 1
+name: stackvm_reduce_tool_example
+description: Tool-loaded reduce StackVM example
+flows:
+  summarize:
+    markdown: flows/summarize.md

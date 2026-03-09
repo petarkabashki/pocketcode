@@ -1,0 +1,15 @@
+schema_version: 1
+name: stackvm_checklist_handoff_example
+description: Normalize tool data, collect checklist actions, and hand off based on the selected list
+flows:
+  normalize:
+    markdown: flows/normalize.md
+  delegate_route:
+    module: flows/delegate_route.py
+    entry_fn: create_flow
+  approve_route:
+    module: flows/approve_route.py
+    entry_fn: create_flow
+  review_route:
+    module: flows/review_route.py
+    entry_fn: create_flow

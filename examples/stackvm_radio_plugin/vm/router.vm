@@ -1,0 +1,43 @@
+[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
+
+[
+  last-tool-result none?
+  [
+    "core.read_file"
+    "{path: radio_payload.yaml}" yaml>
+    tool-request
+  ]
+  [
+    last-tool-result failure?
+    [ "Could not load the payload." answer ]
+    [
+      payload-data "payload" store-set
+
+      "payload" store-get "items" dict-get? dup none?
+      [ drop "[]" yaml> ]
+      [ ]
+      if
+      [ item-title ]
+      parallel-map
+      dup "normalized.titles" shared!? drop
+      ", " join
+      dup "normalized.title" shared!? drop
+
+      "payload" store-get "meta.source" get-in? dup none?
+      [ drop "unknown" ]
+      [ ]
+      if
+      dup "normalized.source" shared!? drop
+
+      "normalized.title" shared@ " from " concat "normalized.source" shared@ concat dup "normalized.summary" shared!? drop
+
+      "{kind: radio, prompt: placeholder, options: [{id: delegate, label: Delegate, value: delegate}, {id: approve, label: Approve, value: approve}, {id: deny, label: Deny, value: deny}]}" yaml>
+      dup "prompt" "Choose mode for " "normalized.summary" shared@ concat dict-set
+      prompt-interaction
+      dup "normalized.mode" shared!? drop
+      "Selected mode " swap concat " for " concat "normalized.summary" shared@ concat answer
+    ]
+    if
+  ]
+  if
+] "decide" define

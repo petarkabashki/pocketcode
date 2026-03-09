@@ -97,3 +97,26 @@ required:
     assert compiled.name == "grep"
     assert compiled.handler == "grep.py:run_grep"
     assert compiled.schema["properties"]["query"]["type"] == "string"
+
+
+def test_compile_markdown_flow_definition_collects_vm_source_blocks(tmp_path: Path):
+    flow_file = tmp_path / "vm-flow.md"
+    flow_file.write_text(
+        """---
+name: vm-flow
+description: StackVM flow
+---
+Prompt text.
+
+```vm
+"hello from vm" answer
+```
+""",
+        encoding="utf-8",
+    )
+
+    document = load_markdown_asset_document(flow_file)
+    compiled = compile_markdown_flow_definition(document, default_name="vm-flow")
+
+    assert compiled["execution_mode"] == "vm"
+    assert compiled["vm_source"] == '"hello from vm" answer'

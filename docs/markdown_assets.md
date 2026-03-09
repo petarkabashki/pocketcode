@@ -21,7 +21,7 @@ PocketCoder currently uses Markdown for these asset surfaces:
 |------|-------------------|----------------|
 | Prompt | plugin `prompts:` files, `<resource_root>/prompts/*.md`, path-based prompt includes | prompt text plus source tracking |
 | Tool | manifest `tools: foo: tools/foo.md`, `<resource_root>/tools/*.md` | wrapped executable tool metadata plus Python handler |
-| Flow | manifest `flows.<name>.markdown`, manifest `.md` `source`, `<resource_root>/flows/*.md` | `FlowDefinition` with either a loaded PocketFlow factory or generated graph `flow_instance` |
+| Flow | manifest `flows.<name>.markdown`, manifest `.md` `source`, `<resource_root>/flows/*.md` | `FlowDefinition` with either a loaded PocketFlow factory, generated graph `flow_instance`, or StackVM program source |
 | Agent profile | `<plugin>/agents/*.md`, `<resource_root>/agents/*.md` | `CompositeAgent` / agent profile |
 | Mode | `<resource_root>/modes/*.md` | `ModeDefinition` |
 | Skill | `<resource_root>/skills/<name>/SKILL.md` | `SkillDefinition` |
@@ -188,10 +188,11 @@ Current validation behavior:
 
 Markdown flows compile into ordinary `FlowDefinition` objects.
 
-### Two supported flow forms
+### Supported flow forms
 
 1. Python factory flow: the Markdown file supplies `module` and `entry_fn`
 2. generated graph flow: the Markdown file omits `module` and `entry_fn` but includes graph metadata plus a `nodes:` mapping
+3. StackVM flow: the Markdown file includes one or more fenced `vm` or `stackvm` blocks, or explicit `vm_*` fields in front matter
 
 Example Python-backed Markdown flow:
 
@@ -233,6 +234,41 @@ graph TD
 ```
 ````
 
+Example StackVM-backed Markdown flow:
+
+````md
+---
+name: vm_triage
+llm_profile: fast
+vm_entry: decide
+vm_modules:
+  - vm/common
+vm_files:
+  - vm/tail.md
+---
+
+```vm
+[ request "request_text" store-set ] "capture-request" define
+[ "request_text" store-get "Route request: " swap concat answer ] "decide" define
+```
+````
+
+Example companion files:
+
+`vm/common.vm`
+
+```text
+[ request "request_text" store-set ] "capture-request" define
+```
+
+`vm/tail.md`
+
+````md
+```vm
+[ "tail loaded" "tail_status" store-set ] "tail-init" define
+```
+````
+
 ### Flow prompt behavior
 
 Markdown flow prompt content can come from:
@@ -245,6 +281,135 @@ Markdown flow prompt content can come from:
 - `prompt:` resource references anywhere a prompt file reference is accepted
 
 The loader resolves those through the shared prompt bundle path and stores the resulting `system_prompt` and `prompt_sources` on the compiled `FlowDefinition`.
+
+### StackVM flow behavior
+
+StackVM-backed flows are still normal `FlowDefinition` records. They use `execution_mode: vm` and carry VM-specific fields such as:
+
+- `vm_source`
+- `vm_entry`
+- `vm_module`, `vm_modules`
+- `vm_file`, `vm_files`
+
+Current source loading rules:
+
+- fenced `vm` and `stackvm` blocks are concatenated into `vm_source`
+- `vm_module` and `vm_modules` resolve module-like refs such as `vm/common` or `vm.common`
+- `vm_file` and `vm_files` resolve explicit `.vm` or `.md` files relative to the flow file or resource/plugin roots
+- Markdown module files contribute fenced `vm`/`stackvm` blocks when present, otherwise their body text is used as VM source
+
+Current runtime host words provided by the engine include:
+
+- `answer`
+- `ask-user`
+- `prompt-user`
+- `prompt-interaction`
+- `handoff`
+- `tool-request`
+- `transition`
+- `llm-call`
+- `system-prompt`
+- `llm-profile`
+- `tool-definitions`
+- `request`
+- `last-tool-result`
+- `last-tool-route`
+- `results`
+
+Selected built-in stack/runtime helpers currently available include:
+
+- `stack-depth`, `stack-empty?`
+- `can-pop?`, `can-dup?`, `can-swap?`, `can-over?`
+- `yaml>`
+- `int>`, `float>`, `bool>`, `str>`
+- `shared@`, `shared!`, `shared!?`
+- `none?`
+- `success?`, `failure?`
+- `dict-get`, `dict-set`
+- `dict-get?`
+- `list-get`, `list-set`
+- `list-get?`
+- `get-in`, `get-in?`, `set-in`, `set-in?`
+- `keys`, `values`
+- `list-append`
+- `len`, `empty?`, `contains?`
+- `join`
+- `switch`, `cond`, `fallback`, `parallel-map`, `reduce`
+- `+`, `-`, `*`, `/`
+- `>`, `<`, `>=`, `<=`
+
+Current mutation convention:
+
+- `store-set` expects the key on top of the stack and the value beneath it, for example `request "request_text" store-set`
+- `shared!` follows the same shape for dotted shared-store paths, for example `"done" "results.status" shared!`
+- `shared!?` follows the same value-then-path shape but returns `None` instead of raising when the path is invalid; on success it pushes the mutated shared store
+- numeric path segments are treated as list indices in `get-in`, `set-in`, `shared@`, and `shared!`, for example `"meta.items.1.name" get-in` or `"ok" "results.reviews.0.status" shared!`
+- `set-in` mutates an arbitrary dict/list container using the same key-on-top shape, for example `dup "done" "meta.steps.0.status" set-in`
+
+Current stack-safety helpers:
+
+- `stack-depth` reports the current stack size without mutating the stack
+- `stack-empty?` reports whether the stack is empty
+- `can-pop?` and `can-dup?` report whether at least one item is available
+- `can-swap?` and `can-over?` report whether at least two items are available
+- these guard words are non-destructive, so they can be used ahead of `dup`, `drop`, `swap`, and `over` when authoring defensive StackVM flows
+
+Current conversion helpers:
+
+- `int>` coerces the top stack value to an integer using Python-style numeric parsing
+- `float>` coerces the top stack value to a floating-point number
+- `bool>` accepts booleans, numbers, `None`, and common string forms such as `true`, `false`, `yes`, `no`, `1`, and `0`
+- `bool>` raises an error for ambiguous strings instead of silently guessing
+- `str>` stringifies the top stack value without changing any surrounding stack state
+
+Current collection helpers:
+
+- `list-get` expects a list beneath an integer index and pushes the selected item
+- `list-get?` returns `None` instead of raising when the container is not a list, the index is not an integer, or the index is out of range
+- `list-set` expects a list beneath an integer index and a replacement value, mutates the list, and pushes the updated list
+- `dict-get?` returns `None` instead of raising when the container is not a dict
+- `get-in?` returns `None` instead of raising when the path itself is invalid; missing nested keys and out-of-range list segments still resolve to `None` under both `get-in` and `get-in?`
+- `set-in?` returns `None` instead of raising when the container or path is invalid; on success it mutates the container and pushes the updated value
+- `dict-get`, `dict-set`, `list-get`, and `list-set` all follow the existing key-or-index-on-top convention used elsewhere in the VM
+
+Current formatting helpers:
+
+- `concat` concatenates two values after stringifying them
+- `str>` stringifies the top stack value directly
+- `join` expects a list or tuple beneath a separator and joins the items after stringifying them, for example `dup ", " join`
+- `join` is useful when `prompt-interaction` returns checklist selections and the flow needs readable output instead of Python-style list formatting
+
+Current orchestration combinators:
+
+- `switch` expects a target value beneath a quotation of alternating case/action pairs and executes the first exact-match action, otherwise the optional `"default"` action
+- `cond` expects a quotation of alternating condition/action pairs, evaluates each condition quotation from top to bottom, and executes the first truthy action quotation
+- `fallback` expects primary and fallback quotations; it executes the fallback quotation only when the primary quotation raises during VM evaluation, and it restores the stack snapshot taken before the primary quotation started
+- `parallel-map` expects a list or tuple beneath a quotation and returns a single list containing one result per input item
+- `parallel-map` runs each item in an isolated child VM with the parent's built-ins and user-defined words, so it is intended for pure data transforms and LLM calls rather than tool requests, handoffs, questions, or answers
+- `reduce` expects a list or tuple beneath an initial accumulator and a quotation; for each item it runs the quotation in an isolated child VM with the accumulator beneath the current item and uses the top stack value as the next accumulator
+- `reduce` is intended for pure fan-in over already loaded data and rejects tool requests, handoffs, questions, and answers inside child quotations
+
+StackVM flows execute against the same shared-store contract used by other flows, so they can populate `pending_tool`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, and other runtime-managed keys.
+
+Current interactive input semantics:
+
+- `ask-user` is terminal and sets `question_to_ask`, which the runtime surfaces as `Question: ...`
+- `prompt-user` is continuing and requires `interaction_handler` or `user_input_handler` in the shared store
+- `prompt-user` stores `last_user_prompt`, `last_user_interaction`, and `last_user_input`, and pushes the response text back onto the VM stack
+- `prompt-user` is intended for bridged runs such as `PocketCodeEngine.start_request(..., bridge_user_input=True)`
+- `prompt-interaction` is the generic continuing host word for structured interaction requests such as `buttons`, `radio`, and `checklist`
+- `prompt-interaction` accepts either a mapping or a YAML mapping string on top of the stack
+- `prompt-interaction` stores `last_user_request`, `last_user_prompt`, `last_user_interaction`, and `last_user_value`, then pushes the extracted response value onto the VM stack
+- for `checklist`, `prompt-interaction` pushes the selected value list; for `buttons` and `radio`, it pushes the selected scalar value
+
+Current optional runtime key rules:
+
+- use `shared@` when branching on optional runtime-managed keys that may be absent, such as `last_delegated_result`, because it resolves missing paths to `None`
+- `store-get` is still appropriate for required top-level scratch values written by the same VM flow, but it returns the empty string for missing keys
+- if a branch depends on `none?`, prefer `shared@` over `store-get` for runtime-managed keys
+- `last_delegated_result`, `last_tool_result`, and nested shared-state contracts are safest to read through `shared@`, `get-in`, or `get-in?`
+
+Tool execution failures reported as `{"success": false, ...}` remain available to the flow in `last_tool_result` and `last_tool_route`. They do not abort execution automatically, which allows StackVM flows to branch on `failure?` and recover explicitly.
 
 ### Generated graph flow behavior
 
