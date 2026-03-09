@@ -141,20 +141,46 @@ Use `parallel-map` before `prompt-interaction`, `handoff`, or delegate-return lo
 ```text
 [ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
 
-"payload" store-get "items" dict-get? dup none?
-[ drop "[]" yaml> ]
-[ ]
-if
-[ item-title ]
-parallel-map
-dup "normalized.titles" shared!? drop
-", " join
-dup "normalized.title" shared!? drop
+[
+  "items" dict-get? dup none?
+  [ drop "[]" yaml> ]
+  [ ]
+  if
+  [ item-title ]
+  parallel-map
+  dup "normalized.titles" shared!? drop
+  ", " join
+  dup "normalized.title" shared!? drop
+] "normalize-item-titles" define
+
+"payload" store-get normalize-item-titles
 ```
+
+In the checked-in examples, `item-title`, `normalize-item-titles`, `store-normalized-source`, `store-normalized-enabled` where needed, and `store-normalized-summary` now live in `vm/common.vm` so routers can reuse the same normalization helpers without repeating the payload shaping and summary setup in every flow.
+
+The checked-in examples now pair `normalize-item-titles` with a reusable `store-normalized-summary` helper so routers can build `normalized.summary` without repeating the title-plus-source concatenation logic.
 
 This pattern keeps the downstream contract stable for flows that still expect a single `normalized.title` or `normalized.summary`, while also preserving the full item list in `normalized.titles` for later use.
 
 See `examples/stackvm_buttons_plugin/`, `examples/stackvm_radio_plugin/`, `examples/stackvm_checklist_handoff_plugin/`, and `examples/stackvm_checklist_return_plugin/` for checked-in interaction flows that now follow this pattern.
+
+## Shared Example Helpers
+
+The checked-in payload-driven StackVM examples now follow a consistent split between `vm/common.vm` and `vm/router.vm`.
+
+- Keep data-shaping helpers in `vm/common.vm` when multiple flows in the example family need the same normalization contract.
+- Keep branching, prompting, delegate return handling, and final answer composition in `vm/router.vm`.
+- Treat helper words as contract builders for the `shared["normalized"]` store, not as places to trigger runtime transitions.
+
+The current helper set used across the checked-in examples is:
+
+- `normalize-item-titles`: map every payload item to a safe title, store `normalized.titles`, and store the joined `normalized.title`.
+- `store-normalized-source`: read `meta.source` from the payload, default to `unknown`, and store `normalized.source`.
+- `store-normalized-enabled`: read `items.0.enabled`, default to `false`, normalize with `bool>`, and store `normalized.enabled` in the boolean-gated examples.
+- `store-normalized-summary`: compose `normalized.title` plus `normalized.source`, store `normalized.summary`, and leave the summary on the stack when the caller wants to use it immediately.
+- `format-selected-actions`: join a checklist selection, store `normalized.selected_actions_text`, and leave both the original list and formatted text available for routing.
+
+Use these helpers when the router would otherwise repeat the same payload normalization steps before every interaction or handoff path. Do not move delegate-return parsing helpers into this pattern unless the returned payload shape is also shared across multiple flows.
 
 ## Branch On Optional Runtime Keys
 
@@ -432,21 +458,19 @@ When checklist input should choose a downstream delegate, store the list, format
 ```text
 prompt-interaction
 dup "normalized.selected_actions" shared!? drop
-dup "delegate" contains?
+format-selected-actions
+over "delegate" contains?
 [
-  dup ", " join dup "normalized.selected_actions_text" shared!? drop
   swap drop drop
   "plugin.delegate_route" handoff
 ]
 [
-  dup "approve" contains?
+  over "approve" contains?
   [
-    dup ", " join dup "normalized.selected_actions_text" shared!? drop
     swap drop drop
     "plugin.approve_route" handoff
   ]
   [
-    dup ", " join dup "normalized.selected_actions_text" shared!? drop
     swap drop drop
     "plugin.review_route" handoff
   ]
@@ -454,6 +478,8 @@ dup "delegate" contains?
 ]
 if
 ```
+
+In the checked-in checklist examples, `format-selected-actions` lives in `vm/common.vm` and both stores `normalized.selected_actions_text` and leaves the original list plus formatted text on the stack so routing can branch on membership without recomputing the joined string.
 
 This pattern is used by `stackvm_checklist_handoff_plugin`.
 

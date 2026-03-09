@@ -1,5 +1,3 @@
-[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
-
 [
   last-tool-result none?
   [
@@ -13,29 +11,13 @@
     [
       payload-data "payload" store-set
 
-      "payload" store-get "items" dict-get? dup none?
-      [ drop "[]" yaml> ]
-      [ ]
-      if
-      [ item-title ]
-      parallel-map
-      dup "normalized.titles" shared!? drop
-      ", " join
-      dup "normalized.title" shared!? drop
+      "payload" store-get normalize-item-titles
 
-      "payload" store-get "items.0.enabled" get-in? dup none?
-      [ drop false ]
-      [ bool> ]
-      if
-      dup "normalized.enabled" shared!? drop
+      "payload" store-get store-normalized-enabled
 
-      "payload" store-get "meta.source" get-in? dup none?
-      [ drop "unknown" ]
-      [ ]
-      if
-      dup "normalized.source" shared!? drop
+      "payload" store-get store-normalized-source
 
-      "normalized.title" shared@ " from " concat "normalized.source" shared@ concat "normalized.summary" shared!? drop
+      store-normalized-summary drop
 
       "normalized.enabled" shared@
       [

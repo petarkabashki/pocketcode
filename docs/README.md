@@ -32,8 +32,8 @@ The runtime also accepts `plugin::resource` in user-facing configuration, manife
 - `cli.md`: startup flags, commands, aliases, and Textual controls
 - `plugin_architecture.md`: plugin discovery, manifest schema, flow fields, and prompt/tool registration
 - `pocketflow_agents.md`: flow authoring and agent profile behavior
-- `stackvm_cookbook.md`: copyable StackVM authoring snippets for common runtime patterns
-- `stackvm_patterns.md`: checked-in StackVM example patterns grouped by orchestration style
+	- `stackvm_cookbook.md`: **canonical source for StackVM helper conventions and architectural split**. Contains copyable authoring snippets for common runtime patterns, including the shared example-helper conventions used by the checked-in payload-driven VM examples. Refer to this doc for the definitive list and description of normalization/formatting helpers and the `vm/common.vm` vs `vm/router.vm` split.
+	- `stackvm_patterns.md`: groups checked-in StackVM examples by orchestration style. For helper conventions and architectural split, always refer to `stackvm_cookbook.md` as canonical. Use this doc to find example starting points and orchestration patterns.
 - `modes_and_skills.md`: Markdown-authored runtime overlays and skill-provided tools
 - `run_cancellation.md`: current cancellation model and managed subprocess behavior
 
@@ -46,7 +46,8 @@ Checked-in example assets live outside `docs/` under `examples/`. Current StackV
 3. Read `configuration.md` for workspace setup and discovery behavior.
 4. Read `markdown_assets.md` when working on any Markdown-authored asset.
 5. Read `cli.md` for the user-facing control surface.
-6. Read `plugin_architecture.md`, `pocketflow_agents.md`, `stackvm_patterns.md`, and `stackvm_cookbook.md` when changing runtime resources.
+    6. Read `plugin_architecture.md`, `pocketflow_agents.md`, `stackvm_patterns.md`, and `stackvm_cookbook.md` when changing runtime resources.
+    	For StackVM example cleanup or authoring, **start with the helper-conventions and architectural split sections in `stackvm_cookbook.md` (canonical)** before editing individual example routers. Use `stackvm_patterns.md` to find orchestration patterns and example starting points.
 7. Read `modes_and_skills.md` when working on session overlays.
 8. Read `run_cancellation.md` when changing long-running tools or stop behavior.
 

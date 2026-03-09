@@ -1,1 +1,25 @@
 [ last-tool-result "content" dict-get yaml> ] "payload-data" define
+[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
+[
+	"items" dict-get? dup none?
+	[ drop "[]" yaml> ]
+	[ ]
+	if
+	[ item-title ]
+	parallel-map
+	dup "normalized.titles" shared!? drop
+	", " join
+	dup "normalized.title" shared!? drop
+] "normalize-item-titles" define
+[
+	"meta.source" get-in? dup none?
+	[ drop "unknown" ]
+	[ ]
+	if
+	dup "normalized.source" shared!? drop
+	drop
+] "store-normalized-source" define
+[
+	"normalized.title" shared@ " from " concat "normalized.source" shared@ concat
+	dup "normalized.summary" shared!? drop
+] "store-normalized-summary" define

@@ -1,5 +1,3 @@
-[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
-
 [
   last-tool-result none?
   [
@@ -13,43 +11,29 @@
     [
       payload-data "payload" store-set
 
-      "payload" store-get "items" dict-get? dup none?
-      [ drop "[]" yaml> ]
-      [ ]
-      if
-      [ item-title ]
-      parallel-map
-      dup "normalized.titles" shared!? drop
-      ", " join
-      dup "normalized.title" shared!? drop
+      "payload" store-get normalize-item-titles
 
-      "payload" store-get "meta.source" get-in? dup none?
-      [ drop "unknown" ]
-      [ ]
-      if
-      dup "normalized.source" shared!? drop
+      "payload" store-get store-normalized-source
 
-      "normalized.title" shared@ " from " concat "normalized.source" shared@ concat dup "normalized.summary" shared!? drop
+      store-normalized-summary
 
       "{kind: checklist, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: review, label: Review, value: review}], min_selected: 1}" yaml>
       dup "prompt" "Choose actions for " "normalized.summary" shared@ concat dict-set
       prompt-interaction
       dup "normalized.selected_actions" shared!? drop
-      dup "delegate" contains?
+      format-selected-actions
+      over "delegate" contains?
       [
-        dup ", " join dup "normalized.selected_actions_text" shared!? drop
         swap drop drop
         "stackvm_checklist_handoff_example.delegate_route" handoff
       ]
       [
-        dup "approve" contains?
+        over "approve" contains?
         [
-          dup ", " join dup "normalized.selected_actions_text" shared!? drop
           swap drop drop
           "stackvm_checklist_handoff_example.approve_route" handoff
         ]
         [
-          dup ", " join dup "normalized.selected_actions_text" shared!? drop
           swap drop drop
           "stackvm_checklist_handoff_example.review_route" handoff
         ]

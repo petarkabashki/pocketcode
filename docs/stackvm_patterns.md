@@ -4,6 +4,16 @@ This document groups the checked-in StackVM examples by orchestration pattern so
 
 Use this together with `markdown_assets.md` for the canonical StackVM surface and `pocketflow_agents.md` for how VM-backed flows fit into the broader runtime.
 
+## Shared Helper Conventions
+
+**For the canonical description of StackVM helper conventions and architectural split, always refer to `stackvm_cookbook.md`.**
+
+Most payload-driven checked-in examples now keep reusable normalization helpers in `vm/common.vm` and reserve `vm/router.vm` for orchestration logic. See `stackvm_cookbook.md` for the definitive list and description of normalization/formatting helpers and the architectural split.
+
+Examples that use this helper style include `stackvm_buttons_plugin`, `stackvm_radio_plugin`, `stackvm_checklist_handoff_plugin`, `stackvm_multistage_pipeline_plugin`, the delegate-return routing/finalize examples, and the plain normalization examples.
+
+Use this convention when the example needs a stable normalized shared-state contract across multiple runtime paths. Keep flow-specific prompting, switching, handoff, and returned-decision parsing in the router instead of pushing those behaviors down into shared helpers.
+
 ## Direct Answer
 
 - `examples/stackvm_review_plugin/`
@@ -113,7 +123,7 @@ Use this together with `markdown_assets.md` for the canonical StackVM surface an
   - Normalizes all payload item titles into shared state with `parallel-map`
   - Uses `prompt-interaction` with a radio request and continues to a final answer from the selected mode
 
-These examples share the same authoring pattern: normalize every payload item first, keep the aggregated summary in shared state, and let the structured interaction operate on that stable summary instead of a single raw item.
+These examples share the same authoring pattern: define `item-title` plus reusable `normalize-item-titles`, `store-normalized-source`, `store-normalized-enabled` where needed, and `store-normalized-summary` helpers in `vm/common.vm`, keep the aggregated summary in shared state, and let the structured interaction operate on that stable summary instead of a single raw item.
 
 ## Prompted Delegate Return
 
@@ -160,7 +170,7 @@ These examples share the same authoring pattern: normalize every payload item fi
   - Reads YAML through a tool
   - Normalizes all payload item titles into shared state with `parallel-map`
   - Collects checklist actions through `prompt-interaction`
-  - Uses the selected list to hand off to different delegates after formatting it with `join`
+  - Uses a reusable `format-selected-actions` helper to store the joined action text once before handing off to different delegates
 
 Together with `stackvm_buttons_plugin` and `stackvm_radio_plugin`, these checklist examples are the current checked-in references for the recurring “normalize many items, then interact or route from the shared summary” pattern.
 
@@ -168,7 +178,7 @@ Together with `stackvm_buttons_plugin` and `stackvm_radio_plugin`, these checkli
 
 - `examples/stackvm_multistage_pipeline_plugin/`
   - Reads YAML through a tool and normalizes all payload item titles into shared state in the caller
-  - Collects checklist actions in the caller, then hands off with `return_to_caller`
+  - Collects checklist actions in the caller, formats them once with `format-selected-actions`, then hands off with `return_to_caller`
   - Uses a VM delegate to ask a second structured question before returning to the caller
   - Can also finalize directly in the caller when the first-stage selection does not require delegation
   - Finalizes back in the caller from both the checklist summary and `last_delegated_result`
