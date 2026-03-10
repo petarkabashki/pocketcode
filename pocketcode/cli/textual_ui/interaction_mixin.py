@@ -7,6 +7,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, OptionList, RichLog, Select, SelectionList, Switch, TextArea
 
 from pocketcode.cli.user_interaction import interaction_placeholder
+from pocketcode.core.user_interaction import normalize_interaction_request
 
 from .shared import LOADING_OPTION, SKILL_GROUP_PREFIX
 
@@ -20,6 +21,11 @@ EXPANDABLE_SURFACE_IDS = (
     "inspector-sessions",
     "inspector-prompts",
 )
+
+INLINE_PROMPT_INPUT_IDS = {"inline-prompt-input-chat", "inline-prompt-input-run"}
+INLINE_PROMPT_OPTION_IDS = {"inline-prompt-options-chat", "inline-prompt-options-run"}
+INLINE_PROMPT_CHECKLIST_IDS = {"inline-prompt-checklist-chat", "inline-prompt-checklist-run"}
+INLINE_PROMPT_SUBMIT_IDS = {"inline-prompt-submit-chat", "inline-prompt-submit-run"}
 
 
 class TextualAppInteractionMixin:
@@ -85,6 +91,10 @@ class TextualAppInteractionMixin:
         widget_id = event.input.id or ""
         if widget_id == "main-input":
             await self._handle_main_input(event.value)
+        elif widget_id == "debugger-inline-value-input":
+            self.action_debug_inline_add_breakpoint()
+        elif widget_id in INLINE_PROMPT_INPUT_IDS:
+            self._submit_inline_pending_input()
 
     async def _handle_main_input(self, raw_text: str) -> None:
         text = raw_text.strip()
@@ -94,18 +104,28 @@ class TextualAppInteractionMixin:
         input_widget = self.query_one("#main-input", Input)
         input_widget.value = ""
         pending_input_request = self._runtime_state.pending_input_request
+        if pending_input_request is None and self._active_run is not None and self._active_run.is_debug_paused:
+            if self._handle_textual_debugger_input(text):
+                self._remember_entry_history(text)
+                input_widget.focus()
+                return
         if pending_input_request is not None and self._active_run is not None:
             if pending_input_request.get("type") == "interaction_requested":
                 try:
-                    resolved = self._resolve_pending_input_effect(text, pending_input_request)
+                    resolved, display_text = self._resolve_pending_input_effect(text, pending_input_request)
                 except ValueError as exc:
                     self._write_error(str(exc))
+                    if getattr(self, "_control_presentation", "inline") != "modal":
+                        self._show_inline_pending_input(dict(pending_input_request), initial_text=text)
                     self._set_main_input_placeholder(interaction_placeholder(pending_input_request))
                     return
             else:
-                resolved = self._resolve_pending_input_effect(text, pending_input_request)
+                resolved, display_text = self._resolve_pending_input_effect(text, pending_input_request)
+            self._remember_entry_history(text)
             if not resolved:
                 self._write_error("The pending prompt is no longer active.")
+            elif getattr(self, "_control_presentation", "inline") != "modal":
+                self._show_inline_prompt_result(display_text)
             self._set_pending_input_request(None)
             self._set_main_input_placeholder()
             return
@@ -116,7 +136,9 @@ class TextualAppInteractionMixin:
 
         try:
             if text.startswith("/"):
+                self._clear_inline_prompt_display()
                 self._set_runtime_busy(True)
+                self._remember_entry_history(text)
                 self._write_user(text)
                 if text.lower() == "/copy":
                     self.action_copy_last_response()
@@ -133,7 +155,9 @@ class TextualAppInteractionMixin:
                     return
             else:
                 with self._batch_ui_update():
+                    self._clear_inline_prompt_display()
                     self._set_runtime_busy(True)
+                    self._remember_entry_history(text)
                     self._write_user(text)
                     self._start_request_effect(text)
                     self._set_runtime_status("running")
@@ -147,6 +171,249 @@ class TextualAppInteractionMixin:
             if self._active_run is None:
                 self._commit_engine_ui_update(refresh_suggestions=True)
 
+    def _coerce_inline_prompt_tokens(self, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        text = str(value).strip()
+        if not text:
+            return []
+        if "," in text:
+            return [segment.strip() for segment in text.split(",") if segment.strip()]
+        return [text]
+
+    def _inline_prompt_option_label(self, option) -> str:
+        label = str(option.label)
+        description = str(option.description or "").strip()
+        return f"{label} [{description}]" if description else label
+
+    def _inline_prompt_help_text(self, kind: str, description: str) -> str:
+        if description:
+            return description
+        if kind == "checklist":
+            return "Use arrows and Space to toggle options, then apply."
+        if kind in {"buttons", "radio"}:
+            return "Choose one option, then submit."
+        return "Submit the requested input for the active run."
+
+    def _show_inline_pending_input(self, request: dict[str, object], *, initial_text: str = "") -> None:
+        request_type = str(request.get("type") or "")
+        prompt = str(request.get("prompt") or "Provide input")
+
+        if request_type == "interaction_requested":
+            normalized = normalize_interaction_request(request)
+            defaults = self._coerce_inline_prompt_tokens(initial_text or normalized.default)
+            self._inline_prompt_kind = normalized.kind
+            self._inline_prompt_prompt = normalized.prompt
+            self._inline_prompt_help = self._inline_prompt_help_text(normalized.kind, normalized.description)
+            self._inline_prompt_placeholder = interaction_placeholder(request)
+            self._inline_prompt_submit_label = normalized.submit_label or (
+                "Apply" if normalized.kind == "checklist" else "Submit"
+            )
+            self._inline_prompt_select_options = tuple(
+                (self._inline_prompt_option_label(option), str(option.id))
+                for option in normalized.options
+            )
+            if normalized.kind == "checklist":
+                selected_tokens = set(defaults)
+                self._inline_prompt_selected_values = tuple(
+                    str(option.id)
+                    for option in normalized.options
+                    if option.id in selected_tokens or str(option.value) in selected_tokens
+                )
+                selected_ids = set(self._inline_prompt_selected_values)
+                self._inline_prompt_checklist_options = tuple(
+                    (
+                        self._inline_prompt_option_label(option),
+                        str(option.id),
+                        option.id in selected_ids,
+                    )
+                    for option in normalized.options
+                )
+                self._inline_prompt_selected_value = ""
+                self._inline_prompt_text_value = ""
+            elif normalized.kind in {"buttons", "radio"}:
+                selected_value = ""
+                if normalized.options:
+                    selected_value = str(normalized.options[0].id)
+                    if defaults:
+                        for option in normalized.options:
+                            if option.id in defaults or str(option.value) in defaults:
+                                selected_value = str(option.id)
+                                break
+                self._inline_prompt_selected_value = selected_value
+                self._inline_prompt_selected_values = ()
+                self._inline_prompt_checklist_options = ()
+                self._inline_prompt_text_value = ""
+            else:
+                self._inline_prompt_text_value = initial_text or (defaults[0] if defaults else "")
+                self._inline_prompt_selected_value = ""
+                self._inline_prompt_selected_values = ()
+                self._inline_prompt_checklist_options = ()
+        else:
+            self._inline_prompt_kind = "text"
+            self._inline_prompt_prompt = prompt
+            self._inline_prompt_help = str(request.get("description") or "Submit the requested input for the active run.")
+            self._inline_prompt_placeholder = prompt
+            self._inline_prompt_submit_label = str(request.get("submit_label") or "Submit")
+            self._inline_prompt_text_value = str(initial_text)
+            self._inline_prompt_selected_value = ""
+            self._inline_prompt_selected_values = ()
+            self._inline_prompt_select_options = ()
+            self._inline_prompt_checklist_options = ()
+
+        self._inline_prompt_visible = True
+        self._inline_prompt_resolved = False
+        self._inline_prompt_summary_text = ""
+        if self._current_view not in {"chat", "run"}:
+            self._set_current_view("chat", refresh=False)
+        self.call_after_refresh(self._focus_inline_pending_input_control)
+
+    def _focus_inline_pending_input_control(self) -> None:
+        if not getattr(self, "_inline_prompt_visible", False) or getattr(self, "_inline_prompt_resolved", False):
+            return
+        suffix = "run" if self._current_view == "run" else "chat"
+        if self._inline_prompt_kind == "text":
+            widget = self.query_one(f"#inline-prompt-input-{suffix}", Input)
+            widget.focus()
+            widget.cursor_position = len(widget.value)
+            return
+        if self._inline_prompt_kind in {"buttons", "radio"}:
+            self.query_one(f"#inline-prompt-options-{suffix}", OptionList).focus()
+            return
+        self.query_one(f"#inline-prompt-checklist-{suffix}", SelectionList).focus()
+
+    def _show_inline_prompt_result(self, summary_text: str) -> None:
+        self._inline_prompt_visible = True
+        self._inline_prompt_resolved = True
+        self._inline_prompt_summary_text = str(summary_text)
+        self._inline_prompt_text_value = ""
+        self._inline_prompt_selected_value = ""
+        self._inline_prompt_selected_values = ()
+        self._inline_prompt_checklist_options = ()
+
+    def _clear_inline_prompt_display(self) -> None:
+        self._inline_prompt_visible = False
+        self._inline_prompt_resolved = False
+        self._inline_prompt_kind = "text"
+        self._inline_prompt_prompt = ""
+        self._inline_prompt_help = ""
+        self._inline_prompt_placeholder = ""
+        self._inline_prompt_submit_label = "Submit"
+        self._inline_prompt_text_value = ""
+        self._inline_prompt_selected_value = ""
+        self._inline_prompt_selected_values = ()
+        self._inline_prompt_summary_text = ""
+        self._inline_prompt_select_options = ()
+        self._inline_prompt_checklist_options = ()
+
+    def _inline_pending_input_value(self) -> str:
+        if self._inline_prompt_kind == "checklist":
+            return ",".join(self._inline_prompt_selected_values)
+        if self._inline_prompt_kind in {"buttons", "radio"}:
+            return self._inline_prompt_selected_value
+        return self._inline_prompt_text_value
+
+    def _submit_inline_pending_input(self) -> None:
+        if self._active_run is None:
+            self._write_error("The pending prompt is no longer active.")
+            return
+        pending_input_request = self._runtime_state.pending_input_request
+        if pending_input_request is None:
+            self._write_error("The pending prompt is no longer active.")
+            return
+        value = self._inline_pending_input_value()
+        try:
+            resolved, display_text = self._resolve_pending_input_effect(value, pending_input_request)
+        except ValueError as exc:
+            self._write_error(str(exc))
+            self.call_after_refresh(self._focus_inline_pending_input_control)
+            return
+        self._remember_entry_history(value)
+        if not resolved:
+            self._write_error("The pending prompt is no longer active.")
+            return
+        self._set_pending_input_request(None)
+        self._set_main_input_placeholder()
+        self._show_inline_prompt_result(display_text)
+        self._commit_ui_update()
+
+    def _should_open_pending_input_modal(self, request: dict[str, object] | None) -> bool:
+        if not isinstance(request, dict):
+            return False
+        if getattr(self, "_control_presentation", "inline") != "modal":
+            return False
+        if self._runtime_state.active_modal_kind is not None:
+            return False
+        if self._active_run is None:
+            return False
+        request_type = str(request.get("type") or "")
+        return request_type in {"interaction_requested", "user_input_requested"}
+
+    def _present_pending_input_modal(self, request: dict[str, object], *, initial_text: str = "") -> None:
+        if not self._should_open_pending_input_modal(request):
+            return
+        request_type = str(request.get("type") or "")
+        if request_type == "interaction_requested" and str(request.get("kind") or "text") != "text":
+            self._present_interaction_controls_modal(
+                title="Input Required",
+                request=request,
+                on_submit=lambda value: self._submit_pending_input_from_modal(value, dict(request)),
+            )
+            return
+
+        prompt = str(request.get("prompt") or "Provide input")
+        placeholder = interaction_placeholder(request) if request_type == "interaction_requested" else prompt
+        help_text = str(request.get("description") or "Submit the requested input for the active run.")
+        submit_label = str(request.get("submit_label") or "Submit")
+        self._present_prompt_input_modal(
+            title="Input Required",
+            prompt=prompt,
+            help_text=help_text,
+            placeholder=placeholder,
+            initial_text=initial_text,
+            submit_label=submit_label,
+            on_submit=lambda value: self._submit_pending_input_from_modal(value, dict(request)),
+        )
+
+    def _submit_pending_input_from_modal(self, value: str, request: dict[str, object]) -> None:
+        if self._active_run is None:
+            self._write_error("The pending prompt is no longer active.")
+            return
+        pending_input_request = self._runtime_state.pending_input_request
+        if pending_input_request is None:
+            self._write_error("The pending prompt is no longer active.")
+            return
+        request_id = str(
+            request.get("request_id")
+            or request.get("prompt_id")
+            or ""
+        )
+        pending_request_id = str(
+            pending_input_request.get("request_id")
+            or pending_input_request.get("prompt_id")
+            or ""
+        )
+        if request_id and pending_request_id and request_id != pending_request_id:
+            self._write_error("A different prompt is now active.")
+            return
+        try:
+            resolved, display_text = self._resolve_pending_input_effect(value, pending_input_request)
+        except ValueError as exc:
+            self._write_error(str(exc))
+            self.call_after_refresh(lambda: self._present_pending_input_modal(dict(pending_input_request), initial_text=value))
+            return
+        self._remember_entry_history(value)
+        if not resolved:
+            self._write_error("The pending prompt is no longer active.")
+            return
+        self._set_pending_input_request(None)
+        self._set_main_input_placeholder()
+        if getattr(self, "_control_presentation", "inline") != "modal":
+            self._show_inline_prompt_result(display_text)
+        self.query_one("#main-input", Input).focus()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
         if button_id == "open-view-button":
@@ -159,6 +426,28 @@ class TextualAppInteractionMixin:
             self.action_clone_asset()
         elif button_id == "reload-button":
             self.action_reload_runtime()
+        elif button_id == "debug-next-button":
+            self.action_debug_next()
+        elif button_id == "debug-continue-button":
+            self.action_debug_continue()
+        elif button_id == "debug-add-break-button":
+            self.action_debug_add_breakpoint()
+        elif button_id == "debug-clear-selected-break-button":
+            self.action_debug_clear_selected_breakpoint()
+        elif button_id == "debug-clear-breaks-button":
+            self.action_debug_clear_breakpoints()
+        elif button_id == "debug-status-button":
+            self.action_debug_status()
+        elif button_id == "debug-breaks-button":
+            self.action_debug_breakpoints()
+        elif button_id == "debug-quit-button":
+            self.action_debug_quit()
+        elif button_id == "debugger-inline-apply-button":
+            self.action_debug_inline_add_breakpoint()
+        elif button_id == "debugger-inline-cancel-button":
+            self._hide_inline_debugger_breakpoint_editor()
+        elif button_id in INLINE_PROMPT_SUBMIT_IDS:
+            self._submit_inline_pending_input()
         elif button_id == "inspector-skill-save-button":
             self._save_inspector_skill_selection()
         elif button_id == "inspector-tool-save-button":
@@ -186,6 +475,8 @@ class TextualAppInteractionMixin:
                 self._apply_llm_selection(value)
             elif widget_id == "session-confirm-select":
                 self._apply_session_confirmation_selection(value)
+            elif widget_id == "debugger-inline-type-select":
+                self._set_inline_debugger_breakpoint_type(value)
             self._commit_engine_ui_update()
         except Exception as exc:
             self._write_error(str(exc))
@@ -217,6 +508,17 @@ class TextualAppInteractionMixin:
         self.focused.action_select()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id in INLINE_PROMPT_OPTION_IDS:
+            option_id = getattr(event, "option_id", None)
+            if option_id is None:
+                option_index = getattr(event, "option_index", getattr(event, "index", None))
+                if option_index is None or option_index >= len(self._inline_prompt_select_options):
+                    return
+                self._inline_prompt_selected_value = str(self._inline_prompt_select_options[option_index][1])
+            else:
+                self._inline_prompt_selected_value = str(option_id)
+            self._commit_ui_update()
+            return
         if event.option_list.id != "profile-list":
             return
         option_index = getattr(event, "option_index", getattr(event, "index", None))
@@ -236,6 +538,19 @@ class TextualAppInteractionMixin:
 
     def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
         list_id = event.selection_list.id or ""
+        if list_id in INLINE_PROMPT_CHECKLIST_IDS and not event.selection_list.disabled:
+            selected_values: list[str] = []
+            for selected in event.selection_list.selected:
+                value = str(selected)
+                if value != LOADING_OPTION:
+                    selected_values.append(value)
+            self._inline_prompt_selected_values = tuple(selected_values)
+            self._inline_prompt_checklist_options = tuple(
+                (label, value, value in self._inline_prompt_selected_values)
+                for label, value, _ in self._inline_prompt_checklist_options
+            )
+            self._commit_ui_update()
+            return
         if list_id not in {"skill-list", "inspector-tools"} or event.selection_list.disabled:
             return
         option_index = getattr(event, "selection_index", getattr(event, "index", None))

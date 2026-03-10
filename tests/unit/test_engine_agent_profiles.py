@@ -1367,6 +1367,7 @@ class TestEngineAgentProfiles:
             workspace_view="review",
             default_agent="asker::asker",
             default_llm_profile="fast",
+            control_presentation="modal",
         )
 
         saved = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
@@ -1374,6 +1375,7 @@ class TestEngineAgentProfiles:
         assert saved["runtime"]["textual"] == {
             "theme_name": "forest",
             "workspace_view": "review",
+            "control_presentation": "modal",
         }
         assert saved["llm"]["default_profile"] == "fast"
 
@@ -1420,10 +1422,43 @@ class TestEngineAgentProfiles:
             workspace_view="review",
             default_agent="core::react",
             default_llm_profile="fast",
+            control_presentation="inline",
         )
 
         saved = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
         assert saved["runtime"]["default_agent"] == "core.react"
+
+    def test_get_system_settings_returns_control_presentation(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._runtime_config = {"textual": {"control_presentation": "modal"}}
+        engine._llm_config = {"default_profile": "fast"}
+        engine._plugins = type("Plugins", (), {"agents": {}})()
+
+        settings = engine.get_system_settings()
+
+        assert settings["control_presentation"] == "modal"
+
+    def test_get_system_settings_maps_legacy_user_input_popups_to_modal(self):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._runtime_config = {"textual": {"user_input_popups": True}}
+        engine._llm_config = {"default_profile": "fast"}
+        engine._plugins = type("Plugins", (), {"agents": {}})()
+
+        settings = engine.get_system_settings()
+
+        assert settings["control_presentation"] == "modal"
+
+    def test_set_last_used_entry_history_persists_trimmed_history(self, tmp_path):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {"runtime": {"textual": {}}}
+        engine._runtime_config = engine._config["runtime"]
+
+        engine.set_last_used_entry_history([" first ", "", "second", "third"])
+
+        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
+        assert saved["runtime"]["textual"]["last_used"]["entry_history"] == ["first", "second", "third"]
+        assert engine.get_textual_entry_history() == ["first", "second", "third"]
 
     def test_configured_enabled_skills_uses_default_skills_without_session_override(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)

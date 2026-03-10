@@ -251,18 +251,55 @@ class GraphFlowNode(Node):
         self.spec = spec
 
     def _run(self, shared: Dict[str, Any]) -> str | None:
+        kind = str(self.spec.get("kind") or self.spec.get("type") or "route").strip().lower()
+        shared["active_node_id"] = self.node_id
+        shared["active_node_kind"] = kind
+        _emit_runtime_event(
+            shared,
+            "node_started",
+            node_id=self.node_id,
+            node_kind=kind,
+            agent=shared.get("active_agent"),
+        )
         context = {"shared": shared}
         _apply_updates(shared, self.spec.get("set") or self.spec.get("updates"), context=context)
 
-        kind = str(self.spec.get("kind") or self.spec.get("type") or "route").strip().lower()
+        transition: str | None = None
         if kind in {"route", "branch", "decision"}:
-            return _resolve_transition(shared, self.spec, context=context)
+            transition = _resolve_transition(shared, self.spec, context=context)
+            _emit_runtime_event(
+                shared,
+                "node_completed",
+                node_id=self.node_id,
+                node_kind=kind,
+                agent=shared.get("active_agent"),
+                transition=transition,
+            )
+            return transition
 
         if kind in {"noop", "pass", "set"}:
-            return str(_resolve_value(self.spec.get("transition") or self.spec.get("next") or "default", context))
+            transition = str(_resolve_value(self.spec.get("transition") or self.spec.get("next") or "default", context))
+            _emit_runtime_event(
+                shared,
+                "node_completed",
+                node_id=self.node_id,
+                node_kind=kind,
+                agent=shared.get("active_agent"),
+                transition=transition,
+            )
+            return transition
 
         if kind == "tool":
-            return self._run_tool_node(shared)
+            transition = self._run_tool_node(shared)
+            _emit_runtime_event(
+                shared,
+                "node_completed",
+                node_id=self.node_id,
+                node_kind=kind,
+                agent=shared.get("active_agent"),
+                transition=transition,
+            )
+            return transition
 
         if kind == "handoff":
             target = _resolve_value(self.spec.get("agent") or self.spec.get("handoff") or self.spec.get("target"), shared)
@@ -271,10 +308,28 @@ class GraphFlowNode(Node):
             context_mode = self.spec.get("context_mode") or self.spec.get("handoff_context_mode")
             if context_mode:
                 shared["active_handoff_context_mode"] = str(context_mode)
-            return "handoff"
+            transition = "handoff"
+            _emit_runtime_event(
+                shared,
+                "node_completed",
+                node_id=self.node_id,
+                node_kind=kind,
+                agent=shared.get("active_agent"),
+                transition=transition,
+            )
+            return transition
 
         if kind in {"output", "end", "answer", "ask"}:
-            return self._run_output_node(shared)
+            transition = self._run_output_node(shared)
+            _emit_runtime_event(
+                shared,
+                "node_completed",
+                node_id=self.node_id,
+                node_kind=kind,
+                agent=shared.get("active_agent"),
+                transition=transition,
+            )
+            return transition
 
         raise ValueError(f"Unsupported markdown graph node kind '{kind}' on '{self.node_id}'.")
 
@@ -502,6 +557,12 @@ def _resolve_transition(shared: Dict[str, Any], spec: Dict[str, Any], *, context
 
     default_transition = spec.get("default_transition") or spec.get("default") or "default"
     return str(_resolve_value(default_transition, context))
+
+
+def _emit_runtime_event(shared: Dict[str, Any], event_type: str, **payload: Any) -> None:
+    handler = shared.get("runtime_event_handler")
+    if callable(handler):
+        handler(event_type, **payload)
 
 
 _INTERPOLATION_PATTERNS = (

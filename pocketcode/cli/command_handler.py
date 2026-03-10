@@ -6,6 +6,7 @@ import shlex
 from typing import Any, Dict, Optional
 
 from pocketcode.core.engine import PocketCodeEngine
+from pocketcode.cli.stackvm_commands import handle_stackvm_command, print_stackvm_help
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ BASE_COMMAND_SUGGESTIONS = [
     "/llm-handoff",
     "/tools",
     "/reload",
+    "/debug",
     "/stop",
     "/cancel",
     "/status",
@@ -51,6 +53,13 @@ BASE_COMMAND_SUGGESTIONS = [
     "/session list",
     "/session new",
     "/session resume",
+    "/stackvm",
+    "/stackvm list",
+    "/stackvm create",
+    "/stackvm inspect",
+    "/stackvm run",
+    "/stackvm debug",
+    "/stackvm alter",
     "/agent list",
     "/agent show",
     "/agent switch",
@@ -302,6 +311,9 @@ def handle_command(
         print("Reloaded plugins, agents, tools, and LLM profile mappings.")
         return None
 
+    if command == "/debug":
+        return _handle_debug_command(args=args, cli_context=cli_context, interface_name=interface_name, active_run=active_run)
+
     if command in {"/stop", "/cancel"}:
         return _handle_stop_command(active_run)
 
@@ -310,7 +322,9 @@ def handle_command(
         run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
         if not isinstance(run_summary, dict):
             run_summary = {}
-        verbose = bool(args) and args[0].lower() in {"verbose", "--verbose", "-v"}
+        normalized_args = {str(arg).lower() for arg in args}
+        verbose = bool({"verbose", "--verbose", "-v"} & normalized_args)
+        show_steps = verbose or bool({"steps", "--steps", "timeline", "--timeline"} & normalized_args)
         print("Runtime status:")
         print(f"  Internal flow: {status.get('runtime_flow') or 'internal-flow'}")
         print(f"  Selected flow: {status.get('flow') or 'auto'}")
@@ -324,6 +338,13 @@ def handle_command(
         print(f"  Default LLM Profile: {status['default_llm_profile']}")
         print(f"  Tool Confirmation (config): {status.get('tool_confirmation', {})}")
         print(f"  Tool Confirmation (session overrides): {status.get('session_tool_confirmation_overrides', {})}")
+        session_debugger_breakpoints = status.get("session_debugger_breakpoints", [])
+        print(f"  Debugger Breakpoints (session): {len(session_debugger_breakpoints or [])}")
+        print(f"  Runtime Events: {run_summary.get('runtime_event_count', 0)}")
+        print(f"  Runtime Steps: {run_summary.get('step_count', 0)}")
+        if verbose and session_debugger_breakpoints:
+            for label in session_debugger_breakpoints:
+                print(f"    - {label}")
         warning_codes = [
             str(item.get("code") or "").strip()
             for item in run_summary.get("vm_validation_warnings", [])
@@ -341,6 +362,8 @@ def handle_command(
                     if message:
                         prefix = f"{code} ({location})" if location else code
                         print(f"    - {prefix}: {message}")
+        if show_steps:
+            _print_run_steps(run_summary, verbose=verbose)
         return None
 
     if command in {"/flows", "/agents", "/prompts", "/modes", "/skills", "/llms", "/tools", "/list"}:
@@ -364,6 +387,13 @@ def handle_command(
 
     if command == "/session":
         return _handle_session_command(args, engine)
+
+    if command == "/stackvm":
+        try:
+            return handle_stackvm_command(args, engine)
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
 
     if command == "/agent":
         return _handle_agent_command(args, engine)
@@ -397,6 +427,66 @@ def _normalize_command(command: str) -> str:
         "/lh": "/llm-handoff",
     }
     return aliases.get(command, command)
+
+
+def _handle_debug_command(
+    *,
+    args: list[str],
+    cli_context: Dict[str, Any],
+    interface_name: str,
+    active_run: Any,
+) -> Optional[str]:
+    if active_run is not None:
+        print("A run is already active. Wait for it to finish or cancel it before starting the debugger.")
+        return None
+
+    if not args:
+        print("Usage: /debug <request text>")
+        return None
+
+    runner = cli_context.get("debug_request_runner") if isinstance(cli_context, dict) else None
+    if not callable(runner):
+        print("The /debug command is not available in this interface.")
+        return None
+
+    request = " ".join(args).strip()
+    if not request:
+        print("Usage: /debug <request text>")
+        return None
+
+    try:
+        result = runner(request)
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return None
+
+    if result:
+        print(result)
+    return None
+
+
+def _print_run_steps(run_summary: Dict[str, Any], *, verbose: bool) -> None:
+    steps = run_summary.get("steps", [])
+    if not isinstance(steps, list) or not steps:
+        print("  Step Trace: (none)")
+        return
+
+    print("  Step Trace:")
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        index = step.get("index")
+        kind = str(step.get("kind") or "step")
+        status = str(step.get("status") or "completed")
+        summary = str(step.get("summary") or step.get("label") or kind)
+        duration = step.get("duration_ms")
+        duration_suffix = f" [{float(duration):.1f}ms]" if isinstance(duration, (int, float)) else ""
+        print(f"    {index}. {kind} ({status}){duration_suffix} {summary}")
+        if not verbose:
+            continue
+        details = step.get("details")
+        if isinstance(details, dict) and details:
+            print(f"       details: {details}")
 
 
 def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine) -> Optional[str]:
@@ -901,16 +991,18 @@ Pocketcode Commands:
                                  Targets: flow|llm|llm-flow|llm-handoff
   /flow <flow_name|auto>         Select the active flow.
                                  Optional: --agent <agent_name>
+  /debug <request text>          Run one request under the interactive debugger.
   /prompts                       List registered prompts.
   /mode <cmd> [opts]             Manage runtime modes. Run '/mode help'.
   /skill <cmd> [opts]            Manage runtime skills. Run '/skill help'.
   /reload                        Reload plugins and runtime catalogs.
   /stop, /cancel                 Request cancellation of the active run.
-  /status [verbose]              Show runtime status.
+  /status [verbose|steps]        Show runtime status and optional step trace.
   /context <cmd> [opts]          Manage context. Run '/context help'.
     /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
     /session <cmd> [opts]          Manage saved sessions. Run '/session help'.
   /agent <cmd> [opts]            Manage agents. Run '/agent help'.
+  /stackvm <cmd> [opts]          Manage StackVM flows, scripts, and agents. Run '/stackvm help'.
     /asset <cmd> [opts]            Create workspace markdown assets. Run '/asset help'.
   /exit, /quit                   Exit Pocketcode.
 
@@ -951,10 +1043,12 @@ Textual-only commands:
 
 Textual UI shortcuts:
   Tab                           Complete current prompt input.
+  F2                            Open previous main-input entries and load one back into the prompt.
   F5                            Open the global view selector (Chat, Control, Run).
   F3                            Open the popup edit selector (agent, mode, LLM, tools, tool policies).
   F4                            Open the popup clone selector (agent, mode, LLM).
   F6                            Open the Control Center (agent, mode, LLM, skills, tools, policies, presets, confirm, system settings).
+  Ctrl+P / Ctrl+N               Cycle backward or forward through previous main-input entries.
   F10                           Toggle the right inspector panel.
   Ctrl+Shift+A                  Copy full response console output.
   Ctrl+Y                        Copy last assistant response.
@@ -979,6 +1073,9 @@ def print_context_help() -> None:
   /context help
 """
     print(context_help)
+
+
+print_stackvm_command_help = print_stackvm_help
 
 
 def _handle_confirm_command(args: list[str], engine: PocketCodeEngine) -> Optional[str]:
@@ -1085,7 +1182,7 @@ def print_confirm_help() -> None:
 
 def _handle_session_command(args: list[str], engine: PocketCodeEngine) -> Optional[str]:
     if not args:
-        print("Usage: /session <show|list|new|resume|delete|clear-all|help> ...")
+        print("Usage: /session <show|list|new|resume|delete|clear-all|clear-breakpoints|help> ...")
         return None
 
     subcommand = args[0].lower()
@@ -1096,15 +1193,24 @@ def _handle_session_command(args: list[str], engine: PocketCodeEngine) -> Option
         return None
 
     if subcommand == "show":
-        session = engine.get_active_session_info() if hasattr(engine, "get_active_session_info") else {}
+        target_id = sub_args[0] if sub_args else None
+        session = (
+            engine.get_saved_session_details(target_id)
+            if hasattr(engine, "get_saved_session_details")
+            else (engine.get_active_session_info() if hasattr(engine, "get_active_session_info") else {})
+        )
         if not session or not session.get("session_id"):
             print("No active session.")
             return None
-        print("Active session:")
+        print("Session:")
         print(f"  Id: {session.get('session_id')}")
         print(f"  Title: {session.get('title') or '-'}")
         print(f"  Updated: {session.get('updated_at') or '-'}")
-        print(f"  Resumed: {'yes' if session.get('loaded_from_history') else 'no'}")
+        if "loaded_from_history" in session:
+            print(f"  Resumed: {'yes' if session.get('loaded_from_history') else 'no'}")
+        print(f"  Debugger Breakpoints: {session.get('debugger_breakpoint_count', 0)}")
+        for label in session.get("debugger_breakpoints", []) or []:
+            print(f"    - {label}")
         return None
 
     if subcommand == "list":
@@ -1116,7 +1222,10 @@ def _handle_session_command(args: list[str], engine: PocketCodeEngine) -> Option
         for item in sessions:
             marker = "*" if item.get("is_active") else " "
             updated_at = item.get("updated_at") or "-"
-            print(f"  {marker} {item.get('session_id')} | {item.get('title') or '-'} | {updated_at}")
+            print(
+                f"  {marker} {item.get('session_id')} | {item.get('title') or '-'} | "
+                f"{updated_at} | breaks={item.get('debugger_breakpoint_count', 0)}"
+            )
         return None
 
     if subcommand == "new":
@@ -1174,6 +1283,32 @@ def _handle_session_command(args: list[str], engine: PocketCodeEngine) -> Option
         print(f"Cleared {removed} saved session{'s' if removed != 1 else ''}.")
         return None
 
+    if subcommand == "clear-breakpoints":
+        if not sub_args:
+            print("Usage: /session clear-breakpoints <session_id> --yes")
+            return None
+        if "--yes" not in sub_args:
+            print("Clearing saved debugger breakpoints requires --yes.")
+            return None
+        session_id = next((arg for arg in sub_args if arg != "--yes"), "")
+        if not session_id:
+            print("Usage: /session clear-breakpoints <session_id> --yes")
+            return None
+        try:
+            cleared = (
+                engine.clear_saved_session_debugger_breakpoints(session_id)
+                if hasattr(engine, "clear_saved_session_debugger_breakpoints")
+                else {}
+            )
+        except Exception as exc:
+            print(f"Error: {exc}")
+            return None
+        print(
+            f"Cleared {cleared.get('cleared', 0)} debugger breakpoint(s) from session: "
+            f"{cleared.get('session_id')}"
+        )
+        return None
+
     print(f"Unknown /session subcommand: {subcommand}")
     print_session_help()
     return None
@@ -1183,11 +1318,13 @@ def print_session_help() -> None:
     session_help = """
 /session Commands:
   /session show
+  /session show <session_id>
   /session list
   /session new [title...]
   /session resume <session_id>
-/session delete <session_id> --yes
-/session clear-all --yes
+  /session delete <session_id> --yes
+  /session clear-all --yes
+  /session clear-breakpoints <session_id> --yes
   /session help
 """
     print(session_help)

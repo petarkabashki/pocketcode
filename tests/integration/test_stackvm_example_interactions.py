@@ -367,6 +367,8 @@ def test_real_engine_start_request_can_continue_after_stackvm_radio_interaction(
 
     result = handle.wait(timeout=1.0)
     assert result == "Selected mode delegate for Alpha, Beta, untitled from fixture"
+    router_source = (EXAMPLES_ROOT / "stackvm_radio_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_start_request_can_route_after_stackvm_checklist_interaction_delegate(tmp_path):

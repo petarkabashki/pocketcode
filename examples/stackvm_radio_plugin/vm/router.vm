@@ -1,10 +1,6 @@
 [
-  last-tool-result none?
-  [
-    "core.read_file"
-    "{path: radio_payload.yaml}" yaml>
-    tool-request
-  ]
+  "core.read_file"
+  [ "{path: radio_payload.yaml}" yaml> ]
   [
     last-tool-result failure?
     [ "Could not load the payload." answer ]
@@ -25,5 +21,5 @@
     ]
     if
   ]
-  if
+  tool-once
 ] "decide" define

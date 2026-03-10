@@ -6,8 +6,10 @@ from types import SimpleNamespace
 
 from pocketcode.cli.textual_app import (
     AssetPickerScreen,
+    InteractionControlsScreen,
     NameInputScreen,
     PocketCodeTextualApp,
+    PromptInputScreen,
     SystemSettingsScreen,
     TextEditorScreen,
     ToolPolicyEditorScreen,
@@ -21,7 +23,7 @@ from pocketcode.cli.textual_app import (
     _build_view_title_text,
     _trim_output_lines,
 )
-from pocketcode.cli.textual_ui.renderables import render_output_blocks
+from pocketcode.cli.textual_ui.renderables import block_is_compactable, render_output_blocks
 from pocketcode.cli.textual_ui.shared import THEME_PALETTES
 from pocketcode.cli.textual_ui.selectors import (
     select_context_summary,
@@ -44,7 +46,8 @@ from pocketcode.cli.textual_ui.store import (
     reduce_textual_runtime_state,
 )
 from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
-from textual.widgets import Input, RichLog, Select, SelectionList, Static, TextArea
+from textual.containers import Vertical
+from textual.widgets import Input, OptionList, RichLog, Select, SelectionList, Static, TextArea
 
 
 class TestTopStatsText:
@@ -324,6 +327,24 @@ class TestTextualRuntimeSelectors:
                 "current_llm_model": "gpt-test",
                 "llm_usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
                 "llm_cost_usd": 0.01,
+                "runtime_event_count": 4,
+                "step_count": 2,
+                "steps": [
+                    {
+                        "index": 1,
+                        "kind": "agent_turn",
+                        "status": "completed",
+                        "duration_ms": 12.0,
+                        "summary": "Transition: call_tool",
+                    },
+                    {
+                        "index": 2,
+                        "kind": "tool_call",
+                        "status": "completed",
+                        "duration_ms": 3.5,
+                        "summary": "Succeeded: 'ok'",
+                    },
+                ],
                 "vm_validation_warning_count": 2,
                 "vm_validation_warnings": [
                     {
@@ -368,9 +389,14 @@ class TestTextualRuntimeSelectors:
         assert "Agent note: Focus mode" in summary_text
         assert "Active session: Review Session (session-1)" in summary_text
         assert "VM warnings: legacy-tool-loop@4:1-12; legacy-prompt-route@9:5-22" in summary_text
+        assert "Runtime events: 4" in summary_text
+        assert "Runtime steps: 2" in summary_text
         assert "active_modal: tool_selection" in preview_text
         assert "active_modal_title: Pick Tools" in preview_text
         assert "current_llm_model: gpt-test" in preview_text
+        assert "runtime_event_count: 4" in preview_text
+        assert "step_count: 2" in preview_text
+        assert "- 1. agent_turn (completed) [12.0ms] Transition: call_tool" in preview_text
         assert "vm_validation_warning_count: 2" in preview_text
 
     def test_context_session_and_prompt_selectors_render_expected_text(self):
@@ -525,6 +551,81 @@ class TestTextualOutputRendering:
 
         asyncio.run(exercise())
 
+    def test_tool_policy_requests_render_collapsible_args_summary(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                app._write_event_output(
+                    {
+                        "type": "tool_confirmation_requested",
+                        "tool": "core.read_file",
+                        "prompt": "Allow tool 'core.read_file' from agent 'reviewer'?",
+                        "arguments": {"path": "notes.md", "encoding": "utf-8"},
+                    },
+                    "ignored",
+                )
+                await pilot.pause(0.05)
+
+                block = app._runtime_state.output_blocks[-1]
+                assert block.title == "Tool Policy: core.read_file"
+                assert block.summary_text == "Allow tool 'core.read_file' from agent 'reviewer'? | args"
+                assert "Args:" in block.text
+                assert block_is_compactable(block) is True
+
+        asyncio.run(exercise())
+
+    def test_llm_events_render_as_expandable_request_and_response_blocks(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                app._write_event_output(
+                    {
+                        "type": "llm_call_started",
+                        "agent": "reviewer",
+                        "profile": "fast",
+                        "prompt_text": "System prompt\n\nUser request: summarize the diff",
+                    },
+                    "ignored",
+                )
+                app._write_event_output(
+                    {
+                        "type": "llm_call_completed",
+                        "agent": "reviewer",
+                        "model": "gpt-test",
+                        "usage": {"total_tokens": 42},
+                        "response_text": "Summary: the patch updates the prompt handling path.",
+                    },
+                    "ignored",
+                )
+                await pilot.pause(0.05)
+
+                request_block = app._runtime_state.output_blocks[-2]
+                response_block = app._runtime_state.output_blocks[-1]
+
+                assert request_block.title == "LLM Request: reviewer"
+                assert request_block.summary_text == "fast: System prompt"
+                assert block_is_compactable(request_block) is True
+
+                assert response_block.title == "LLM Response: reviewer"
+                assert response_block.summary_text == "gpt-test | 42 tokens | Summary: the patch updates the prompt handling path."
+                assert block_is_compactable(response_block) is True
+
+        asyncio.run(exercise())
+
 
 class TestTextualPointerSelection:
     def test_pointer_selection_uses_rendered_block_spans(self):
@@ -661,6 +762,29 @@ class TestTextualPointerSelection:
 
 
 class TestTextualViewSwitching:
+    def test_startup_keeps_chat_as_default_view(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            engine.get_system_settings = lambda: {
+                "theme_name": "ocean",
+                "workspace_view": "control_desk",
+                "default_agent": "a",
+                "default_llm_profile": "fast",
+                "control_presentation": "inline",
+            }
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                assert app._workspace_view == "control_desk"
+                assert app._current_view == "chat"
+
+        asyncio.run(exercise())
+
     def test_view_picker_opens_selector_screen(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
@@ -727,6 +851,71 @@ class TestTextualViewSwitching:
 
 
 class TestTextualInteractionRequests:
+    def test_main_input_history_can_cycle_previous_entries(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                input_widget = app.query_one("#main-input", Input)
+                input_widget.value = "draft request"
+                input_widget.focus()
+
+                app.action_history_previous()
+                await pilot.pause(0.05)
+                assert input_widget.value == "/status verbose"
+
+                app.action_history_previous()
+                await pilot.pause(0.05)
+                assert input_widget.value == "previous request"
+
+                app.action_history_next()
+                await pilot.pause(0.05)
+                assert input_widget.value == "/status verbose"
+
+                app.action_history_next()
+                await pilot.pause(0.05)
+                assert input_widget.value == "draft request"
+
+        asyncio.run(exercise())
+
+    def test_f2_history_picker_loads_selected_entry_into_main_input(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                app.action_pick_history()
+                await pilot.pause(0.05)
+
+                assert isinstance(app.screen, AssetPickerScreen)
+                app.screen.dismiss("previous request")
+                await pilot.pause(0.05)
+
+                assert app.query_one("#main-input", Input).value == "previous request"
+
+        asyncio.run(exercise())
+
+    def test_remember_entry_history_persists_textual_entry_history(self):
+        engine = _TextualEngineStub()
+        app = PocketCodeTextualApp(
+            engine,
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}, "interface": "textual"},
+        )
+
+        app._remember_entry_history("/status")
+
+        assert engine.set_last_used_entry_history_calls[-1][-1] == "/status"
+
     def test_pending_button_interaction_accepts_scope_value(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
@@ -790,6 +979,247 @@ class TestTextualInteractionRequests:
                         },
                     )
                 ]
+
+        asyncio.run(exercise())
+
+    def test_structured_interaction_can_open_popup_controls_when_enabled(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+            app._control_presentation = "modal"
+
+            class _RunStub:
+                def __init__(self):
+                    self.calls = []
+
+                def drain_events(self):
+                    return []
+
+                def resolve_interaction(self, request_id, payload):
+                    self.calls.append((request_id, payload))
+                    return True
+
+            run_stub = _RunStub()
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._active_run = run_stub
+
+                app._consume_run_event(
+                    {
+                        "type": "interaction_requested",
+                        "request_id": "interaction-2",
+                        "kind": "buttons",
+                        "prompt": "Allow tool 'core.read_file'?",
+                        "options": [
+                            {"id": "once", "label": "Approve Once", "value": "once"},
+                            {"id": "always", "label": "Always Approve", "value": "always"},
+                        ],
+                    }
+                )
+                app._refresh_ui()
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, InteractionControlsScreen)
+                app.screen.dismiss("always")
+                await pilot.pause(0.1)
+
+                assert run_stub.calls == [
+                    (
+                        "interaction-2",
+                        {
+                            "kind": "buttons",
+                            "value": "always",
+                            "values": ["always"],
+                            "label": "Always Approve",
+                            "selected_options": [
+                                {
+                                    "id": "always",
+                                    "label": "Always Approve",
+                                    "value": "always",
+                                    "description": "",
+                                }
+                            ],
+                            "raw_input": "always",
+                        },
+                    )
+                ]
+                assert app._runtime_state.pending_input_request is None
+
+        asyncio.run(exercise())
+
+    def test_structured_interaction_renders_inline_controls_by_default_and_replaces_them_with_selected_input(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            class _RunStub:
+                def __init__(self):
+                    self.calls = []
+
+                def drain_events(self):
+                    return []
+
+                def resolve_interaction(self, request_id, payload):
+                    self.calls.append((request_id, payload))
+                    return True
+
+            run_stub = _RunStub()
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._active_run = run_stub
+
+                app._consume_run_event(
+                    {
+                        "type": "interaction_requested",
+                        "request_id": "interaction-inline-1",
+                        "kind": "buttons",
+                        "prompt": "Allow tool 'core.read_file'?",
+                        "options": [
+                            {"id": "once", "label": "Approve Once", "value": "once"},
+                            {"id": "always", "label": "Always Approve", "value": "always"},
+                        ],
+                    }
+                )
+                app._refresh_ui()
+                await pilot.pause(0.1)
+
+                prompt_box = app.query_one("#inline-prompt-chat", Vertical)
+                assert prompt_box.display is True
+                assert app.query_one("#inline-prompt-options-chat", OptionList).display is True
+                assert app.query_one("#inline-prompt-summary-chat", Static).display is False
+
+                app._inline_prompt_selected_value = "always"
+                app._submit_inline_pending_input()
+                await pilot.pause(0.1)
+
+                assert run_stub.calls == [
+                    (
+                        "interaction-inline-1",
+                        {
+                            "kind": "buttons",
+                            "value": "always",
+                            "values": ["always"],
+                            "label": "Always Approve",
+                            "selected_options": [
+                                {
+                                    "id": "always",
+                                    "label": "Always Approve",
+                                    "value": "always",
+                                    "description": "",
+                                }
+                            ],
+                            "raw_input": "always",
+                        },
+                    )
+                ]
+                assert app._runtime_state.pending_input_request is None
+                assert app._inline_prompt_resolved is True
+                assert app.query_one("#inline-prompt-options-chat", OptionList).display is False
+                assert app.query_one("#inline-prompt-summary-chat", Static).display is True
+                assert app._inline_prompt_summary_text == "Always Approve"
+
+        asyncio.run(exercise())
+
+    def test_text_prompt_can_open_popup_when_enabled(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+            app._control_presentation = "modal"
+
+            class _RunStub:
+                def __init__(self):
+                    self.calls = []
+
+                def drain_events(self):
+                    return []
+
+                def resolve_user_input(self, request_id, payload):
+                    self.calls.append((request_id, payload))
+                    return True
+
+            run_stub = _RunStub()
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._active_run = run_stub
+
+                app._consume_run_event(
+                    {
+                        "type": "user_input_requested",
+                        "request_id": "prompt-1",
+                        "prompt": "Provide a filename",
+                    }
+                )
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, PromptInputScreen)
+                app.screen.dismiss("report.md")
+                await pilot.pause(0.1)
+
+                assert run_stub.calls == [("prompt-1", "report.md")]
+                assert app._runtime_state.pending_input_request is None
+
+        asyncio.run(exercise())
+
+    def test_text_prompt_renders_inline_input_by_default_and_replaces_it_with_submitted_text(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            class _RunStub:
+                def __init__(self):
+                    self.calls = []
+
+                def drain_events(self):
+                    return []
+
+                def resolve_user_input(self, request_id, payload):
+                    self.calls.append((request_id, payload))
+                    return True
+
+            run_stub = _RunStub()
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._active_run = run_stub
+
+                app._consume_run_event(
+                    {
+                        "type": "user_input_requested",
+                        "request_id": "prompt-inline-1",
+                        "prompt": "Provide a filename",
+                    }
+                )
+                app._refresh_ui()
+                await pilot.pause(0.1)
+
+                assert app.query_one("#inline-prompt-input-chat", Input).display is True
+                assert app.query_one("#inline-prompt-summary-chat", Static).display is False
+
+                app._inline_prompt_text_value = "report.md"
+                app._submit_inline_pending_input()
+                await pilot.pause(0.1)
+
+                assert run_stub.calls == [("prompt-inline-1", "report.md")]
+                assert app._runtime_state.pending_input_request is None
+                assert app._inline_prompt_resolved is True
+                assert app.query_one("#inline-prompt-input-chat", Input).display is False
+                assert app.query_one("#inline-prompt-summary-chat", Static).display is True
+                assert app._inline_prompt_summary_text == "report.md"
 
         asyncio.run(exercise())
 
@@ -859,6 +1289,8 @@ class _TextualEngineStub:
         self.saved_selection_presets: list[str] = []
         self.applied_selection_presets: list[str] = []
         self.deleted_selection_presets: list[str] = []
+        self.entry_history = ["previous request", "/status verbose"]
+        self.set_last_used_entry_history_calls: list[list[str]] = []
         self.started_sessions = 0
         self.resumed_sessions: list[str] = []
         self.deleted_sessions: list[str] = []
@@ -1165,17 +1597,28 @@ class _TextualEngineStub:
             "workspace_view": "balanced",
             "default_agent": "a",
             "default_llm_profile": "fast",
+            "control_presentation": "inline",
         }
 
-    def save_system_settings(self, *, theme_name, workspace_view, default_agent, default_llm_profile):
+    def save_system_settings(self, *, theme_name, workspace_view, default_agent, default_llm_profile, control_presentation):
         self.save_system_settings_calls.append(
             {
                 "theme_name": theme_name,
                 "workspace_view": workspace_view,
                 "default_agent": default_agent,
                 "default_llm_profile": default_llm_profile,
+                "control_presentation": str(control_presentation),
             }
         )
+        return Path("/tmp/pocketcode.yml")
+
+    def get_textual_entry_history(self):
+        return list(self.entry_history)
+
+    def set_last_used_entry_history(self, entries):
+        normalized = list(entries)
+        self.set_last_used_entry_history_calls.append(normalized)
+        self.entry_history = normalized
         return Path("/tmp/pocketcode.yml")
 
     def set_last_used_skills(self, skill_names):
@@ -2421,6 +2864,7 @@ class TestProfileCloneAndSave:
                         "workspace_view": "review",
                         "default_agent": "b",
                         "default_llm_profile": "smart",
+                        "control_presentation": "modal",
                     }
                 )
                 await pilot.pause(0.05)
@@ -2431,9 +2875,11 @@ class TestProfileCloneAndSave:
                         "workspace_view": "review",
                         "default_agent": "b",
                         "default_llm_profile": "smart",
+                        "control_presentation": "modal",
                     }
                 ]
                 assert engine.current_agent == "b"
+                assert app._control_presentation == "modal"
 
         asyncio.run(exercise())
 

@@ -108,7 +108,26 @@ def _block_max_lines(block: OutputBlock) -> int:
     return DEFAULT_MAX_LINES
 
 
+def _has_manual_summary(block: OutputBlock) -> bool:
+    summary_text = str(block.summary_text or "").strip()
+    return bool(summary_text) and summary_text != str(block.text)
+
+
+def _preview_result(block: OutputBlock) -> CompactionResult:
+    if _has_manual_summary(block):
+        return CompactionResult(
+            text=str(block.summary_text or ""),
+            summary="click to expand",
+            truncated=True,
+        )
+    return _compact_text(block.text, max_lines=_block_max_lines(block), max_chars=DEFAULT_MAX_CHARS)
+
+
 def block_is_compactable(block: OutputBlock) -> bool:
+    if _has_manual_summary(block):
+        return True
+    if block.kind == "code" and str(block.title or "").startswith("Breakpoint #"):
+        return True
     if block.kind not in {"code", "tool_call", "tool_result"}:
         return False
     result = _compact_text(block.text, max_lines=_block_max_lines(block), max_chars=DEFAULT_MAX_CHARS)
@@ -133,7 +152,7 @@ def _make_diff_renderable(
     selected: bool,
     hovered: bool,
 ) -> Panel:
-    result = _compact_text(block.text, max_lines=DIFF_MAX_LINES)
+    result = _preview_result(block)
     diff_source = block.text if expanded else result.text
     diff_text = Text()
     for line in diff_source.splitlines() or [""]:
@@ -171,7 +190,7 @@ def _make_code_renderable(
     language = block.language or "text"
     if language.lower() == "diff":
         return _make_diff_renderable(block, palette, expanded=expanded, selected=selected, hovered=hovered)
-    result = _compact_text(block.text, max_lines=_block_max_lines(block))
+    result = _preview_result(block)
     syntax = Syntax(
         block.text if expanded else result.text,
         language,
@@ -215,7 +234,7 @@ def render_output_block(
             border_style=palette.info,
         )
     if block.kind == "tool_call":
-        result = _compact_text(block.text, max_lines=TEXT_PREVIEW_MAX_LINES)
+        result = _preview_result(block)
         return Panel(
             _make_text(block.text if expanded else result.text, palette.text_primary),
             title=_block_title(title, selected=selected, hovered=hovered),
@@ -227,7 +246,7 @@ def render_output_block(
     if block.kind == "tool_result":
         if block.language:
             return _make_code_renderable(block, palette, expanded=expanded, selected=selected, hovered=hovered)
-        result = _compact_text(block.text, max_lines=TEXT_PREVIEW_MAX_LINES)
+        result = _preview_result(block)
         return Panel(
             _make_text(block.text if expanded else result.text, palette.text_primary),
             title=_block_title(title, selected=selected, hovered=hovered),

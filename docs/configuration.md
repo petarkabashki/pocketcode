@@ -116,11 +116,14 @@ Common keys include:
 
 - `theme_name`
 - `workspace_view`
+- `control_presentation`
 - `default_skills`
 - `selection_presets`
 - `last_used`
 
 The engine still reads legacy `workspace_mode` values from older configs, but `workspace_view` is the canonical persisted key.
+
+At Textual startup, the saved `workspace_view` restores layout details such as inspector visibility, but the shell still opens on the `chat` view by default. Changing the workspace view from inside Textual continues to switch to that preset's paired view.
 
 `last_used` can persist:
 
@@ -129,6 +132,14 @@ The engine still reads legacy `workspace_mode` values from older configs, but `w
 - global LLM override
 - session confirmation default
 - `auto_confirm_tools`
+- `entry_history`
+
+`control_presentation` is the canonical Textual control-layout setting. Supported values are:
+
+- `inline`
+- `modal`
+
+`inline` renders pending runtime input controls directly in the Textual chat/run surfaces, replaces those controls with the submitted value after acceptance, and keeps debugger breakpoint controls on-screen in the Run view. `modal` opens those control flows in popup screens instead. Older configs that still contain `user_input_popups: true` are read as `control_presentation: modal`.
 
 Session-only inspector selections are not written into `runtime.textual.last_used`. They live in the active saved session under `<primary_resource_root>/state/sessions/*.json`.
 
@@ -165,7 +176,8 @@ Each resource root can provide this extension surface:
 ├── plugins/
 ├── prompts/
 ├── skills/
-└── tools/
+├── tools/
+└── vm/
 ```
 
 Runtime session state is stored under:
@@ -185,6 +197,7 @@ Purpose of each directory:
 - `state/sessions/`: runtime-managed saved session JSON files under the primary resource root
 - `skills/`: skill packs with `SKILL.md` and optional assets
 - `tools/`: shared direct Python or Markdown-backed tools auto-registered under `resource_root.<name>`; the default `.pocketcode/` root is also aliased under `workspace`
+- `vm/`: standalone StackVM `.vm` or Markdown `.md` scripts used by the `/stackvm` CLI commands; these are not auto-registered as flows until a direct `/stackvm run` or `/stackvm debug` invocation synthesizes a temporary VM flow for the current command
 
 See `markdown_assets.md` for the canonical file formats and validation rules for Markdown-backed assets.
 

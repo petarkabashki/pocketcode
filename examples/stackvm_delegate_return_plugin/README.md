@@ -18,3 +18,5 @@ The example demonstrates:
 - explicit `pending_handoff_policy` setup with `return_to_caller: true`
 - direct pass-through of `last_delegated_result.answer` through `delegate-return`
 - a checked-in reference for the current `delegate-return` macro contract
+
+Conceptually, `delegate-return` expands to the same explicit “handoff when the delegated result is missing, otherwise answer from the returned path” branch that a handwritten router would use. The return policy still stays explicit in the caller.

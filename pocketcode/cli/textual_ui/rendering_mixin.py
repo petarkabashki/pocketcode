@@ -127,6 +127,68 @@ class TextualAppRenderingMixin:
         self._append_output_block(OutputBlock(kind="user", text=str(text), title="You"))
         self._sync_output_widget()
 
+    def _single_line_preview(self, value: Any, *, limit: int = 96) -> str:
+        text = str(value or "").strip().replace("\r", "")
+        if not text:
+            return "(empty)"
+        first_line = text.splitlines()[0].strip()
+        if len(first_line) <= limit:
+            return first_line
+        return first_line[: limit - 3].rstrip() + "..."
+
+    def _write_tool_policy_request(self, event: Dict[str, Any]) -> None:
+        tool_name = str(event.get("tool") or "tool")
+        question = str(event.get("prompt") or f"Allow tool '{tool_name}'?")
+        arguments = event.get("arguments")
+        arguments_text = self._serialize_output_payload(arguments) or "{}"
+        self._append_output_block(
+            OutputBlock(
+                kind="tool_call",
+                title=f"Tool Policy: {tool_name}",
+                text=f"{question}\n\nArgs:\n{arguments_text}",
+                summary_text=f"{question} | args",
+                language="yaml" if isinstance(arguments, (dict, list, tuple)) else None,
+            ),
+            plain_text=f"runtime> Tool confirmation requested: {question}",
+        )
+        self._sync_output_widget()
+
+    def _write_llm_request(self, event: Dict[str, Any]) -> None:
+        agent_name = str(event.get("agent") or "unknown")
+        profile_name = str(event.get("profile") or "default")
+        prompt_text = str(event.get("prompt_text") or "")
+        prompt_preview = self._single_line_preview(prompt_text)
+        self._append_output_block(
+            OutputBlock(
+                kind="code",
+                title=f"LLM Request: {agent_name}",
+                text=prompt_text or "(empty prompt)",
+                summary_text=f"{profile_name}: {prompt_preview}",
+                language="text",
+            ),
+            plain_text=f"runtime> LLM request ({profile_name}): {prompt_preview}",
+        )
+        self._sync_output_widget()
+
+    def _write_llm_response(self, event: Dict[str, Any]) -> None:
+        agent_name = str(event.get("agent") or "unknown")
+        model_name = str(event.get("model") or "-")
+        usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+        total_tokens = int(usage.get("total_tokens", 0) or 0) if isinstance(usage, dict) else 0
+        response_text = str(event.get("response_text") or "")
+        response_preview = self._single_line_preview(response_text)
+        self._append_output_block(
+            OutputBlock(
+                kind="code",
+                title=f"LLM Response: {agent_name}",
+                text=response_text or "(empty response)",
+                summary_text=f"{model_name} | {total_tokens} tokens | {response_preview}",
+                language="text",
+            ),
+            plain_text=f"runtime> LLM response ({model_name}, {total_tokens} tokens): {response_preview}",
+        )
+        self._sync_output_widget()
+
     def _write_assistant(self, text: str) -> None:
         response_text = str(text)
         self._append_output_blocks(
@@ -196,6 +258,15 @@ class TextualAppRenderingMixin:
 
     def _write_event_output(self, event: Dict[str, Any], message: str) -> None:
         event_type = str(event.get("type") or "")
+        if event_type == "tool_confirmation_requested":
+            self._write_tool_policy_request(event)
+            return
+        if event_type == "llm_call_started":
+            self._write_llm_request(event)
+            return
+        if event_type == "llm_call_completed":
+            self._write_llm_response(event)
+            return
         if event_type == "tool_started":
             self._write_tool_call(str(event.get("tool") or "tool"), event.get("arguments"))
             return
@@ -222,18 +293,26 @@ class TextualAppRenderingMixin:
         if refresh:
             self._refresh_ui()
 
-    def _apply_workspace_view(self, view_name: str, *, announce: bool) -> None:
+    def _apply_workspace_view(
+        self,
+        view_name: str,
+        *,
+        announce: bool,
+        preserve_current_view: bool = False,
+    ) -> None:
         config = WORKSPACE_VIEWS.get(view_name)
         if config is None:
             return
         target_view = str(config["view"])
         if target_view not in TEXTUAL_VIEWS:
             return
-        self._dispatch_cli_actions(
+        actions = [
             SetWorkspaceViewAction(workspace_view=view_name),
             SetRightPanelVisibleAction(visible=bool(config["right"])),
-            SetCurrentViewAction(current_view=target_view),
-        )
+        ]
+        if not preserve_current_view:
+            actions.append(SetCurrentViewAction(current_view=target_view))
+        self._dispatch_cli_actions(*actions)
         if announce:
             self._write_info(f"Workspace View: {config['label']}.")
 
@@ -253,11 +332,10 @@ class TextualAppRenderingMixin:
 
     def _drain_run_events(self) -> None:
         events = self._drain_active_run_effect()
-        if not events:
-            return
         should_refresh = False
         for event in events:
             should_refresh = self._consume_run_event(event) or should_refresh
+        should_refresh = self._sync_textual_debugger_state() or should_refresh
         if should_refresh:
             self._refresh_ui()
 
@@ -275,6 +353,9 @@ class TextualAppRenderingMixin:
             self._set_main_input_placeholder(interaction_placeholder(event))
             if event.get("kind") != "text":
                 self._write_info(describe_interaction_request(event))
+            if getattr(self, "_control_presentation", "inline") != "modal":
+                self._show_inline_pending_input(dict(event))
+            self.call_after_refresh(lambda: self._present_pending_input_modal(dict(event)))
             return True
         if event_type == "interaction_received":
             self._set_runtime_status("running")
@@ -284,6 +365,9 @@ class TextualAppRenderingMixin:
             self._set_pending_input_request(event)
             self._set_runtime_status("waiting_for_input")
             self._set_main_input_placeholder(str(event.get("prompt") or "Provide input"))
+            if getattr(self, "_control_presentation", "inline") != "modal":
+                self._show_inline_pending_input(dict(event))
+            self.call_after_refresh(lambda: self._present_pending_input_modal(dict(event)))
             return True
         if event_type == "user_input_received":
             self._set_runtime_status("running")
@@ -291,6 +375,11 @@ class TextualAppRenderingMixin:
             return True
         if event_type == "run_completed":
             with self._batch_engine_ui_update():
+                self._textual_debugger_active = False
+                self._textual_debugger_last_pause_key = None
+                self._debugger_inline_breakpoint_visible = False
+                if self._runtime_state.pending_input_request is not None and not getattr(self, "_inline_prompt_resolved", False):
+                    self._clear_inline_prompt_display()
                 self._set_runtime_busy(False)
                 self._active_run = None
                 self._set_pending_input_request(None)
@@ -300,6 +389,11 @@ class TextualAppRenderingMixin:
             return False
         if event_type == "run_failed":
             with self._batch_engine_ui_update():
+                self._textual_debugger_active = False
+                self._textual_debugger_last_pause_key = None
+                self._debugger_inline_breakpoint_visible = False
+                if self._runtime_state.pending_input_request is not None and not getattr(self, "_inline_prompt_resolved", False):
+                    self._clear_inline_prompt_display()
                 self._set_runtime_busy(False)
                 self._active_run = None
                 self._set_pending_input_request(None)
@@ -309,6 +403,11 @@ class TextualAppRenderingMixin:
             return False
         if event_type == "run_cancelled":
             with self._batch_engine_ui_update():
+                self._textual_debugger_active = False
+                self._textual_debugger_last_pause_key = None
+                self._debugger_inline_breakpoint_visible = False
+                if self._runtime_state.pending_input_request is not None and not getattr(self, "_inline_prompt_resolved", False):
+                    self._clear_inline_prompt_display()
                 self._set_runtime_busy(False)
                 self._active_run = None
                 self._set_pending_input_request(None)

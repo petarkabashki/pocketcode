@@ -9,7 +9,9 @@ from .base import TextualAppBase
 from .config_effects_mixin import TextualAppConfigEffectsMixin
 from .config_editing_mixin import TextualAppConfigEditingMixin
 from .control_center_mixin import TextualAppControlCenterMixin
+from .debugger_mixin import TextualAppDebuggerMixin
 from .effects_mixin import TextualAppEffectsMixin
+from .input_history_mixin import TextualAppInputHistoryMixin
 from .interaction_mixin import TextualAppInteractionMixin
 from .modal_coordinator_mixin import TextualAppModalCoordinatorMixin
 from .picker_model_mixin import TextualAppPickerModelMixin
@@ -27,7 +29,9 @@ class PocketCodeTextualApp(
     TextualAppUiStateMixin,
     TextualAppWidgetSyncMixin,
     TextualAppSelectionEffectsMixin,
+    TextualAppDebuggerMixin,
     TextualAppEffectsMixin,
+    TextualAppInputHistoryMixin,
     TextualAppInteractionMixin,
     TextualAppAssetManagementMixin,
     TextualAppConfigEditingMixin,

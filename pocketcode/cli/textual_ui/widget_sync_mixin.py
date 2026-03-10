@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import ContentSwitcher
-from textual.widgets import Input, OptionList, RichLog, Select, SelectionList, Static, Switch, TextArea
+from textual.widgets import Button, Input, OptionList, RichLog, Select, SelectionList, Static, Switch, TextArea
+from textual.widgets.option_list import Option
 
 from .renderables import (
     RenderedBlockSpan,
@@ -20,6 +21,75 @@ from .store import make_surface_block_ref
 
 
 class TextualAppWidgetSyncMixin:
+    def _apply_inline_prompt_state(self, state: TextualUIState) -> None:
+        title = "Input Submitted" if state.inline_prompt_resolved else "Input Required"
+        for suffix in ("chat", "run"):
+            container = self.query_one(f"#inline-prompt-{suffix}", Vertical)
+            container.display = state.inline_prompt_visible
+            self._set_static_text(
+                self.query_one(f"#inline-prompt-title-{suffix}", Static),
+                title,
+            )
+            self._set_static_text(
+                self.query_one(f"#inline-prompt-prompt-{suffix}", Static),
+                state.inline_prompt_prompt,
+            )
+            self._set_static_text(
+                self.query_one(f"#inline-prompt-help-{suffix}", Static),
+                state.inline_prompt_help,
+            )
+            summary_widget = self.query_one(f"#inline-prompt-summary-{suffix}", Static)
+            self._set_static_text(summary_widget, state.inline_prompt_summary_text)
+            summary_widget.display = state.inline_prompt_resolved and bool(state.inline_prompt_summary_text)
+
+            input_widget = self.query_one(f"#inline-prompt-input-{suffix}", Input)
+            input_widget.display = state.inline_prompt_visible and not state.inline_prompt_resolved and state.inline_prompt_kind == "text"
+            input_widget.placeholder = state.inline_prompt_placeholder
+            if input_widget.value != state.inline_prompt_text_value:
+                input_widget.value = state.inline_prompt_text_value
+                input_widget.cursor_position = len(input_widget.value)
+
+            option_widget = self.query_one(f"#inline-prompt-options-{suffix}", OptionList)
+            option_widget.display = (
+                state.inline_prompt_visible
+                and not state.inline_prompt_resolved
+                and state.inline_prompt_kind in {"buttons", "radio"}
+            )
+            self._set_option_list_options(
+                option_widget,
+                state.inline_prompt_select_options or (("No options available", LOADING_OPTION),),
+                state.inline_prompt_selected_value or LOADING_OPTION,
+            )
+            option_widget.disabled = not state.inline_prompt_select_options
+
+            checklist_widget = self.query_one(f"#inline-prompt-checklist-{suffix}", SelectionList)
+            checklist_widget.display = (
+                state.inline_prompt_visible
+                and not state.inline_prompt_resolved
+                and state.inline_prompt_kind == "checklist"
+            )
+            self._set_selection_list_options(
+                checklist_widget,
+                state.inline_prompt_checklist_options or (("No options available", LOADING_OPTION, False),),
+            )
+            checklist_widget.disabled = not state.inline_prompt_checklist_options
+
+            submit_button = self.query_one(f"#inline-prompt-submit-{suffix}", Button)
+            submit_button.display = state.inline_prompt_visible and not state.inline_prompt_resolved
+            submit_button.label = state.inline_prompt_submit_label
+            submit_button.disabled = (
+                not state.inline_prompt_visible
+                or state.inline_prompt_resolved
+                or (
+                    state.inline_prompt_kind in {"buttons", "radio"}
+                    and not state.inline_prompt_select_options
+                )
+                or (
+                    state.inline_prompt_kind == "checklist"
+                    and not state.inline_prompt_checklist_options
+                )
+            )
+
     def _apply_theme_name(self, theme_name: str) -> None:
         for class_name in [f"theme-{name}" for name in THEME_OPTIONS]:
             self.screen.remove_class(class_name)
@@ -43,6 +113,78 @@ class TextualAppWidgetSyncMixin:
         hint_widget = self.query_one("#footer-hint", Static)
         hint_widget.display = bool(footer_hint_text)
         self._set_static_text(hint_widget, footer_hint_text)
+
+    def _apply_debugger_controls_state(
+        self,
+        *,
+        attached: bool,
+        paused: bool,
+        breakpoint_count: int,
+        state: TextualUIState,
+    ) -> None:
+        controls = self.query_one("#debugger-controls", Horizontal)
+        controls.display = attached
+
+        next_button = self.query_one("#debug-next-button", Button)
+        continue_button = self.query_one("#debug-continue-button", Button)
+        add_break_button = self.query_one("#debug-add-break-button", Button)
+        clear_selected_break_button = self.query_one("#debug-clear-selected-break-button", Button)
+        clear_breaks_button = self.query_one("#debug-clear-breaks-button", Button)
+        status_button = self.query_one("#debug-status-button", Button)
+        breaks_button = self.query_one("#debug-breaks-button", Button)
+        quit_button = self.query_one("#debug-quit-button", Button)
+
+        next_button.disabled = not paused
+        continue_button.disabled = not paused
+        add_break_button.disabled = not attached
+        clear_selected_break_button.disabled = not attached or state.selected_debugger_breakpoint_id is None
+        clear_breaks_button.disabled = not attached or breakpoint_count <= 0
+        status_button.disabled = not attached
+        breaks_button.disabled = not attached
+        quit_button.disabled = not attached
+        breaks_button.label = f"Breaks ({int(breakpoint_count)})"
+        clear_selected_break_button.label = (
+            "Clear Selected"
+            if state.selected_debugger_breakpoint_id is None
+            else f"Clear #{int(state.selected_debugger_breakpoint_id)}"
+        )
+        clear_breaks_button.label = "Clear Breaks" if breakpoint_count <= 0 else f"Clear ({int(breakpoint_count)})"
+
+    def _apply_debugger_inline_editor_state(self, state: TextualUIState) -> None:
+        editor = self.query_one("#debugger-inline-controls", Vertical)
+        editor.display = state.debugger_inline_breakpoint_visible
+        self._set_static_text(
+            self.query_one("#debugger-inline-help", Static),
+            state.debugger_inline_breakpoint_help,
+        )
+        self._set_select_options(
+            self.query_one("#debugger-inline-type-select", Select),
+            (
+                ("Node", "node"),
+                ("Agent", "agent"),
+                ("Tool", "tool"),
+                ("Event", "event"),
+                ("Handoff", "handoff"),
+                ("Error", "error"),
+                ("Answer", "answer"),
+                ("Ask", "ask"),
+                ("Condition", "when"),
+            ),
+            state.debugger_inline_breakpoint_type,
+        )
+        value_input = self.query_one("#debugger-inline-value-input", Input)
+        value_input.placeholder = state.debugger_inline_breakpoint_placeholder
+        if value_input.value != state.debugger_inline_breakpoint_value:
+            value_input.value = state.debugger_inline_breakpoint_value
+            value_input.cursor_position = len(value_input.value)
+        value_required = state.debugger_inline_breakpoint_type in {"node", "agent", "tool", "event", "when"}
+        value_input.disabled = not value_required
+        self.query_one("#debugger-inline-cancel-button", Button).disabled = not state.debugger_inline_breakpoint_visible
+        self.query_one("#debugger-inline-apply-button", Button).label = (
+            "Add Breakpoint"
+            if value_required
+            else f"Add {state.debugger_inline_breakpoint_type.title()} Break"
+        )
 
     def _sync_output_widget(self, *, force: bool = False) -> None:
         blocks = self._runtime_state.output_blocks
@@ -201,7 +343,18 @@ class TextualAppWidgetSyncMixin:
                 header_llm_text=state.header_llm_text,
             )
             self._apply_footer_hint_state(state.footer_hint_text)
-
+        if (
+            previous is None
+            or previous.debugger_attached != state.debugger_attached
+            or previous.debugger_paused != state.debugger_paused
+            or previous.debugger_breakpoint_count != state.debugger_breakpoint_count
+        ):
+            self._apply_debugger_controls_state(
+                attached=state.debugger_attached,
+                paused=state.debugger_paused,
+                breakpoint_count=state.debugger_breakpoint_count,
+                state=state,
+            )
         self._syncing_controls = True
         try:
             self._set_select_options(
@@ -229,6 +382,32 @@ class TextualAppWidgetSyncMixin:
                 state.session_confirm_select.options,
                 state.session_confirm_select.value,
             )
+            if (
+                previous is None
+                or previous.debugger_inline_breakpoint_visible != state.debugger_inline_breakpoint_visible
+                or previous.debugger_inline_breakpoint_type != state.debugger_inline_breakpoint_type
+                or previous.debugger_inline_breakpoint_placeholder != state.debugger_inline_breakpoint_placeholder
+                or previous.debugger_inline_breakpoint_help != state.debugger_inline_breakpoint_help
+                or previous.debugger_inline_breakpoint_value != state.debugger_inline_breakpoint_value
+            ):
+                self._apply_debugger_inline_editor_state(state)
+            if (
+                previous is None
+                or previous.inline_prompt_visible != state.inline_prompt_visible
+                or previous.inline_prompt_resolved != state.inline_prompt_resolved
+                or previous.inline_prompt_kind != state.inline_prompt_kind
+                or previous.inline_prompt_prompt != state.inline_prompt_prompt
+                or previous.inline_prompt_help != state.inline_prompt_help
+                or previous.inline_prompt_placeholder != state.inline_prompt_placeholder
+                or previous.inline_prompt_submit_label != state.inline_prompt_submit_label
+                or previous.inline_prompt_text_value != state.inline_prompt_text_value
+                or previous.inline_prompt_selected_value != state.inline_prompt_selected_value
+                or previous.inline_prompt_selected_values != state.inline_prompt_selected_values
+                or previous.inline_prompt_summary_text != state.inline_prompt_summary_text
+                or previous.inline_prompt_select_options != state.inline_prompt_select_options
+                or previous.inline_prompt_checklist_options != state.inline_prompt_checklist_options
+            ):
+                self._apply_inline_prompt_state(state)
             self.query_one("#auto-confirm-switch", Switch).value = state.auto_confirm_tools
         finally:
             self._syncing_controls = False
@@ -292,6 +471,26 @@ class TextualAppWidgetSyncMixin:
         if option_tuple:
             widget.add_options(option_tuple)
         self._option_list_state_cache[cache_key] = option_tuple
+
+    def _set_option_list_options(
+        self,
+        widget: OptionList,
+        options: Iterable[tuple[str, str]],
+        selected_value: str,
+    ) -> None:
+        option_tuple = tuple((str(label), str(value)) for label, value in options)
+        cache_key = widget.id or ""
+        cache_value = (option_tuple, str(selected_value))
+        if self._option_list_state_cache.get(cache_key) == cache_value:
+            return
+        widget.clear_options()
+        if option_tuple:
+            widget.add_options([Option(label, id=value) for label, value in option_tuple])
+            highlighted = next((index for index, (_, value) in enumerate(option_tuple) if value == str(selected_value)), 0)
+            widget.highlighted = highlighted if highlighted < len(option_tuple) else None
+        else:
+            widget.highlighted = None
+        self._option_list_state_cache[cache_key] = cache_value
 
     def _set_selection_list_options(
         self,

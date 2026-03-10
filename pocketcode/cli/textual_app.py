@@ -1,8 +1,10 @@
 from pocketcode.cli.textual_ui import (
     AssetPickerScreen,
+    InteractionControlsScreen,
     NameInputScreen,
     PickerOption,
     PocketCodeTextualApp,
+    PromptInputScreen,
     SelectViewState,
     SystemSettingsScreen,
     TextEditorScreen,
@@ -22,9 +24,11 @@ from pocketcode.cli.textual_ui import (
 
 __all__ = [
     "AssetPickerScreen",
+    "InteractionControlsScreen",
     "NameInputScreen",
     "PickerOption",
     "PocketCodeTextualApp",
+    "PromptInputScreen",
     "SelectViewState",
     "SystemSettingsScreen",
     "TextEditorScreen",

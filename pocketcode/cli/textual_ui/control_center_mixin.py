@@ -24,6 +24,11 @@ class TextualAppControlCenterMixin:
         tool_asset_count = len(self._engine.list_markdown_assets("tool")) if hasattr(self._engine, "list_markdown_assets") else 0
         saved_sessions = self._engine.list_saved_sessions() if hasattr(self._engine, "list_saved_sessions") else []
         active_session = self._engine.get_active_session_info() if hasattr(self._engine, "get_active_session_info") else {}
+        session_breakpoint_count = (
+            int(active_session.get("debugger_breakpoint_count") or 0)
+            if isinstance(active_session, dict)
+            else 0
+        )
         return (
             PickerOption(
                 value="profile",
@@ -92,18 +97,18 @@ class TextualAppControlCenterMixin:
             PickerOption(
                 value="sessions",
                 label=(
-                    f"Sessions: {active_session.get('title')}"
+                    f"Sessions: {active_session.get('title')} ({session_breakpoint_count} breaks)"
                     if isinstance(active_session, dict) and active_session.get("title")
                     else f"Sessions: {len(saved_sessions)} saved"
                 ),
-                description="Start a new session or resume saved workspace history",
-                search_text="sessions history resume new",
+                description="Start, resume, inspect, or prune saved session debugger breakpoints",
+                search_text="sessions history resume debugger breakpoints clear inspect",
             ),
             PickerOption(
                 value="system_settings",
                 label="System Settings",
-                description="Theme, workspace view, and default agent/LLM saved to pocketcode.yml",
-                search_text="system settings theme workspace view default agent llm config save",
+                description="Theme, workspace view, control presentation, and default agent/LLM saved to pocketcode.yml",
+                search_text="system settings theme workspace view control presentation inline modal default agent llm config save",
             ),
         )
 
@@ -179,6 +184,8 @@ class TextualAppControlCenterMixin:
             return (
                 PickerOption("new", "Start New Session", search_text="start new session"),
                 PickerOption("resume", "Resume Saved Session", search_text="resume saved session history"),
+                PickerOption("inspect_breakpoints", "Inspect Session Breakpoints", search_text="inspect session debugger breakpoints"),
+                PickerOption("clear_breakpoints", "Clear Session Breakpoints", search_text="clear session debugger breakpoints"),
                 PickerOption("delete", "Delete Saved Session", search_text="delete saved session history"),
                 PickerOption("clear_all", "Clear Previous Sessions", search_text="clear previous saved sessions"),
             )
@@ -311,6 +318,12 @@ class TextualAppControlCenterMixin:
             if action == "resume":
                 self._open_saved_session_picker()
                 return
+            if action == "inspect_breakpoints":
+                self._open_saved_session_picker(action="inspect_breakpoints")
+                return
+            if action == "clear_breakpoints":
+                self._open_saved_session_picker(action="clear_breakpoints")
+                return
             if action == "delete":
                 self._open_saved_session_picker(action="delete")
                 return
@@ -327,27 +340,52 @@ class TextualAppControlCenterMixin:
             self._write_error("This runtime does not support saved sessions.")
             return
         sessions = self._engine.list_saved_sessions()
-        resumable = [item for item in sessions if item.get("is_resumable")]
-        if not resumable:
-            self._write_error("No saved sessions are available to resume.")
+        if action == "resume":
+            options_source = [item for item in sessions if item.get("is_resumable")]
+        elif action in {"inspect_breakpoints", "clear_breakpoints"}:
+            options_source = list(sessions)
+        else:
+            options_source = [item for item in sessions if item.get("is_resumable")]
+        if not options_source:
+            self._write_error("No saved sessions are available.")
             return
         options = tuple(
             PickerOption(
                 str(item.get("session_id") or ""),
                 str(item.get("title") or item.get("session_id") or "Unnamed session"),
-                description=str(item.get("updated_at") or ""),
-                search_text="saved session history",
+                description=f"{item.get('updated_at') or ''} | breaks={item.get('debugger_breakpoint_count', 0)}",
+                search_text="saved session history debugger breakpoints",
             )
-            for item in resumable
+            for item in options_source
         )
         self._show_picker(
-            title="Resume Saved Session" if action == "resume" else "Delete Saved Session",
+            title=(
+                "Resume Saved Session"
+                if action == "resume"
+                else "Inspect Session Breakpoints"
+                if action == "inspect_breakpoints"
+                else "Clear Session Breakpoints"
+                if action == "clear_breakpoints"
+                else "Delete Saved Session"
+            ),
             options=options,
             current_value=None,
-            on_select=self._resume_saved_session if action == "resume" else self._confirm_delete_saved_session,
+            on_select=(
+                self._resume_saved_session
+                if action == "resume"
+                else self._inspect_saved_session_breakpoints
+                if action == "inspect_breakpoints"
+                else self._confirm_clear_saved_session_breakpoints
+                if action == "clear_breakpoints"
+                else self._confirm_delete_saved_session
+            ),
             help_text=(
                 "Choose a saved session to resume."
                 if action == "resume"
+                else "Choose a saved session to inspect saved debugger breakpoints."
+                if action == "inspect_breakpoints"
+                else "Choose a saved session to clear saved debugger breakpoints."
+                if action == "clear_breakpoints"
                 else "Choose a saved session to delete."
             ),
             empty_message="No saved sessions are available.",
@@ -367,6 +405,37 @@ class TextualAppControlCenterMixin:
             current_value=None,
             on_select=lambda value: self._delete_saved_session(session_id) if value == "delete" else None,
             help_text="Delete the selected saved session. The active session is protected.",
+        )
+
+    def _inspect_saved_session_breakpoints(self, session_id: str) -> None:
+        details = self._get_saved_session_details_effect(session_id)
+        lines = [
+            f"Session: {details.get('title') or details.get('session_id')}",
+            f"Id: {details.get('session_id')}",
+            f"Updated: {details.get('updated_at') or '-'}",
+            f"Debugger breakpoints: {details.get('debugger_breakpoint_count', 0)}",
+        ]
+        for label in details.get("debugger_breakpoints", []) or []:
+            lines.append(f"- {label}")
+        self._write_info("\n".join(lines))
+
+    def _confirm_clear_saved_session_breakpoints(self, session_id: str) -> None:
+        self._show_picker(
+            title="Clear Session Breakpoints",
+            options=(
+                PickerOption("clear", f"Clear debugger breakpoints for {session_id}", search_text="confirm clear debugger breakpoints"),
+                PickerOption("cancel", "Cancel"),
+            ),
+            current_value=None,
+            on_select=lambda value: self._clear_saved_session_breakpoints(session_id) if value == "clear" else None,
+            help_text="Remove all persisted debugger breakpoints from the selected saved session.",
+        )
+
+    def _clear_saved_session_breakpoints(self, session_id: str) -> None:
+        cleared = self._clear_saved_session_debugger_breakpoints_effect(session_id)
+        self._write_info(
+            f"Cleared {cleared.get('cleared', 0)} debugger breakpoint(s) from session: "
+            f"{cleared.get('session_id')}"
         )
 
     def _delete_saved_session(self, session_id: str) -> None:

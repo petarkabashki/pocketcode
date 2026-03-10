@@ -2,7 +2,52 @@
 
 This page collects small, copyable StackVM snippets for the patterns that recur across the checked-in examples.
 
-Use this together with `markdown_assets.md` for the canonical runtime surface and `stackvm_patterns.md` for the example catalog.
+Use this together with `markdown_assets.md` for the canonical runtime surface, `stackvm_macros.md` for the compile-time macro surface, and `stackvm_patterns.md` for the example catalog.
+
+## Choose Between Helper Words And Macros
+
+Prefer the smallest mechanism that matches the job:
+
+- use `define` for reusable runtime helpers, especially repeated YAML literals, parsing steps, and shared-state normalization
+- use a built-in macro for a recurring authoring pattern that already has a stable expansion, such as `tool-once`, `prompt-route`, `delegate-return`, or `finalize-from`
+- use `defmacro` when you need a new postfix authoring surface over ordinary StackVM AST
+
+If the repeated part is mostly data, especially a YAML literal, keep it in a helper word. If the repeated part is mostly control-flow shape, prefer a macro.
+
+## Guard A Branch With `when`
+
+Use `when` when the flow only needs a truthy branch and an empty false branch would be noise.
+
+```text
+"normalized.enabled" shared@
+[ "Enabled summary ready." answer ]
+when
+```
+
+`when` expands to the same `if` shape the runtime already understands, but it keeps the happy-path branch compact.
+
+## Guard A Branch With `unless`
+
+Use `unless` when the negative case is the one worth naming.
+
+```text
+"normalized.enabled" shared@
+[ "Payload is disabled." answer ]
+unless
+```
+
+This is the same control-flow surface as `when`, just with the condition negated during expansion.
+
+## Read A Shared Value With A Default
+
+Use `shared-or` when the flow wants `shared@` semantics plus a fallback value and you do not want to repeat the `dup none?` branch.
+
+```text
+"normalized.source" "unknown" shared-or
+"Source: " swap concat answer
+```
+
+`shared-or` is for optional runtime-managed values. It is not a replacement for nested dict or list traversal inside payload data.
 
 ## Route With Exact-Match Cases
 
@@ -124,6 +169,36 @@ Prefer the built-in `tool-once` macro when a flow should call a tool on the firs
 `tool-once` expands to the same `last-tool-result none?` pattern the runtime already understands, but it keeps the router focused on the later-turn logic instead of repeating the request branch in every tool-first example.
 
 When a flow still uses the manual `last-tool-result none? ... tool-request ... if` pattern, runtime metadata now records a non-fatal `legacy-tool-loop` authoring warning in `last_vm_validation_warnings`.
+
+## Define A Simple Custom Macro
+
+Use `defmacro` when a local project pattern is not covered by the built-in macro set.
+
+```text
+[ value ]
+[ [ value unquote ] "Macro says: " swap concat answer ]
+syntax-quote "answer-with-prefix" defmacro
+
+"hello" answer-with-prefix
+```
+
+This keeps the call site short while still expanding to ordinary executable StackVM before runtime. For the full compile-time surface, including `gensym`, refer to `stackvm_macros.md`.
+
+## Splice A Quotation Into Expanded Code
+
+Use `unquote-splice` when a macro should inline a quotation body into surrounding generated code rather than leave the quotation intact as one nested node.
+
+```text
+[ body ]
+[ [ body unquote-splice ] answer ]
+syntax-quote "answer-from" defmacro
+
+"hello"
+[ "Result: " swap concat ]
+answer-from
+```
+
+This pattern is useful when you want a compact macro for “run these steps, then answer” or similar wrapper shapes.
 
 ## Normalize Optional Nested Values
 

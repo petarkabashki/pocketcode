@@ -150,3 +150,63 @@ def test_removed_agent_flag_alias_is_rejected(monkeypatch):
 
     assert exit_code == 2
     assert "unrecognized arguments: --agent core::react" in stderr
+
+
+def test_build_debugger_until_predicate_supports_node_and_condition_matching():
+    predicate_config = main_module._build_debugger_until_predicate(["node", "review"])
+    assert predicate_config is not None
+    predicate, label = predicate_config
+
+    assert label == "until node review"
+    assert predicate({"type": "node_completed", "node_id": "review"}, {}) is True
+    assert predicate({"type": "node_completed", "node_id": "start"}, {}) is False
+
+    condition_config = main_module._build_debugger_until_predicate(
+        ["when", "pending_tool.name", "==", "core.write_file"]
+    )
+    assert condition_config is not None
+    condition, condition_label = condition_config
+
+    assert "pending_tool.name" in condition_label
+    assert condition({}, {"pending_tool": {"name": "core.write_file"}}) is True
+    assert condition({}, {"pending_tool": {"name": "core.read_file"}}) is False
+
+
+def test_parse_debug_step_count_accepts_positive_integer_and_rejects_invalid_values():
+    assert main_module._parse_debug_step_count([]) == 1
+    assert main_module._parse_debug_step_count(["5"]) == 5
+    assert main_module._parse_debug_step_count(["0"]) is None
+    assert main_module._parse_debug_step_count(["one"]) is None
+
+
+def test_print_debug_breakpoints_renders_saved_breakpoints(capsys):
+    class _Handle:
+        def list_debug_breakpoints(self):
+            return [
+                {"id": 1, "label": "until node review"},
+                {"id": 2, "label": "until tool core.write_file"},
+            ]
+
+    main_module._print_debug_breakpoints(_Handle())
+
+    captured = capsys.readouterr()
+    assert "[debug] Breakpoints:" in captured.out
+    assert "1. until node review" in captured.out
+    assert "2. until tool core.write_file" in captured.out
+
+
+def test_print_debug_pause_renders_active_node_details(capsys):
+    main_module._print_debug_pause(
+        {"type": "node_completed", "node_id": "review", "node_kind": "tool", "transition": "final_answer"},
+        {
+            "active_agent": "graph.agent",
+            "active_node_id": "review",
+            "active_node_kind": "tool",
+            "step_count": 2,
+            "runtime_event_count": 4,
+        },
+    )
+
+    captured = capsys.readouterr()
+    assert "[debug] Active agent: graph.agent" in captured.out
+    assert "[debug] Active node: review (tool)" in captured.out

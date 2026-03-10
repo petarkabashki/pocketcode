@@ -61,6 +61,7 @@ class OutputBlock:
     text: str
     title: str | None = None
     language: str | None = None
+    summary_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +218,7 @@ def _normalize_output_block(block: OutputBlock) -> OutputBlock:
         text=str(block.text),
         title=str(block.title) if block.title else None,
         language=str(block.language) if block.language else None,
+        summary_text=str(block.summary_text) if block.summary_text else None,
     )
 
 

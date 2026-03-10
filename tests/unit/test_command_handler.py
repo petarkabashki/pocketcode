@@ -55,6 +55,8 @@ class _SessionCommandEngineStub(_EngineStub):
                 "updated_at": "2026-03-07T10:00:00+00:00",
                 "is_active": True,
                 "is_resumable": True,
+                "debugger_breakpoint_count": 1,
+                "debugger_breakpoints": ["until node review"],
             },
             {
                 "session_id": "session-2",
@@ -62,6 +64,11 @@ class _SessionCommandEngineStub(_EngineStub):
                 "updated_at": "2026-03-07T09:00:00+00:00",
                 "is_active": False,
                 "is_resumable": True,
+                "debugger_breakpoint_count": 2,
+                "debugger_breakpoints": [
+                    "until tool core.write_file",
+                    "until when pending_tool.name == \"core.write_file\"",
+                ],
             },
         ]
         self.current_session = {
@@ -69,17 +76,29 @@ class _SessionCommandEngineStub(_EngineStub):
             "title": "First session",
             "updated_at": "2026-03-07T10:00:00+00:00",
             "loaded_from_history": False,
+            "debugger_breakpoint_count": 1,
+            "debugger_breakpoints": ["until node review"],
         }
         self.started = 0
         self.resumed: list[str] = []
         self.deleted: list[str] = []
         self.cleared = 0
+        self.cleared_breakpoints: list[str] = []
 
     def get_active_session_info(self):
         return dict(self.current_session)
 
     def list_saved_sessions(self):
         return [dict(item) for item in self._sessions]
+
+    def get_saved_session_details(self, session_id=None):
+        target_id = session_id or self.current_session["session_id"]
+        if target_id == self.current_session["session_id"]:
+            return dict(self.current_session)
+        for item in self._sessions:
+            if item["session_id"] == target_id:
+                return dict(item)
+        return {}
 
     def start_new_session(self):
         self.started += 1
@@ -88,6 +107,8 @@ class _SessionCommandEngineStub(_EngineStub):
             "title": f"Session {self.started}",
             "updated_at": "2026-03-07T11:00:00+00:00",
             "loaded_from_history": False,
+            "debugger_breakpoint_count": 0,
+            "debugger_breakpoints": [],
         }
         return dict(self.current_session)
 
@@ -98,6 +119,11 @@ class _SessionCommandEngineStub(_EngineStub):
             "title": "Earlier work",
             "updated_at": "2026-03-07T09:00:00+00:00",
             "loaded_from_history": True,
+            "debugger_breakpoint_count": 2,
+            "debugger_breakpoints": [
+                "until tool core.write_file",
+                "until when pending_tool.name == \"core.write_file\"",
+            ],
         }
         return dict(self.current_session)
 
@@ -113,6 +139,20 @@ class _SessionCommandEngineStub(_EngineStub):
         self.cleared += len(prior)
         self._sessions = [item for item in self._sessions if item["session_id"] == self.current_session["session_id"]]
         return len(prior)
+
+    def clear_saved_session_debugger_breakpoints(self, session_id):
+        details = self.get_saved_session_details(session_id)
+        labels = list(details.get("debugger_breakpoints", []))
+        cleared = len(labels)
+        self.cleared_breakpoints.append(session_id)
+        for item in self._sessions:
+            if item["session_id"] == session_id:
+                item["debugger_breakpoint_count"] = 0
+                item["debugger_breakpoints"] = []
+        if self.current_session["session_id"] == session_id:
+            self.current_session["debugger_breakpoint_count"] = 0
+            self.current_session["debugger_breakpoints"] = []
+        return {"session_id": session_id, "cleared": cleared}
 
 
 class _PromptListingEngineStub(_EngineStub):
@@ -161,6 +201,16 @@ class _RunHandleStub:
     def cancel(self, reason):
         self.reasons.append(reason)
         return self.cancel_result
+
+
+class _DebugRunnerRecorder:
+    def __init__(self, result="debugged response"):
+        self.calls: list[str] = []
+        self.result = result
+
+    def __call__(self, request: str):
+        self.calls.append(request)
+        return self.result
 
 
 class _EditableProfileEngineStub(_EngineStub):
@@ -309,7 +359,7 @@ class _StatusEngineStub(_EngineStub):
             "default_llm_profile": "balanced",
             "tool_confirmation": {},
             "session_tool_confirmation_overrides": {},
-            "last_run_summary": {},
+            "last_run_summary": {"runtime_event_count": 0, "step_count": 0, "steps": []},
         }
 
 
@@ -329,6 +379,26 @@ class _WarningStatusEngineStub(_EngineStub):
             "tool_confirmation": {},
             "session_tool_confirmation_overrides": {},
             "last_run_summary": {
+                "runtime_event_count": 4,
+                "step_count": 2,
+                "steps": [
+                    {
+                        "index": 1,
+                        "kind": "agent_turn",
+                        "status": "completed",
+                        "duration_ms": 12.0,
+                        "summary": "Transition: call_tool",
+                        "details": {"agent": "core::react"},
+                    },
+                    {
+                        "index": 2,
+                        "kind": "tool_call",
+                        "status": "completed",
+                        "duration_ms": 3.5,
+                        "summary": "Succeeded: 'ok'",
+                        "details": {"tool": "core.read_file"},
+                    },
+                ],
                 "vm_validation_warnings": [
                     {
                         "code": "legacy-tool-loop",
@@ -454,6 +524,109 @@ class _FailingAssetEditEngineStub(_AssetCommandEngineStub):
         raise ValueError("Tool handler file not found: /tmp/missing_tool.py")
 
 
+class _StackVmCommandEngineStub(_EngineStub):
+    def __init__(self, workspace_root: Path):
+        self.workspace_root = workspace_root
+        self.create_flow_calls: list[tuple[str, str, str | None]] = []
+        self.create_script_calls: list[tuple[str, str]] = []
+        self.create_agent_calls: list[tuple[str, str]] = []
+        self.inspect_calls: list[tuple[str, str, str | None]] = []
+        self.run_calls: list[dict[str, object]] = []
+        self.update_script_calls: list[tuple[str, str]] = []
+        self.update_markdown_calls: list[tuple[str, str, str]] = []
+
+    def list_flows(self):
+        return ["core.react", "workspace.vm_review", "workspace.vm_router"]
+
+    def describe_flow(self, flow_name=None):
+        vm_modes = {
+            "workspace.vm_review": "vm",
+            "workspace.vm_router": "vm",
+            "core.react": "llm",
+        }
+        return {"name": flow_name, "execution_mode": vm_modes.get(flow_name, "llm")}
+
+    def list_stackvm_scripts(self):
+        return ["router.vm", "nested/review.vm"]
+
+    def create_stackvm_flow(self, name, *, entry="decide", agent_name=None):
+        self.create_flow_calls.append((name, entry, agent_name))
+        path = self.workspace_root / ".pocketcode" / "flows" / f"{name}.md"
+        agent = None
+        if agent_name:
+            agent = {
+                "name": agent_name,
+                "flow": name,
+                "path": self.workspace_root / ".pocketcode" / "agents" / f"{agent_name}.md",
+            }
+        return {"name": name, "path": path, "entry": entry, "agent": agent}
+
+    def create_stackvm_script(self, name, *, entry="main"):
+        self.create_script_calls.append((name, entry))
+        return {"name": name, "path": self.workspace_root / ".pocketcode" / "vm" / f"{name}.vm", "entry": entry}
+
+    def create_stackvm_agent(self, name, *, flow_name):
+        self.create_agent_calls.append((name, flow_name))
+        return {"name": name, "flow": flow_name, "path": self.workspace_root / ".pocketcode" / "agents" / f"{name}.md"}
+
+    def inspect_stackvm_target(self, kind, target, *, entry=None):
+        self.inspect_calls.append((kind, target, entry))
+        return {
+            "target_kind": kind,
+            "name": target,
+            "path": self.workspace_root / ".pocketcode" / ("vm" if kind == "script" else "flows") / target,
+            "flow": "workspace.vm_review" if kind == "agent" else None,
+            "agent": "review.safe" if kind == "agent" else None,
+            "execution_mode": "vm",
+            "vm_entry": entry or "decide",
+            "source_files": [str(self.workspace_root / ".pocketcode" / "vm" / "router.vm")],
+            "token_count": 5,
+            "warning_count": 1,
+            "warnings": [
+                {
+                    "code": "legacy-tool-loop",
+                    "location": "line 1, cols 1-10",
+                    "message": "Prefer tool-once.",
+                }
+            ],
+            "expanded_source": "[ \"done\" answer ] \"decide\" define",
+            "source": "[ \"done\" answer ] \"decide\" define",
+        }
+
+    def update_stackvm_script(self, target, *, source_text):
+        self.update_script_calls.append((target, source_text))
+        return {"name": target, "path": self.workspace_root / ".pocketcode" / "vm" / target, "warnings": []}
+
+    def update_markdown_asset(self, kind, target, *, markdown_text):
+        self.update_markdown_calls.append((kind, target, markdown_text))
+        return {"name": target, "path": self.workspace_root / ".pocketcode" / f"{kind}s" / f"{target}.md"}
+
+    def run_stackvm_target(self, kind, target, *, request="", entry=None, debug=False, auto_confirm_tools=True):
+        self.run_calls.append(
+            {
+                "kind": kind,
+                "target": target,
+                "request": request,
+                "entry": entry,
+                "debug": debug,
+                "auto_confirm_tools": auto_confirm_tools,
+            }
+        )
+        return {
+            "output": "stackvm output",
+            "error_message": None,
+            "run_summary": {"vm_validation_warning_count": 1},
+            "tool_history": [{"tool": "core.read_file"}],
+            "trace_count": 2,
+            "trace": [
+                {"op": "push-literal", "value": "hello", "stack": ["hello"]},
+                {"op": "word", "word": "answer", "stack": []},
+            ],
+            "last_vm_expanded_source": "[ \"hello\" answer ]",
+            "last_vm_source": "[ \"hello\" answer ]",
+        }
+
+
 class TestCommandHandlerParsing:
     def test_universal_command_suggestions_exclude_textual_only_commands(self):
         suggestions = list_command_suggestions(_EngineStub())
@@ -461,6 +634,7 @@ class TestCommandHandlerParsing:
         assert "/help" in suggestions
         assert "/agent" in suggestions
         assert "/asset" in suggestions
+        assert "/stackvm" in suggestions
         assert "/copy" not in suggestions
         assert "/copy-all" not in suggestions
         assert "/view" not in suggestions
@@ -756,7 +930,47 @@ class TestCommandHandlerParsing:
         captured = capsys.readouterr()
         assert "Internal flow: internal-router" in captured.out
         assert "Selected flow: core::react" in captured.out
+        assert "Runtime Steps: 0" in captured.out
         assert "workflow" not in captured.out.lower()
+
+    def test_debug_command_uses_debug_runner_callback(self, capsys):
+        runner = _DebugRunnerRecorder()
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "basic",
+            "debug_request_runner": runner,
+        }
+
+        handle_command(
+            "/debug inspect the active agent",
+            engine=_EngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert runner.calls == ["inspect the active agent"]
+        assert "debugged response" in captured.out
+
+    def test_debug_command_reports_scope_without_runner(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "textual",
+        }
+
+        handle_command(
+            "/debug inspect the active agent",
+            engine=_EngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "not available in this interface" in captured.out
 
     def test_status_output_includes_vm_validation_warning_codes_when_present(self, capsys):
         cli_context = {
@@ -774,6 +988,7 @@ class TestCommandHandlerParsing:
 
         captured = capsys.readouterr()
         assert "VM Validation Warnings: legacy-tool-loop, legacy-prompt-route" in captured.out
+        assert "Runtime Steps: 2" in captured.out
 
     def test_status_verbose_output_includes_vm_validation_warning_messages(self, capsys):
         cli_context = {
@@ -793,6 +1008,27 @@ class TestCommandHandlerParsing:
         assert "VM Validation Warnings: legacy-tool-loop, legacy-prompt-route" in captured.out
         assert "- legacy-tool-loop (line 4, cols 1-12): Prefer tool-once." in captured.out
         assert "- legacy-prompt-route (line 9, cols 5-22): Prefer prompt-route." in captured.out
+        assert "1. agent_turn (completed) [12.0ms] Transition: call_tool" in captured.out
+        assert "details: {'agent': 'core::react'}" in captured.out
+
+    def test_status_steps_outputs_step_trace_without_verbose_details(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+
+        handle_command(
+            "/status steps",
+            engine=_WarningStatusEngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Step Trace:" in captured.out
+        assert "1. agent_turn (completed) [12.0ms] Transition: call_tool" in captured.out
+        assert "details:" not in captured.out
 
     def test_context_add_snippet_uses_shell_style_quoting(self):
         cli_context = {
@@ -818,7 +1054,9 @@ class TestCommandHandlerParsing:
         captured = capsys.readouterr()
         assert "First session" in captured.out
         assert "2026-03-07T10:00:00+00:00" in captured.out
+        assert "breaks=1" in captured.out
         assert "Earlier work" in captured.out
+        assert "breaks=2" in captured.out
 
     def test_session_show_reports_active_session(self, capsys):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -826,9 +1064,22 @@ class TestCommandHandlerParsing:
         handle_command("/session show", engine=_SessionCommandEngineStub(), cli_context=cli_context)
 
         captured = capsys.readouterr()
-        assert "Active session" in captured.out
+        assert "Session:" in captured.out
         assert "session-1" in captured.out
         assert "First session" in captured.out
+        assert "Debugger Breakpoints: 1" in captured.out
+        assert "until node review" in captured.out
+
+    def test_session_show_can_inspect_saved_session_breakpoints(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/session show session-2", engine=_SessionCommandEngineStub(), cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "session-2" in captured.out
+        assert "Earlier work" in captured.out
+        assert "Debugger Breakpoints: 2" in captured.out
+        assert "until tool core.write_file" in captured.out
 
     def test_session_new_reports_created_session(self, capsys):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -885,6 +1136,26 @@ class TestCommandHandlerParsing:
         second = capsys.readouterr()
         assert engine.cleared == 1
         assert "Cleared 1 saved session" in second.out
+
+    def test_session_clear_breakpoints_requires_confirmation(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _SessionCommandEngineStub()
+
+        handle_command("/session clear-breakpoints session-2", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.cleared_breakpoints == []
+        assert "requires --yes" in captured.out
+
+    def test_session_clear_breakpoints_reports_cleared_count(self, capsys):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _SessionCommandEngineStub()
+
+        handle_command("/session clear-breakpoints session-2 --yes", engine=engine, cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert engine.cleared_breakpoints == ["session-2"]
+        assert "Cleared 2 debugger breakpoint(s) from session: session-2" in captured.out
 
     def test_invalid_quoted_command_returns_parse_error(self, capsys):
         cli_context = {
@@ -978,6 +1249,82 @@ class TestCommandHandlerParsing:
         assert engine.set_flow_calls == []
         captured = capsys.readouterr()
         assert "Unknown /agent subcommand: coder::coder" in captured.out
+
+    def test_stackvm_list_prints_flows_and_scripts(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command("/stackvm list", engine=_StackVmCommandEngineStub(tmp_path), cli_context=cli_context)
+
+        captured = capsys.readouterr()
+        assert "workspace.vm_review" in captured.out
+        assert "router.vm" in captured.out
+
+    def test_stackvm_create_flow_supports_entry_and_agent(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/stackvm create flow vm_triage --entry route --agent review.safe",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.create_flow_calls == [("vm_triage", "route", "review.safe")]
+        assert "Created StackVM flow 'vm_triage'" in captured.out
+
+    def test_stackvm_inspect_prints_warning_and_expanded_source(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+
+        handle_command(
+            "/stackvm inspect script router.vm --entry decide",
+            engine=_StackVmCommandEngineStub(tmp_path),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "legacy-tool-loop" in captured.out
+        assert "Expanded StackVM:" in captured.out
+
+    def test_stackvm_alter_script_uses_source_file(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+        source_file = tmp_path / "router.vm"
+        source_file.write_text("[ \"updated\" answer ]\n", encoding="utf-8")
+
+        handle_command(
+            f"/stackvm alter script router.vm {source_file}",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.update_script_calls == [("router.vm", "[ \"updated\" answer ]\n")]
+        assert "Updated StackVM script" in captured.out
+
+    def test_stackvm_debug_prints_trace(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+
+        handle_command(
+            '/stackvm debug script router.vm --input "hello"',
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.run_calls == [
+            {
+                "kind": "script",
+                "target": "router.vm",
+                "request": "hello",
+                "entry": None,
+                "debug": True,
+                "auto_confirm_tools": True,
+            }
+        ]
+        assert "Trace:" in captured.out
+        assert "push-literal" in captured.out
 
     def test_flow_shortcut_alias_is_removed(self, capsys):
         cli_context = {

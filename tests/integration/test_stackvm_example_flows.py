@@ -197,6 +197,24 @@ def test_real_engine_runs_checked_in_stackvm_tool_normalize_example_disabled_pay
     assert engine.last_run_summary["current_agent"] == "stackvm_tool_normalize_example.normalize"
 
 
+def test_real_engine_runs_checked_in_stackvm_macro_authoring_example(tmp_path):
+    write_fixture(
+        tmp_path,
+        "macro_payload.yaml",
+        [
+            'message: "from macro example"',
+        ],
+    )
+    engine = make_example_engine(tmp_path, "stackvm_macro_authoring_example.normalize")
+
+    result = engine.process_request("run macro authoring example", {})
+
+    assert result == "Macro says: from macro example"
+    assert engine.last_run_summary["current_agent"] == "stackvm_macro_authoring_example.normalize"
+    router_source = (EXAMPLES_ROOT / "stackvm_macro_authoring_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "answer-from", "read-file-once"]
+
+
 def test_real_engine_runs_checked_in_stackvm_parallel_map_example(tmp_path):
     engine = make_example_engine(tmp_path, "stackvm_parallel_map_example.map")
 

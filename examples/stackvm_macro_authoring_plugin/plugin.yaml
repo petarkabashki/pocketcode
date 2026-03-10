@@ -1,0 +1,6 @@
+schema_version: 1
+name: stackvm_macro_authoring_example
+description: StackVM user-authored macro example
+flows:
+  normalize:
+    markdown: flows/normalize.md

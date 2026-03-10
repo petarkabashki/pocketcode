@@ -181,29 +181,38 @@ class TextualAppSelectionMixin:
             default_llm_profile=(
                 str(settings.get("default_llm_profile")) if settings.get("default_llm_profile") else None
             ),
+            control_presentation=str(
+                settings.get("control_presentation")
+                or ("modal" if settings.get("user_input_popups") else getattr(self, "_control_presentation", "inline"))
+            ),
             available_agents=self._engine.list_agents(),
             available_llm_profiles=self._engine.list_llm_profiles(),
             on_submit=self._apply_system_settings,
         )
 
-    def _apply_system_settings(self, payload: dict[str, str | None]) -> None:
+    def _apply_system_settings(self, payload: dict[str, object]) -> None:
         theme_name = str(payload.get("theme_name") or self._cli_state.theme_name)
         workspace_view = str(
             payload.get("workspace_view") or payload.get("workspace_mode") or self._cli_state.workspace_view
         )
         default_agent = str(payload.get("default_agent")) if payload.get("default_agent") else None
         default_llm_profile = str(payload.get("default_llm_profile")) if payload.get("default_llm_profile") else None
+        control_presentation = str(payload.get("control_presentation") or getattr(self, "_control_presentation", "inline"))
 
         config_path = self._save_system_settings_effect(
             theme_name=theme_name,
             workspace_view=workspace_view,
             default_agent=default_agent,
             default_llm_profile=default_llm_profile,
+            control_presentation=control_presentation,
         )
         with self._batch_engine_ui_update(refresh_suggestions=True):
             self._set_cli_theme_name(theme_name)
             self._apply_workspace_view(workspace_view, announce=False)
             self._set_default_agent_effect(default_agent)
+            self._control_presentation = "modal" if control_presentation == "modal" else "inline"
+            if self._control_presentation == "modal":
+                self._debugger_inline_breakpoint_visible = False
             self._write_info(f"Applied system settings and saved to {config_path}.")
 
     def _apply_view_selection(self, selected_value: str) -> None:

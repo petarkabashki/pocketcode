@@ -52,6 +52,21 @@ def _extract_vm_interaction_value(response: Any) -> Any:
     return response
 
 
+def _snapshot_vm_value(value: Any, *, depth: int = 0) -> Any:
+    if depth >= 4:
+        return repr(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _snapshot_vm_value(item, depth=depth + 1)
+            for key, item in list(value.items())[:16]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_snapshot_vm_value(item, depth=depth + 1) for item in list(value)[:16]]
+    return repr(value)
+
+
 def _emit_runtime_event(shared_store: dict[str, Any], event_type: str, **payload: Any) -> None:
     handler = shared_store.get("runtime_event_handler")
     if callable(handler):
@@ -135,20 +150,38 @@ class AgentStackVM:
         if word_name not in self.words:
             raise ValueError(f"Unknown word: '{word_name}'")
         await self._call_word(self.words[word_name])
+        self._record_trace("word", word=word_name)
 
     async def execute_ast(self, ast: list[Any]) -> None:
         for item in ast:
             if isinstance(item, list):
                 self.stack.append(item)
+                self._record_trace("push-quotation", value=item)
                 continue
             token_type, token_value = item
             if token_type in {"str", "int", "float", "bool", "none"}:
                 self.stack.append(token_value)
+                self._record_trace("push-literal", token_type=token_type, value=token_value)
                 continue
             if token_type == "sym":
                 if token_value not in self.words:
                     raise ValueError(f"Unknown word: '{token_value}'")
                 await self._call_word(self.words[token_value])
+                self._record_trace("word", word=token_value)
+
+    def _record_trace(self, op: str, **payload: Any) -> None:
+        if not self.store.get("stackvm_trace_enabled"):
+            return
+        trace = self.store.setdefault("vm_trace", [])
+        if not isinstance(trace, list):
+            return
+        trace.append(
+            {
+                "op": str(op),
+                **{key: _snapshot_vm_value(value) for key, value in payload.items()},
+                "stack": _snapshot_vm_value(list(self.stack)),
+            }
+        )
 
     def register_host_words(self, *, host_context: StackVmHostContext, result: StackVmExecutionResult) -> None:
         self._host_context = host_context
@@ -264,6 +297,7 @@ class AgentStackVM:
                 "llm_call_started",
                 agent=host_context.agent_name,
                 profile=profile_name,
+                prompt_text=full_prompt,
             )
             response = host_context.llm_router.generate(profile_name=profile_name, prompt=full_prompt)
             generation_info = None
@@ -287,6 +321,8 @@ class AgentStackVM:
                 model=generation_info.get("model") if isinstance(generation_info, dict) else None,
                 usage=usage if isinstance(usage, dict) else {},
                 estimated_cost_usd=estimated_cost if isinstance(estimated_cost, (int, float)) else 0.0,
+                prompt_text=full_prompt,
+                response_text=response,
             )
             self.stack.append(response)
 

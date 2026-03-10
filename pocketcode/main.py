@@ -9,6 +9,14 @@ from typing import Any, Dict
 
 from dotenv import load_dotenv
 
+from pocketcode.cli.debugger_commands import (
+    build_debugger_until_predicate as _build_debugger_until_predicate,
+    lookup_path as _lookup_path,
+    parse_debug_step_count as _parse_debug_step_count,
+    parse_debugger_condition as _parse_debugger_condition,
+    resolve_debugger_value as _resolve_debugger_value,
+    split_debugger_command as _split_debugger_command,
+)
 from pocketcode.cli.runtime_events import format_runtime_event
 from pocketcode.cli.user_interaction import request_interaction_from_console
 from pocketcode.cli.command_handler import handle_command
@@ -50,6 +58,12 @@ def _print_startup(engine: PocketCodeEngine) -> None:
 
 def _run_basic_interactive_cli(engine: PocketCodeEngine, cli_context: Dict[str, Any]) -> None:
     cli_context["interface"] = "basic"
+    cli_context["debug_request_runner"] = lambda request: _run_request_with_debugger(
+        engine=engine,
+        user_input=request,
+        cli_context=cli_context,
+        bridge_user_input=True,
+    )
     print("Textual UI unavailable. Using basic interactive CLI.")
     print("Type /help for commands. Ctrl+C or /exit to quit.")
 
@@ -117,6 +131,199 @@ def _run_request_with_live_events(
 
     _drain_live_events(handle=handle, resolved_prompts=resolved_prompts, bridge_user_input=bridge_user_input)
     return handle.wait(timeout=1.0)
+
+
+def _run_request_with_debugger(
+    *,
+    engine: PocketCodeEngine,
+    user_input: str,
+    cli_context: Dict[str, Any],
+    bridge_user_input: bool,
+) -> str:
+    handle = engine.start_request(
+        user_input=user_input,
+        cli_context=cli_context,
+        bridge_user_input=bridge_user_input,
+        debug=True,
+    )
+    resolved_prompts: set[str] = set()
+    pause_banner_shown = False
+
+    try:
+        while not handle.is_done:
+            _drain_live_events(handle=handle, resolved_prompts=resolved_prompts, bridge_user_input=bridge_user_input)
+            if handle.is_debug_paused:
+                if not pause_banner_shown:
+                    print("[debug] Interactive debugger attached. Type 'help' for commands.")
+                    pause_banner_shown = True
+                _run_debugger_prompt(handle=handle)
+                continue
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        if handle.cancel("Run cancelled from debugger interrupt."):
+            print("\nStop requested. Waiting for the active step to yield...")
+        handle.continue_debugger()
+        while not handle.is_done:
+            _drain_live_events(handle=handle, resolved_prompts=resolved_prompts, bridge_user_input=bridge_user_input)
+            if handle.is_debug_paused:
+                handle.continue_debugger()
+            if not handle.is_done:
+                time.sleep(0.05)
+
+    _drain_live_events(handle=handle, resolved_prompts=resolved_prompts, bridge_user_input=bridge_user_input)
+    return handle.wait(timeout=1.0)
+
+
+def _run_debugger_prompt(*, handle: Any) -> None:
+    paused_event = handle.debug_pause_event or {}
+    _print_debug_pause(paused_event, handle.get_debug_snapshot(), until_label=handle.debug_until_label)
+
+    while handle.is_debug_paused and not handle.is_done:
+        try:
+            command = input("(debug) > ").strip()
+        except (KeyboardInterrupt, EOFError):
+            command = "quit"
+
+        parts = _split_debugger_command(command)
+        if not parts:
+            handle.step_debugger()
+            return
+        normalized = parts[0].lower()
+        if normalized in {"n", "next", "s", "step"}:
+            count = _parse_debug_step_count(parts[1:] if len(parts) > 1 else [])
+            if count is None:
+                print("[debug] Usage: next [count]")
+                continue
+            handle.step_debugger(count=count)
+            return
+        if normalized in {"c", "cont", "continue"}:
+            handle.continue_debugger()
+            return
+        if normalized in {"p", "pause", "status", "where"}:
+            _print_debug_pause(paused_event, handle.get_debug_snapshot(), until_label=handle.debug_until_label)
+            continue
+        if normalized in {"steps", "timeline"}:
+            _print_debug_steps(handle.get_debug_snapshot())
+            continue
+        if normalized in {"break", "b"}:
+            breakpoint_command = parts[1:]
+            breakpoint_config = _build_debugger_until_predicate(breakpoint_command)
+            if breakpoint_config is None:
+                print("[debug] Usage: break <node|agent|tool|event|when> ...")
+                continue
+            predicate, label = breakpoint_config
+            breakpoint_id = handle.add_debug_breakpoint(predicate, label=label)
+            print(f"[debug] Breakpoint {breakpoint_id} added: {label}")
+            continue
+        if normalized in {"breaks", "bp"}:
+            _print_debug_breakpoints(handle)
+            continue
+        if normalized == "clear":
+            if len(parts) == 1 or parts[1].lower() == "all":
+                cleared = handle.clear_all_debug_breakpoints()
+                print(f"[debug] Cleared {cleared} breakpoint(s).")
+                continue
+            try:
+                breakpoint_id = int(parts[1])
+            except (TypeError, ValueError):
+                print("[debug] Usage: clear <breakpoint_id|all>")
+                continue
+            if handle.clear_debug_breakpoint(breakpoint_id):
+                print(f"[debug] Cleared breakpoint {breakpoint_id}.")
+            else:
+                print(f"[debug] Breakpoint {breakpoint_id} not found.")
+            continue
+        if normalized == "until":
+            until_command = parts[1:]
+            predicate_config = _build_debugger_until_predicate(until_command)
+            if predicate_config is None:
+                print("[debug] Usage: until <node|agent|tool|event|when> ...")
+                continue
+            predicate, label = predicate_config
+            handle.continue_until_debugger(predicate, label=label)
+            return
+        if normalized in {"q", "quit", "cancel"}:
+            if handle.cancel("Run cancelled from debugger."):
+                print("[debug] Cancellation requested.")
+            handle.continue_debugger()
+            return
+        if normalized in {"h", "help", "?"}:
+            print(
+                "Debugger commands: next [count], continue, until node <id>, until agent <name>, "
+                "until tool <name>, until event <type>, until when <path> == <value>, "
+                "break <...>, breaks, clear <id|all>, status, steps, quit, help"
+            )
+            continue
+        print(
+            "Unknown debugger command. Use: next [count], continue, until ..., break <...>, "
+            "breaks, clear <id|all>, status, steps, quit, help"
+        )
+
+
+def _print_debug_pause(paused_event: Dict[str, Any], snapshot: Dict[str, Any], *, until_label: str | None = None) -> None:
+    event_type = paused_event.get("type") or "event"
+    message = format_runtime_event(paused_event) or f"Paused at {event_type}."
+    print(f"[debug] Paused: {message}")
+    if paused_event.get("debug_breakpoint_id"):
+        print(
+            f"[debug] Breakpoint hit: #{paused_event.get('debug_breakpoint_id')} "
+            f"{paused_event.get('debug_breakpoint_label') or ''}".rstrip()
+        )
+    if until_label:
+        print(f"[debug] Stop condition: {until_label}")
+    print(f"[debug] Active agent: {snapshot.get('active_agent') or 'unknown'}")
+    if snapshot.get("active_node_id"):
+        print(
+            f"[debug] Active node: {snapshot.get('active_node_id')} "
+            f"({snapshot.get('active_node_kind') or 'node'})"
+        )
+    if snapshot.get("current_llm_profile") or snapshot.get("current_llm_model"):
+        print(
+            "[debug] LLM: "
+            f"{snapshot.get('current_llm_profile') or 'none'} "
+            f"({snapshot.get('current_llm_model') or '-'})"
+        )
+    if snapshot.get("pending_tool"):
+        print(f"[debug] Pending tool: {snapshot.get('pending_tool')}")
+    if snapshot.get("pending_handoff_agent"):
+        print(f"[debug] Pending handoff: {snapshot.get('pending_handoff_agent')}")
+    if snapshot.get("last_agent_decision"):
+        print(f"[debug] Last agent decision: {snapshot.get('last_agent_decision')}")
+    if snapshot.get("last_tool_route"):
+        print(f"[debug] Last tool route: {snapshot.get('last_tool_route')}")
+    if snapshot.get("error_message"):
+        print(f"[debug] Error: {snapshot.get('error_message')}")
+    print(
+        f"[debug] Steps so far: {snapshot.get('step_count', 0)} | "
+        f"Events: {snapshot.get('runtime_event_count', 0)}"
+    )
+
+
+def _print_debug_breakpoints(handle: Any) -> None:
+    breakpoints = handle.list_debug_breakpoints()
+    if not breakpoints:
+        print("[debug] No breakpoints set.")
+        return
+    print("[debug] Breakpoints:")
+    for item in breakpoints:
+        print(f"  {item.get('id')}. {item.get('label')}")
+
+
+def _print_debug_steps(snapshot: Dict[str, Any]) -> None:
+    steps = snapshot.get("steps", [])
+    if not isinstance(steps, list) or not steps:
+        print("[debug] No recorded steps yet.")
+        return
+    print("[debug] Step timeline:")
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        duration = step.get("duration_ms")
+        duration_suffix = f" [{float(duration):.1f}ms]" if isinstance(duration, (int, float)) else ""
+        print(
+            f"  {step.get('index')}. {step.get('kind')} "
+            f"({step.get('status')}){duration_suffix} {step.get('summary')}"
+        )
 
 
 def _drain_live_events(

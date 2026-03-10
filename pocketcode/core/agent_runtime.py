@@ -644,6 +644,7 @@ class AgentRuntime:
             "llm_call_started",
             agent=agent_name,
             profile=llm_profile,
+            prompt_text=prompt,
         )
         self._raise_if_cancelled(shared_store)
         response_text = self._llm_router.generate(profile_name=llm_profile, prompt=prompt)
@@ -694,6 +695,8 @@ class AgentRuntime:
             model=llm_generation_info.get("model") if isinstance(llm_generation_info, dict) else None,
             usage=usage if isinstance(usage, dict) else {},
             estimated_cost_usd=estimated_cost if isinstance(estimated_cost, (int, float)) else 0.0,
+            prompt_text=prompt,
+            response_text=response_text,
         )
 
         decision = self._parse_yaml_mapping(response_text)

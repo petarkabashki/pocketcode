@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict
 import yaml
 
+from pocketcode.cli.runtime_events import format_runtime_event
+
 from .shared import _build_output_text, _build_stats_text
 from .store import OutputBlock, TextualRuntimeState
 
@@ -39,7 +41,10 @@ def select_inspector_summary_text(
         f"Skills: {', '.join(active_skill_names) if active_skill_names else 'none'}",
         f"Auto-confirm: {'on' if auto_confirm_tools else 'off'}",
         f"Session confirm: {session_default}",
+        f"Session debug breaks: {len(status.get('session_debugger_breakpoints', []) or [])}",
         f"Modal: {select_modal_label(runtime_state)}",
+        f"Runtime events: {run_summary.get('runtime_event_count', 0)}",
+        f"Runtime steps: {run_summary.get('step_count', 0)}",
         _build_stats_text(status),
     ]
     if active_profile and active_profile.description:
@@ -88,7 +93,39 @@ def select_inspector_summary_blocks(
     )
 
 
-def select_run_preview_text(state: TextualRuntimeState, status: Dict[str, Any]) -> str:
+def _format_debugger_summary(debugger_state: Dict[str, Any]) -> list[str]:
+    snapshot = debugger_state.get("snapshot", {})
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    pause_event = debugger_state.get("pause_event", {})
+    if not isinstance(pause_event, dict):
+        pause_event = {}
+    breakpoints = debugger_state.get("breakpoints", ())
+    lines = [
+        f"attached: {'yes' if debugger_state.get('attached') else 'no'}",
+        f"paused: {'yes' if debugger_state.get('paused') else 'no'}",
+        f"active_agent: {snapshot.get('active_agent') or 'unknown'}",
+    ]
+    if snapshot.get("active_node_id"):
+        lines.append(
+            f"active_node: {snapshot.get('active_node_id')} ({snapshot.get('active_node_kind') or 'node'})"
+        )
+    if pause_event:
+        lines.append(f"pause_event: {format_runtime_event(pause_event)}")
+    if debugger_state.get("until_label"):
+        lines.append(f"stop_condition: {debugger_state.get('until_label')}")
+    lines.append(f"breakpoints: {len(tuple(breakpoints))}")
+    lines.append(f"runtime_event_count: {snapshot.get('runtime_event_count', 0)}")
+    lines.append(f"step_count: {snapshot.get('step_count', 0)}")
+    return lines
+
+
+def select_run_preview_text(
+    state: TextualRuntimeState,
+    status: Dict[str, Any],
+    *,
+    debugger_state: Dict[str, Any] | None = None,
+) -> str:
     run_summary = status.get("last_run_summary", {})
     if not isinstance(run_summary, dict):
         run_summary = {}
@@ -106,11 +143,20 @@ def select_run_preview_text(state: TextualRuntimeState, status: Dict[str, Any]) 
         f"current_llm_model: {run_summary.get('current_llm_model') or '-'}",
         f"llm_usage: {run_summary.get('llm_usage', {})}",
         f"llm_cost_usd: {run_summary.get('llm_cost_usd', 0.0)}",
+        f"runtime_event_count: {run_summary.get('runtime_event_count', 0)}",
+        f"step_count: {run_summary.get('step_count', 0)}",
         f"vm_validation_warning_count: {run_summary.get('vm_validation_warning_count', 0)}",
         f"vm_validation_warnings: {run_summary.get('vm_validation_warnings', [])}",
         f"context_stats: {run_summary.get('context_stats', {})}",
         f"session_confirmation: {status.get('session_tool_confirmation_overrides', {})}",
     ]
+    if isinstance(debugger_state, dict):
+        lines.append("debugger:")
+        lines.extend(f"- {item}" for item in _format_debugger_summary(debugger_state))
+    step_timeline = _format_run_steps(run_summary.get("steps", []), limit=8)
+    if step_timeline:
+        lines.append("steps:")
+        lines.extend(f"- {item}" for item in step_timeline)
     if state.live_run_events:
         lines.append("live_events:")
         lines.extend(f"- {item}" for item in state.live_run_events[-8:])
@@ -142,7 +188,30 @@ def _build_warning_location_label(item: Dict[str, Any]) -> str:
     return str(item.get("location") or "").strip()
 
 
-def select_run_preview_blocks(state: TextualRuntimeState, status: Dict[str, Any]) -> tuple[OutputBlock, ...]:
+def _format_run_steps(raw_steps: Any, *, limit: int) -> list[str]:
+    if not isinstance(raw_steps, list):
+        return []
+
+    rendered: list[str] = []
+    for step in raw_steps[-max(limit, 0) :]:
+        if not isinstance(step, dict):
+            continue
+        index = step.get("index")
+        kind = str(step.get("kind") or "step")
+        status = str(step.get("status") or "completed")
+        summary = str(step.get("summary") or step.get("label") or kind)
+        duration = step.get("duration_ms")
+        duration_suffix = f" [{float(duration):.1f}ms]" if isinstance(duration, (int, float)) else ""
+        rendered.append(f"{index}. {kind} ({status}){duration_suffix} {summary}")
+    return rendered
+
+
+def select_run_preview_blocks(
+    state: TextualRuntimeState,
+    status: Dict[str, Any],
+    *,
+    debugger_state: Dict[str, Any] | None = None,
+) -> tuple[OutputBlock, ...]:
     run_summary = status.get("last_run_summary", {})
     if not isinstance(run_summary, dict):
         run_summary = {}
@@ -168,6 +237,8 @@ def select_run_preview_blocks(state: TextualRuntimeState, status: Dict[str, Any]
                     "current_llm_model": run_summary.get("current_llm_model") or "-",
                     "llm_usage": run_summary.get("llm_usage", {}),
                     "llm_cost_usd": run_summary.get("llm_cost_usd", 0.0),
+                    "runtime_event_count": run_summary.get("runtime_event_count", 0),
+                    "step_count": run_summary.get("step_count", 0),
                     "vm_validation_warning_count": run_summary.get("vm_validation_warning_count", 0),
                     "vm_validation_warnings": run_summary.get("vm_validation_warnings", []),
                     "context_stats": run_summary.get("context_stats", {}),
@@ -177,6 +248,40 @@ def select_run_preview_blocks(state: TextualRuntimeState, status: Dict[str, Any]
             language="yaml",
         ),
     ]
+    if isinstance(debugger_state, dict):
+        blocks.append(
+            OutputBlock(
+                kind="code",
+                title="Debugger",
+                text="\n".join(_format_debugger_summary(debugger_state)),
+                language="text",
+            )
+        )
+        for item in tuple(debugger_state.get("breakpoints", ())):
+            if not isinstance(item, dict):
+                continue
+            breakpoint_id = item.get("id")
+            label = str(item.get("label") or "").strip()
+            if breakpoint_id is None or not label:
+                continue
+            blocks.append(
+                OutputBlock(
+                    kind="code",
+                    title=f"Breakpoint #{int(breakpoint_id)}",
+                    text=label,
+                    language="text",
+                )
+            )
+    step_timeline = _format_run_steps(run_summary.get("steps", []), limit=12)
+    if step_timeline:
+        blocks.append(
+            OutputBlock(
+                kind="code",
+                title="Step Timeline",
+                text="\n".join(step_timeline),
+                language="text",
+            )
+        )
     if state.live_run_events:
         blocks.append(
             OutputBlock(

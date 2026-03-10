@@ -163,12 +163,14 @@ The shared command layer exposes these primary command groups:
 - `/prompts`
 - `/agent`
 - `/asset`
+- `/stackvm`
 - `/mode`
 - `/skill`
 - `/context`
 - `/confirm`
 - `/session`
 - `/reload`
+- `/debug`
 - `/stop`
 - `/cancel`
 - `/status`
@@ -278,6 +280,47 @@ Examples:
 /asset create agent reviewer.safe
 /asset create flow triage
 /asset create tool workspace_echo
+```
+
+## StackVM Commands
+
+Syntax:
+
+```text
+/stackvm list [flows|scripts]
+/stackvm create flow <name> [--entry <word>] [--agent <agent_name>]
+/stackvm create script <name> [--entry <word>]
+/stackvm create agent <agent_name> <flow_name>
+/stackvm inspect <flow|script|agent> <target> [--entry <word>]
+/stackvm run <flow|script|agent> <target> [--input <text>] [--entry <word>] [--debug]
+/stackvm debug <flow|script|agent> <target> [--input <text>] [--entry <word>]
+/stackvm alter <flow|script|agent> <target> <source_file>
+```
+
+Behavior:
+
+- `list` prints registered StackVM-backed flows plus standalone workspace scripts under `<primary_resource_root>/vm/`
+- `create flow` writes a Markdown flow scaffold with `execution_mode: vm`, a default `vm_entry`, and an inline fenced `vm` block
+- `create flow ... --agent <name>` also writes a workspace Markdown agent profile bound to that StackVM flow
+- `create script` writes a standalone `.vm` source file under `<primary_resource_root>/vm/`
+- `create agent` writes a workspace Markdown agent profile that targets an existing StackVM flow
+- `inspect` compiles the target, prints token count, source contributors, validation warnings, and the expanded executable StackVM source
+- `run` executes the requested target once through the normal agent runtime loop and prints the final output plus any recorded warning count
+- `debug` is the same execution path as `run`, but also enables per-step VM tracing and prints the recorded stack snapshots after each literal push, quotation push, or word execution
+- direct `run` and `debug` executions currently force `auto_confirm_tools=True` for that invocation so StackVM CLI runs do not block on tool confirmation prompts
+- `alter flow` and `alter agent` delegate to the workspace Markdown asset updater
+- `alter script` replaces a standalone `.vm` or `.md` script file from a local source file after compiling its VM body
+- direct script execution defaults to the `main` entry word when `--entry` is not provided
+
+Examples:
+
+```text
+/stackvm list
+/stackvm create flow vm_triage --entry decide --agent reviewer.safe
+/stackvm create script hello_world --entry main
+/stackvm inspect flow resource_root.pocketcode.vm_triage
+/stackvm debug script hello_world --input "ping"
+/stackvm alter script hello_world ./drafts/hello_world.vm
 ```
 
 ### Flow Selection
@@ -466,36 +509,93 @@ Current subcommands are:
 
 ```text
 /session show
+/session show <session_id>
 /session list
 /session new [title...]
 /session resume <session_id>
 /session delete <session_id> --yes
 /session clear-all --yes
+/session clear-breakpoints <session_id> --yes
 /session help
 ```
 
 Behavior:
 
 - saved sessions are workspace-local and backed by JSON files under `.pocketcode/state/sessions/`
-- `/session show` prints the active session id, title, and whether it was resumed from history
-- `/session list` prints saved sessions with id, title, and last-updated timestamp, marking the active session
+- `/session show` prints the requested saved session, or the active one when no id is supplied
+- `/session show` includes the saved debugger breakpoint count and the persisted breakpoint labels for that session
+- `/session list` prints saved sessions with id, title, last-updated timestamp, active marker, and persisted debugger breakpoint count
 - `/session new` creates a fresh active session without deleting earlier history
 - `/session resume` restores the saved agent, mode, enabled skills, global LLM override, and session-scoped confirmation overrides
 - `/session delete` requires `--yes`, refuses to delete the active session, and removes only the targeted saved session
 - `/session clear-all` requires `--yes`, preserves the active session, and reports how many prior saved sessions were removed
+- `/session clear-breakpoints` requires `--yes` and removes only the persisted debugger breakpoints from the targeted saved session
 
 ## Runtime Control Commands
 
 - `/reload` rebuilds plugins, agents, tools, skills, and LLM profile mappings
+- `/debug <request text>` is available in interactive CLI surfaces with debugger support and runs one request under an interactive step debugger
 - `/stop` and `/cancel` request cooperative cancellation on the active run if one exists
-- `/status` prints runtime flow, selected flow, active agent, active mode, skills, LLM overrides, default LLM, confirmation state, and any last-run StackVM validation warning codes recorded in `last_run_summary.vm_validation_warnings`
-- `/status verbose` or `/status --verbose` also prints the full warning messages and any recorded exact StackVM warning spans, while the Textual inspector summary renders the same warnings with compact `line:column` labels derived from the stored `span` metadata
+- `/status` prints runtime flow, selected flow, active agent, active mode, skills, LLM overrides, default LLM, confirmation state, last-run runtime event and step counts, and any last-run StackVM validation warning codes recorded in `last_run_summary.vm_validation_warnings`
+- `/status` also shows the count of session-persisted debugger breakpoints that will be restored onto the next debug run
+- `/status steps`, `/status --steps`, `/status timeline`, or `/status --timeline` also print the recorded last-run step trace without the nested per-step detail payloads
+- `/status verbose` or `/status --verbose` prints the same step trace plus the full warning messages, exact StackVM warning spans, and the recorded per-step detail payloads
 
 `/stop` and `/cancel` only work when the interface passes an active run handle to the command layer.
 
+The interactive debugger currently supports:
+
+- `next` / `step`: run until the next pause-worthy runtime step completes
+- `next <count>` / `step <count>`: run until that many pause-worthy runtime steps have completed
+- `continue`: resume without pausing again until the run completes or is cancelled
+- `until node <node_id>`: continue until a matching runtime node completion is observed
+- `until agent <agent_name>`: continue until a pause-worthy event for that active agent is observed
+- `until tool <tool_name>`: continue until a pause-worthy event involving that tool is observed
+- `until event <event_type>`: continue until a matching pause-worthy runtime event is observed
+- `until handoff`, `until error`, `until answer`, `until ask`: shorthands for common event stops
+- `until when <path> == <value>` or `until when <path> != <value>`: continue until a simple condition over the paused event or live snapshot matches
+- `break <node|agent|tool|event|when> ...`: add a persistent breakpoint using the same predicate surface as `until`
+- `breaks`: list saved breakpoints for the active debug session
+- `clear <breakpoint_id>` or `clear all`: remove one or all saved breakpoints
+- `status`: print the paused event plus a compact live runtime snapshot
+- `steps`: print the currently recorded step timeline
+- `quit`: cancel the run
+
+The debugger currently pauses after completed or instantaneous runtime steps:
+
+- `node_completed`
+- `agent_turn_completed`
+- `llm_call_completed`
+- `tool_finished`
+- `handoff`
+- `handoff_return`
+- `final_answer`
+- `ask_user`
+- `runtime_error`
+
+Condition paths for `until when` resolve against:
+
+- the paused event with the explicit prefix `event.`
+- the live snapshot with the explicit prefix `snapshot.`
+- unprefixed paths first against the event, then against the snapshot
+
+Examples:
+
+- `until node review_route`
+- `next 5`
+- `until tool core.write_file`
+- `until handoff`
+- `until when pending_tool.name == "core.write_file"`
+- `until when event.node_id == "review_route"`
+- `until when snapshot.active_agent == "review.safe"`
+- `break node review_route`
+- `break when pending_tool.name == "core.write_file"`
+- `breaks`
+- `clear 2`
+
 ## Request Execution And Live Events
 
-Both one-shot mode and the basic CLI use the same request runner in `pocketcode/main.py`.
+One-shot mode, the basic CLI, and the Textual UI all use the same request runner in `pocketcode/main.py` plus `engine.start_request(...)`.
 
 Execution model:
 
@@ -505,6 +605,21 @@ Execution model:
 4. Print formatted runtime lifecycle lines using `pocketcode/cli/runtime_events.py`.
 5. When bridging is enabled, resolve `interaction_requested` and `user_input_requested` events from console input.
 6. Wait for final output and print the final assistant response.
+
+Each run now also builds a canonical observability summary in `last_run_summary`:
+
+- `runtime_event_count`: total runtime events seen by the request-level observer
+- `step_count`: number of structured runtime steps recorded for the run
+- `steps`: ordered step timeline entries with `index`, `kind`, `status`, `duration_ms`, `summary`, and compact `details`
+
+The step observer currently records first-class steps for:
+
+- agent turns
+- LLM calls
+- tool calls
+- handoffs
+- handoff returns
+- runtime errors
 
 The event formatter currently emits human-readable lines for:
 
@@ -518,7 +633,41 @@ The event formatter currently emits human-readable lines for:
 - user-input and interaction prompts
 - runtime errors and cancellation
 
-This event stream is shared with the Textual UI so both interfaces present the same lifecycle vocabulary.
+When an event is associated with a structured runtime step, the formatted line is prefixed with `Step N:`. This gives both the basic CLI and one-shot mode a stable step-by-step execution view without switching into a separate debug command.
+
+This event stream is shared with the Textual UI so both interfaces present the same lifecycle vocabulary and the same step numbering.
+
+## Interactive Debugger
+
+The basic interactive CLI and the Textual UI both expose `/debug <request text>` through the shared command layer.
+
+Execution model:
+
+1. Call `engine.start_request(..., debug=True)` so the request's `RunHandle` starts in step-debug mode.
+2. Drain runtime events normally.
+3. When the `RunHandle` reaches a pause-worthy runtime step, it blocks the worker thread after queueing that event.
+4. The active interface renders the paused event plus a compact live snapshot from the engine's shared store.
+5. The user issues debugger commands such as `next`, `continue`, `status`, `steps`, or `quit`.
+6. Persistent breakpoints, when configured, can interrupt ordinary `continue` execution and are reported back on the paused event as the matched breakpoint id and label.
+
+Generated Markdown graph flows now also emit `node_started` and `node_completed` runtime events through the shared request event stream and keep `active_node_id` / `active_node_kind` up to date in the shared store. The interactive debugger uses `node_completed` as the node-level pause boundary for `until node ...`, and paused snapshots now show the active node directly.
+
+Textual-specific behavior:
+
+- `/debug <request text>` starts the run under the same `RunHandle` debugger used by the basic CLI
+- when execution pauses, the app automatically switches to the `Run` view
+- the run inspector now shows a dedicated `Debugger` block with pause status, active agent, active node, stop condition, breakpoint count, and live runtime counters
+- the inspector summary also shows the count of session-persisted debugger breakpoints even when no debug run is currently attached
+- the `Run` view also exposes direct debugger controls for `Next`, `Continue`, `Add Break`, `Clear Breaks`, `Status`, `Breaks`, and `Quit`
+- `Add Break` opens a Textual picker and prompt flow so node, agent, tool, event, shorthand, and conditional breakpoints can be added without typing the raw `break ...` command
+- each saved breakpoint is also rendered as its own selectable block in the `Run` inspector
+- selecting a breakpoint block lets `Clear Selected` remove that specific breakpoint directly from the UI
+- breakpoints added or cleared in Textual are now stored on the active saved session and are restored automatically on later `/debug` runs after session resume or app restart
+- the Control Center `Sessions` category can inspect a saved session's persisted debugger breakpoints or clear them before the next debug run
+- while paused, the main input accepts the same debugger commands as the basic CLI: `next`, `continue`, `until ...`, `break ...`, `breaks`, `clear ...`, `status`, `steps`, and `quit`
+- Textual key bindings for debugger control are `F7` (`next`), `F8` (`continue`), `F9` (`add breakpoint`), `Ctrl+G` (`status`), `Ctrl+B` (`breaks`), `Ctrl+K` (`clear selected breakpoint`), and `Ctrl+Shift+B` (`clear all breakpoints`)
+
+One-shot mode still exposes the same runtime step timeline and live event stream, but it does not provide an interactive pause/continue debugger surface.
 
 ## Textual UI Architecture
 
@@ -531,6 +680,7 @@ Current module layout:
 - `pocketcode/cli/textual_app.py`: compatibility facade that re-exports the Textual UI surface
 - `pocketcode/cli/textual_ui/app.py`: final `PocketCodeTextualApp` composition and `run_textual_cli()`
 - `pocketcode/cli/textual_ui/base.py`: app shell, bindings, CSS, and layout composition
+- `pocketcode/cli/textual_ui/debugger_mixin.py`: Textual debugger queueing, pause sync, and paused-command handling
 - `pocketcode/cli/textual_ui/picker_model_mixin.py`: shared skill/tool picker models and grouping helpers used across rendering and interaction flows
 - `pocketcode/cli/textual_ui/ui_state_mixin.py`: `TextualUIState` assembly from reducer state, selector outputs, and picker models
 - `pocketcode/cli/textual_ui/widget_sync_mixin.py`: cached widget updates, view switching, and `TextualUIState` application
@@ -552,6 +702,9 @@ Core state owned by the app includes:
 - active run handle
 - pending interaction request
 - live run status and recent run events
+- live debugger state for the active paused debug run, derived from the current `RunHandle`
+- debugger control-row visibility and enabled state in the `Run` view
+- last-run structured step trace rendered from `last_run_summary.steps`
 
 ### UI Pipeline
 
@@ -624,7 +777,7 @@ Built-in workspace views are:
 - `minimal`
 - `review`
 
-Workspace view changes both the default content view and whether the right inspector panel is visible.
+Textual startup always opens on the `chat` view. The saved workspace view still restores its layout traits, such as right-inspector visibility, and selecting a workspace view inside the UI switches to that preset's paired content view.
 
 The main chat console is rendered through a Rich-capable log surface rather than a plain text area. Current semantic output block kinds are:
 
@@ -638,11 +791,11 @@ The main chat console is rendered through a Rich-capable log surface rather than
 - `tool_call`
 - `tool_result`
 
-Assistant and user messages render as bordered panels under the active theme. Assistant responses that contain fenced code blocks are decomposed into prose panels plus syntax-highlighted code panels. Fenced `diff` blocks render through a dedicated diff view with line-level add/remove styling. Tool calls and tool results render as dedicated panels, while runtime, info, warning, and error entries render as themed inline log records. The plain-text transcript is still preserved in runtime state for clipboard copy and other text-only flows.
+Assistant and user messages render as bordered panels under the active theme. Assistant responses that contain fenced code blocks are decomposed into prose panels plus syntax-highlighted code panels. Fenced `diff` blocks render through a dedicated diff view with line-level add/remove styling. Tool calls and tool results render as dedicated panels, while runtime, info, warning, and error entries render as themed inline log records. Tool-policy confirmation requests now render as dedicated collapsible panels that show the human question in the collapsed state and reveal `Args:` details only when expanded. LLM requests and LLM responses also render as dedicated one-line collapsible panels that expand to the full prompt or response body. The plain-text transcript is still preserved in runtime state for clipboard copy and other text-only flows.
 
-The `run` view now uses the same Rich-capable rendering path as the main chat console. Instead of a plain text dump, the run preview presents semantic overview and summary blocks, including YAML-formatted run metadata, StackVM authoring warnings from `last_run_summary.vm_validation_warnings` when present, and recent live events.
+The `run` view now uses the same Rich-capable rendering path as the main chat console. Instead of a plain text dump, the run preview presents semantic overview and summary blocks, including YAML-formatted run metadata, the recorded runtime event count, the structured step count, a dedicated step-timeline block rendered from `last_run_summary.steps`, StackVM authoring warnings from `last_run_summary.vm_validation_warnings` when present, and recent live events.
 
-The right-side inspector summary also surfaces StackVM authoring warning codes from the last run when the active run summary recorded any `vm_validation_warnings`.
+The right-side inspector summary also surfaces the last run's runtime event count, runtime step count, and any StackVM authoring warning codes when the active run summary recorded `vm_validation_warnings`.
 
 The right-side inspector panel now follows the same pattern for its summary, session context, saved sessions, and prompt-source panes. Those sections render semantic Rich blocks rather than plain text areas, while the profile list, skill selection list, and tool selection list remain interactive list widgets.
 
@@ -671,10 +824,13 @@ Terminal font sizing remains outside PocketCoder's control. The terminal emulato
 Current bindings are:
 
 - `Tab`: complete the current input from the suggestion list
+- `F2`: open the previous-entry picker for the main input box
 - `F3`: open the edit asset picker
 - `F4`: open the clone asset picker
 - `F5`: open the global view selector for `chat`, `control`, and `run`
 - `F6`: open the main asset/control picker
+- `Ctrl+P`: load the previous main-input entry
+- `Ctrl+N`: move forward through recalled main-input entries
 - `Ctrl+Up`: focus the previous visible Rich surface
 - `Ctrl+Down`: focus the next visible Rich surface
 - `Ctrl+Left`: select the previous compactable block in the focused Rich surface
@@ -686,8 +842,6 @@ Current bindings are:
 - `Ctrl+R`: reload runtime
 - `Ctrl+L`: clear output
 - `Ctrl+Q`: quit
-
-There is no current `F2` binding.
 
 ### Textual-Only Slash Commands
 
@@ -707,6 +861,10 @@ The main input field handles three cases:
 - when a runtime interaction is pending, input is treated as the reply to that interaction
 - when the text starts with `/`, it is executed as a slash command
 - otherwise it starts a normal engine request with `bridge_user_input=True`
+
+The Textual shell also keeps a persisted history of accepted main-input entries under `runtime.textual.last_used.entry_history`. That history powers both the `F2` picker and the `Ctrl+P`/`Ctrl+N` recall path.
+
+`runtime.textual.control_presentation` controls whether these higher-friction Textual controls render `inline` or as `modal` popups. In `modal` mode, pending `interaction_requested` and `user_input_requested` events open popup input screens and the debugger breakpoint-add flow uses popup pickers. In `inline` mode, pending runtime prompts render as on-screen controls above the chat log and run log, then collapse into a submitted summary after the input is accepted; single-choice prompts use the same list-style option surface as checklist prompts instead of a dropdown; debugger breakpoint controls also stay on-screen in the Run view.
 
 Command execution in Textual is wrapped with `redirect_stdout()` so the shared command handler can continue to print plain text while the UI captures that output and appends it to the output panel.
 
@@ -740,6 +898,8 @@ Current capabilities implemented across `pocketcode/cli/textual_ui/` include:
 - deleting workspace-backed agent, mode, or LLM assets
 - saving, loading, and deleting selection presets
 - editing and saving system settings
+- recalling previous main-input entries from a picker or keyboard history
+- answering pending runtime prompts through inline chat/run controls by default or popup controls when enabled
 
 These are UI conveniences over engine methods. The Textual app maintains a reducer-backed CLI state snapshot, hydrates it from engine/session state, and renders widgets from that snapshot via one-way data flow.
 
@@ -751,6 +911,7 @@ Persisted settings currently include:
 
 - `theme_name`
 - `workspace_view`
+- `control_presentation`
 - `default_skills`
 - `selection_presets`
 - `last_used.active_profile`
@@ -758,6 +919,7 @@ Persisted settings currently include:
 - `last_used.global_llm_profile`
 - `last_used.session_confirmation_default`
 - `last_used.auto_confirm_tools`
+- `last_used.entry_history`
 
 Important behavior:
 
@@ -777,8 +939,11 @@ Current values returned are:
 - `workspace_view`
 - `default_agent`
 - `default_llm_profile`
+- `control_presentation`
 
 `save_system_settings()` writes these values back into the runtime and LLM sections of `pocketcode.yml`, then reloads LLM runtime state.
+
+On startup, `workspace_view` restores the saved layout preset but does not override the initial `chat` surface. Interactive workspace-view changes inside Textual still switch to the preset's paired view.
 
 When the Textual system-settings editor opens, it normalizes legacy `plugin::resource` agent ids from config to the registry's canonical `plugin.resource` form so older saved defaults continue to load without crashing the agent select widget.
 

@@ -97,6 +97,49 @@ digraph G {
     assert shared["final_answer"] == "echo:hello"
 
 
+def test_graph_flow_emits_node_runtime_events():
+    events = []
+    definition = {
+        "metadata": {
+            "markdown_graphs": [
+                {
+                    "language": "dot",
+                    "content": """
+digraph G {
+  start -> done;
+}
+""",
+                }
+            ]
+        },
+        "nodes": {
+            "start": {"kind": "noop", "transition": "default"},
+            "done": {"kind": "output", "message": "Done"},
+        },
+    }
+
+    flow = build_graph_flow_from_metadata(definition)
+    shared = {
+        "active_agent": "graph.agent",
+        "runtime_event_handler": lambda event_type, **payload: events.append({"type": event_type, **payload}),
+    }
+
+    assert flow is not None
+    assert flow.run(shared) == "final_answer"
+    assert [event["type"] for event in events] == [
+        "node_started",
+        "node_completed",
+        "node_started",
+        "node_completed",
+    ]
+    assert shared["active_node_id"] == "done"
+    assert shared["active_node_kind"] == "output"
+    assert events[1]["node_id"] == "start"
+    assert events[1]["transition"] == "default"
+    assert events[3]["node_id"] == "done"
+    assert events[3]["transition"] == "final_answer"
+
+
 def test_graph_flow_interpolates_strings_and_maps_tool_result_transitions():
     definition = {
         "metadata": {

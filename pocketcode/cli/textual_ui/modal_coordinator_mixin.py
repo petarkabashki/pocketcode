@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable
 
 from .editor_screens import NameInputScreen, SystemSettingsScreen, TextEditorScreen, ToolPolicyEditorScreen
+from .interaction_screens import InteractionControlsScreen, PromptInputScreen
 from .picker_screens import AssetPickerScreen, ToolSelectionScreen
 from .shared import PickerOption
 
@@ -84,6 +85,45 @@ class TextualAppModalCoordinatorMixin:
             on_result=lambda text: on_submit(text) if text is not None else None,
         )
 
+    def _present_prompt_input_modal(
+        self,
+        *,
+        title: str,
+        prompt: str,
+        help_text: str,
+        placeholder: str,
+        initial_text: str,
+        submit_label: str,
+        on_submit: Callable[[str], None],
+    ) -> None:
+        self._present_modal(
+            PromptInputScreen(
+                title=title,
+                prompt=prompt,
+                help_text=help_text,
+                placeholder=placeholder,
+                initial_text=initial_text,
+                submit_label=submit_label,
+            ),
+            modal_kind="prompt_input",
+            modal_title=title,
+            on_result=lambda value: on_submit(value) if value is not None else None,
+        )
+
+    def _present_interaction_controls_modal(
+        self,
+        *,
+        title: str,
+        request: dict[str, Any],
+        on_submit: Callable[[str], None],
+    ) -> None:
+        self._present_modal(
+            InteractionControlsScreen(request=request),
+            modal_kind="interaction_controls",
+            modal_title=title,
+            on_result=lambda value: on_submit(value) if value is not None else None,
+        )
+
     def _present_tool_policy_editor_modal(
         self,
         *,
@@ -133,9 +173,10 @@ class TextualAppModalCoordinatorMixin:
         workspace_view: str,
         default_agent: str | None,
         default_llm_profile: str | None,
+        control_presentation: str,
         available_agents: Iterable[str],
         available_llm_profiles: Iterable[str],
-        on_submit: Callable[[dict[str, str | None]], None],
+        on_submit: Callable[[dict[str, Any]], None],
     ) -> None:
         self._present_modal(
             SystemSettingsScreen(
@@ -143,6 +184,7 @@ class TextualAppModalCoordinatorMixin:
                 workspace_view=workspace_view,
                 default_agent=default_agent,
                 default_llm_profile=default_llm_profile,
+                control_presentation=control_presentation,
                 available_agents=available_agents,
                 available_llm_profiles=available_llm_profiles,
             ),

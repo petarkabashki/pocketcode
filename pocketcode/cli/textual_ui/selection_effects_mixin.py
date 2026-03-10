@@ -33,6 +33,7 @@ class TextualAppSelectionEffectsMixin:
         workspace_view: str,
         default_agent: str | None,
         default_llm_profile: str | None,
+        control_presentation: str,
     ) -> str:
         if not hasattr(self._engine, "save_system_settings"):
             raise ValueError("This runtime does not support saving system settings.")
@@ -41,6 +42,7 @@ class TextualAppSelectionEffectsMixin:
             workspace_view=workspace_view,
             default_agent=default_agent,
             default_llm_profile=default_llm_profile,
+            control_presentation=control_presentation,
         )
 
     def _set_default_agent_effect(self, agent_name: str | None) -> None:
@@ -170,3 +172,13 @@ class TextualAppSelectionEffectsMixin:
         if not hasattr(self._engine, "clear_saved_sessions"):
             raise ValueError("This runtime does not support saved sessions.")
         return int(self._engine.clear_saved_sessions())
+
+    def _get_saved_session_details_effect(self, session_id: str):
+        if not hasattr(self._engine, "get_saved_session_details"):
+            raise ValueError("This runtime does not support saved sessions.")
+        return self._engine.get_saved_session_details(session_id)
+
+    def _clear_saved_session_debugger_breakpoints_effect(self, session_id: str):
+        if not hasattr(self._engine, "clear_saved_session_debugger_breakpoints"):
+            raise ValueError("This runtime does not support saved sessions.")
+        return self._engine.clear_saved_session_debugger_breakpoints(session_id)

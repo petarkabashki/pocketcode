@@ -313,6 +313,7 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
         workspace_view: str,
         default_agent: str | None,
         default_llm_profile: str | None,
+        control_presentation: str,
         available_agents: Iterable[str],
         available_llm_profiles: Iterable[str],
     ) -> None:
@@ -323,6 +324,7 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
         self._available_llm_profiles = tuple(str(name) for name in available_llm_profiles)
         self._default_agent = _normalize_agent_select_value(default_agent, self._available_agents)
         self._default_llm_profile = str(default_llm_profile) if default_llm_profile else UNSET_OPTION
+        self._control_presentation = "modal" if str(control_presentation).strip().lower() == "modal" else "inline"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="system-settings-modal"):
@@ -359,6 +361,13 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
                 allow_blank=False,
                 value=self._default_llm_profile,
             )
+            yield Static("Control Presentation", classes="field-label")
+            yield Select(
+                [("Inline", "inline"), ("Modal Popups", "modal")],
+                id="system-control-presentation-select",
+                allow_blank=False,
+                value=self._control_presentation,
+            )
             with Horizontal(id="system-settings-actions", classes="button-row"):
                 yield Button("Apply", id="system-settings-apply", variant="primary")
                 yield Button("Cancel", id="system-settings-cancel")
@@ -378,6 +387,7 @@ class SystemSettingsScreen(ModalScreen[dict[str, str | None] | None]):
                 "workspace_view": str(self.query_one("#system-workspace-view-select", Select).value),
                 "default_agent": None if str(default_agent) == UNSET_OPTION else str(default_agent),
                 "default_llm_profile": None if str(default_llm_profile) == UNSET_OPTION else str(default_llm_profile),
+                "control_presentation": str(self.query_one("#system-control-presentation-select", Select).value),
             }
         )
 

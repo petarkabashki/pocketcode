@@ -16,3 +16,5 @@ The example demonstrates:
 - pure data fan-out with `parallel-map` before the interaction step
 - structured `buttons` interaction through the built-in `prompt-route` macro
 - continued VM execution from the selected option value
+
+Conceptually, `prompt-route` expands to the same `prompt-interaction` plus `switch` pattern the runtime already supports, but it keeps the router focused on the case table instead of the plumbing.

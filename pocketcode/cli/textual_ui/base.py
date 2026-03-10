@@ -15,7 +15,15 @@ from pocketcode.cli.command_handler import list_command_suggestions
 from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.core.run_handle import RunHandle
 
-from .shared import INHERIT_POLICY, LOADING_OPTION, THEME_CSS, THEME_OPTIONS, TextualUIState, WORKSPACE_VIEWS
+from .shared import (
+    DEFAULT_MAIN_INPUT_PLACEHOLDER,
+    INHERIT_POLICY,
+    LOADING_OPTION,
+    THEME_CSS,
+    THEME_OPTIONS,
+    TextualUIState,
+    WORKSPACE_VIEWS,
+)
 from .store import (
     AppendConsoleLineAction,
     AppendOutputBlockAction,
@@ -53,7 +61,10 @@ from .store import (
 
 class TextualAppBase(App[None]):
     BINDINGS = [
+        Binding("f2", "pick_history", "History", priority=True),
         Binding("tab", "complete_input", "Complete Input", priority=True),
+        Binding("ctrl+p", "history_previous", "Previous Entry", show=False, priority=True),
+        Binding("ctrl+n", "history_next", "Next Entry", show=False, priority=True),
         Binding("f3", "edit_asset", "Edit", priority=True),
         Binding("f4", "clone_asset", "Clone", priority=True),
         Binding("f5", "pick_view", "Views", priority=True),
@@ -65,6 +76,13 @@ class TextualAppBase(App[None]):
         Binding("f10", "toggle_right_panel", "Toggle Inspector"),
         Binding("ctrl+shift+a", "copy_output", "Copy Output"),
         Binding("ctrl+y", "copy_last_response", "Copy Last"),
+        Binding("f7", "debug_next", "Debug Next"),
+        Binding("f8", "debug_continue", "Debug Continue"),
+        Binding("f9", "debug_add_breakpoint", "Debug Break"),
+        Binding("ctrl+g", "debug_status", "Debug Status"),
+        Binding("ctrl+b", "debug_breakpoints", "Debug Breaks"),
+        Binding("ctrl+k", "debug_clear_selected_breakpoint", "Debug Clear One"),
+        Binding("ctrl+shift+b", "debug_clear_breakpoints", "Debug Clear"),
         Binding("ctrl+r", "reload_runtime", "Reload"),
         Binding("ctrl+e", "toggle_expanded_surface", "Expand Panel"),
         Binding("ctrl+l", "clear_output", "Clear Output"),
@@ -235,6 +253,80 @@ class TextualAppBase(App[None]):
         margin-bottom: 0;
     }
 
+    #debugger-controls {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #debugger-controls Button {
+        min-width: 10;
+    }
+
+    #debugger-inline-controls {
+        height: auto;
+        margin-bottom: 1;
+        border: round #334155;
+        background: #0b1220;
+        padding: 1;
+    }
+
+    #debugger-inline-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    #debugger-inline-actions {
+        height: auto;
+        margin-top: 1;
+    }
+
+    .inline-prompt-controls {
+        height: auto;
+        margin-bottom: 1;
+        border: round #334155;
+        background: #0b1220;
+        padding: 1;
+    }
+
+    .inline-prompt-title {
+        color: #e0f2fe;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    .inline-prompt-prompt {
+        color: #f8fafc;
+        margin-bottom: 1;
+    }
+
+    .inline-prompt-help {
+        color: #cbd5e1;
+        margin-bottom: 1;
+    }
+
+    .inline-prompt-summary {
+        color: #f8fafc;
+        border: round #475569;
+        background: #020617;
+        padding: 0 1;
+    }
+
+    #inline-prompt-options-chat,
+    #inline-prompt-options-run,
+    #inline-prompt-checklist-chat,
+    #inline-prompt-checklist-run {
+        height: auto;
+        max-height: 8;
+        border: round #334155;
+        background: #020617;
+        margin-bottom: 1;
+    }
+
+    .inline-prompt-actions {
+        height: auto;
+        margin-top: 1;
+    }
+
     #profile-list,
     #skill-list,
     #inspector-tools {
@@ -308,11 +400,44 @@ class TextualAppBase(App[None]):
         self._inspector_prompts_render_cache: tuple[str, tuple[Any, ...]] | None = None
         self._option_list_state_cache: dict[str, tuple[str, ...]] = {}
         self._selection_list_state_cache: dict[str, tuple[tuple[str, str, bool], ...]] = {}
+        self._textual_debugger_active = False
+        self._textual_debugger_last_pause_key: tuple[Any, ...] | None = None
         self._ui_commit_batch_depth = 0
         self._ui_commit_requested = False
         self._ui_commit_hydrate_engine = False
         self._ui_commit_refresh_suggestions = False
         self._ui_state: TextualUIState | None = None
+        self._entry_history = list(engine.get_textual_entry_history()) if hasattr(engine, "get_textual_entry_history") else []
+        self._entry_history_cursor: int | None = None
+        self._entry_history_draft = ""
+        self._suppress_history_input_reset = False
+        self._control_presentation = (
+            "modal"
+            if str(
+                system_settings.get("control_presentation")
+                or ("modal" if system_settings.get("user_input_popups") else "inline")
+            ).strip().lower()
+            == "modal"
+            else "inline"
+        )
+        self._debugger_inline_breakpoint_visible = False
+        self._debugger_inline_breakpoint_type = "node"
+        self._debugger_inline_breakpoint_value = ""
+        self._debugger_inline_breakpoint_help = "Choose a breakpoint type and enter a target if required."
+        self._debugger_inline_breakpoint_placeholder = "review_route"
+        self._inline_prompt_visible = False
+        self._inline_prompt_resolved = False
+        self._inline_prompt_kind = "text"
+        self._inline_prompt_prompt = ""
+        self._inline_prompt_help = ""
+        self._inline_prompt_placeholder = ""
+        self._inline_prompt_submit_label = "Submit"
+        self._inline_prompt_text_value = ""
+        self._inline_prompt_selected_value = ""
+        self._inline_prompt_selected_values: tuple[str, ...] = ()
+        self._inline_prompt_summary_text = ""
+        self._inline_prompt_select_options: tuple[tuple[str, str], ...] = ()
+        self._inline_prompt_checklist_options: tuple[tuple[str, str, bool], ...] = ()
         self._cli_state: TextualCliState = make_initial_cli_state(
             theme_name=str(system_settings.get("theme_name") or "ocean"),
             workspace_view=str(system_settings.get("workspace_view") or system_settings.get("workspace_mode") or "balanced"),
@@ -324,7 +449,12 @@ class TextualAppBase(App[None]):
             self._cli_context["textual_open_view_picker"] = self._queue_open_view_picker
             self._cli_context["textual_set_view"] = self._queue_set_view
             self._cli_context["textual_get_current_view"] = lambda: self._cli_state.current_view
-        self._apply_workspace_view(self._cli_state.workspace_view, announce=False)
+            self._cli_context["debug_request_runner"] = self._enqueue_textual_debug_request
+        self._apply_workspace_view(
+            self._cli_state.workspace_view,
+            announce=False,
+            preserve_current_view=True,
+        )
 
     def compose(self) -> ComposeResult:
         with Vertical(id="topbar"):
@@ -337,6 +467,16 @@ class TextualAppBase(App[None]):
                 yield Static(id="view-title")
                 with ContentSwitcher(initial="view-chat", id="view-switcher"):
                     with Vertical(id="view-chat", classes="view"):
+                        with Vertical(id="inline-prompt-chat", classes="inline-prompt-controls hidden"):
+                            yield Static("Input Required", id="inline-prompt-title-chat", classes="inline-prompt-title")
+                            yield Static("", id="inline-prompt-prompt-chat", classes="inline-prompt-prompt")
+                            yield Static("", id="inline-prompt-help-chat", classes="inline-prompt-help")
+                            yield Input(id="inline-prompt-input-chat")
+                            yield OptionList(id="inline-prompt-options-chat")
+                            yield SelectionList(id="inline-prompt-checklist-chat")
+                            yield Static("", id="inline-prompt-summary-chat", classes="inline-prompt-summary")
+                            with Horizontal(id="inline-prompt-actions-chat", classes="inline-prompt-actions button-row"):
+                                yield Button("Submit", id="inline-prompt-submit-chat", variant="primary")
                         yield RichLog(id="output", auto_scroll=False, wrap=True, markup=False)
                     with VerticalScroll(id="view-control", classes="view view-scroll"):
                         yield Static("Runtime controls apply immediately.", classes="hint")
@@ -377,10 +517,57 @@ class TextualAppBase(App[None]):
                             yield Button("Reload Runtime", id="reload-button", variant="primary")
                     with VerticalScroll(id="view-run", classes="view view-scroll"):
                         yield Static("Last run summary and effective runtime state.", classes="hint")
+                        with Horizontal(id="debugger-controls", classes="button-row hidden"):
+                            yield Button("Next", id="debug-next-button", variant="primary")
+                            yield Button("Continue", id="debug-continue-button", variant="primary")
+                            yield Button("Add Break", id="debug-add-break-button")
+                            yield Button("Clear Selected", id="debug-clear-selected-break-button")
+                            yield Button("Clear Breaks", id="debug-clear-breaks-button")
+                            yield Button("Status", id="debug-status-button")
+                            yield Button("Breaks", id="debug-breaks-button")
+                            yield Button("Quit", id="debug-quit-button", variant="error")
+                        with Vertical(id="debugger-inline-controls", classes="hidden"):
+                            yield Static(
+                                "Choose a breakpoint type and enter a target if required.",
+                                id="debugger-inline-help",
+                            )
+                            yield Select(
+                                [
+                                    ("Node", "node"),
+                                    ("Agent", "agent"),
+                                    ("Tool", "tool"),
+                                    ("Event", "event"),
+                                    ("Handoff", "handoff"),
+                                    ("Error", "error"),
+                                    ("Answer", "answer"),
+                                    ("Ask", "ask"),
+                                    ("Condition", "when"),
+                                ],
+                                id="debugger-inline-type-select",
+                                allow_blank=False,
+                                value="node",
+                            )
+                            yield Input(
+                                id="debugger-inline-value-input",
+                                placeholder="review_route",
+                            )
+                            with Horizontal(id="debugger-inline-actions", classes="button-row"):
+                                yield Button("Add Breakpoint", id="debugger-inline-apply-button", variant="primary")
+                                yield Button("Cancel", id="debugger-inline-cancel-button")
+                        with Vertical(id="inline-prompt-run", classes="inline-prompt-controls hidden"):
+                            yield Static("Input Required", id="inline-prompt-title-run", classes="inline-prompt-title")
+                            yield Static("", id="inline-prompt-prompt-run", classes="inline-prompt-prompt")
+                            yield Static("", id="inline-prompt-help-run", classes="inline-prompt-help")
+                            yield Input(id="inline-prompt-input-run")
+                            yield OptionList(id="inline-prompt-options-run")
+                            yield SelectionList(id="inline-prompt-checklist-run")
+                            yield Static("", id="inline-prompt-summary-run", classes="inline-prompt-summary")
+                            with Horizontal(id="inline-prompt-actions-run", classes="inline-prompt-actions button-row"):
+                                yield Button("Submit", id="inline-prompt-submit-run", variant="primary")
                         yield RichLog(id="run-preview", auto_scroll=False, wrap=True, markup=False)
                 yield Input(
                     id="main-input",
-                    placeholder="Type a request or /command. F3 edit F4 clone F5 views F6 control",
+                    placeholder=DEFAULT_MAIN_INPUT_PLACEHOLDER,
                 )
             with VerticalScroll(id="right-panel", classes="view"):
                 yield Static("Inspector", classes="panel-title")
@@ -424,6 +611,9 @@ class TextualAppBase(App[None]):
             elif action_name == "set_view":
                 _, view_name, announce = action
                 self._set_current_view(str(view_name), announce=bool(announce))
+            elif action_name == "start_debug_request":
+                _, request = action
+                self._start_debug_request_from_queue(str(request))
 
     def _refresh_suggestions(self) -> None:
         interface_name = self._cli_context.get("interface") if isinstance(self._cli_context, dict) else None

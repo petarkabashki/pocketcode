@@ -42,6 +42,13 @@ class _EventfulRuntime:
             arguments={"path": "notes.txt", "content": "hello"},
         )
         emit(
+            "tool_finished",
+            agent="core::agent",
+            tool="workspace::write_file",
+            success=True,
+            result={"success": True, "result": "ok"},
+        )
+        emit(
             "handoff_return",
             source_agent="core::agent",
             target_agent="planner::agent",
@@ -80,6 +87,43 @@ class _CancellableRuntime:
         shared_store["final_output"] = "late"
 
 
+class _DebuggableRuntime:
+    def run(self, shared_store):
+        emit = shared_store["runtime_event_handler"]
+        shared_store["active_agent"] = "core::agent"
+        time.sleep(0.01)
+        emit(
+            "tool_started",
+            agent="core::agent",
+            tool="workspace::write_file",
+            arguments={"path": "notes.txt"},
+        )
+        time.sleep(0.01)
+        emit(
+            "tool_finished",
+            agent="core::agent",
+            tool="workspace::write_file",
+            success=True,
+            result={"success": True, "result": "ok"},
+        )
+        shared_store["final_output"] = "ready"
+
+
+class _NodeDebugRuntime:
+    def run(self, shared_store):
+        emit = shared_store["runtime_event_handler"]
+        shared_store["active_agent"] = "graph.agent"
+        shared_store["active_node_id"] = "start"
+        shared_store["active_node_kind"] = "noop"
+        emit("node_started", agent="graph.agent", node_id="start", node_kind="noop")
+        emit("node_completed", agent="graph.agent", node_id="start", node_kind="noop", transition="default")
+        shared_store["active_node_id"] = "review"
+        shared_store["active_node_kind"] = "tool"
+        emit("node_started", agent="graph.agent", node_id="review", node_kind="tool")
+        emit("node_completed", agent="graph.agent", node_id="review", node_kind="tool", transition="final_answer")
+        shared_store["final_output"] = "done"
+
+
 def _build_engine(runtime) -> PocketCodeEngine:
     engine = PocketCodeEngine.__new__(PocketCodeEngine)
     engine._runtime_config = {}
@@ -96,6 +140,7 @@ def _build_engine(runtime) -> PocketCodeEngine:
         "tool_policies": {},
         "agent_policies": {},
     }
+    engine.session_debugger_breakpoints = []
     engine.active_agent_profile = None
     engine.last_run_summary = {}
     engine._agent_runtime = runtime
@@ -169,8 +214,49 @@ class TestEngineRunHandle:
         assert [event["type"] for event in events] == [
             "run_started",
             "tool_started",
+            "tool_finished",
             "handoff_return",
             "run_completed",
+        ]
+        assert events[1]["step_index"] == 1
+        assert events[2]["step_index"] == 1
+        assert events[3]["step_index"] == 2
+        assert engine.last_run_summary["runtime_event_count"] == 4
+        assert engine.last_run_summary["step_count"] == 2
+        assert engine.last_run_summary["steps"] == [
+            {
+                "index": 1,
+                "kind": "tool_call",
+                "label": "Tool call: workspace::write_file",
+                "status": "completed",
+                "parent_step_index": None,
+                "duration_ms": engine.last_run_summary["steps"][0]["duration_ms"],
+                "summary": "Succeeded: 'ok'",
+                "details": {
+                    "agent": "core::agent",
+                    "tool": "workspace::write_file",
+                    "arguments": {"path": "notes.txt", "content": "hello"},
+                    "outcome": {
+                        "tool": "workspace::write_file",
+                        "success": True,
+                        "result": {"success": True, "result": "ok"},
+                    },
+                },
+            },
+            {
+                "index": 2,
+                "kind": "handoff_return",
+                "label": "Handoff return: core::agent <- planner::agent",
+                "status": "completed",
+                "parent_step_index": None,
+                "duration_ms": 0.0,
+                "summary": "Transition: continue",
+                "details": {
+                    "source_agent": "core::agent",
+                    "target_agent": "planner::agent",
+                    "return_transition": "continue",
+                },
+            },
         ]
 
     def test_start_request_includes_vm_validation_warnings_in_run_summary(self):
@@ -215,10 +301,136 @@ class TestEngineRunHandle:
         ]
         assert events[-1]["reason"] == "Stop requested from test."
 
+    def test_start_request_debugger_pauses_on_completed_step_events(self):
+        engine = _build_engine(_DebuggableRuntime())
+
+        handle = engine.start_request(
+            "hello",
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            debug=True,
+        )
+
+        for _ in range(100):
+            if handle.is_debug_paused:
+                break
+            time.sleep(0.01)
+
+        assert handle.is_debug_paused is True
+        paused_event = handle.debug_pause_event
+        assert paused_event is not None
+        assert paused_event["type"] == "tool_finished"
+        assert paused_event["step_index"] == 1
+
+        snapshot = handle.get_debug_snapshot()
+        assert snapshot["active_agent"] == "core::agent"
+        assert snapshot["step_count"] == 1
+        assert snapshot["runtime_event_count"] == 3
+
+        assert handle.step_debugger() is True
+        assert handle.wait(timeout=1.0) == "ready"
+
+    def test_start_request_debugger_can_continue_until_matching_predicate(self):
+        engine = _build_engine(_NodeDebugRuntime())
+
+        handle = engine.start_request(
+            "hello",
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            debug=True,
+        )
+
+        for _ in range(100):
+            if handle.is_debug_paused:
+                break
+            time.sleep(0.01)
+
+        first_pause = handle.debug_pause_event
+        assert first_pause is not None
+        assert first_pause["type"] == "node_completed"
+        assert first_pause["node_id"] == "start"
+        assert handle.get_debug_snapshot()["active_node_id"] == "start"
+        assert handle.get_debug_snapshot()["active_node_kind"] == "noop"
+
+        assert handle.continue_until_debugger(
+            lambda event, _snapshot: str(event.get("node_id") or "") == "review",
+            label="until node review",
+        ) is True
+
+        for _ in range(100):
+            if handle.is_debug_paused:
+                break
+            time.sleep(0.01)
+
+        second_pause = handle.debug_pause_event
+        assert second_pause is not None
+        assert second_pause["type"] == "node_completed"
+        assert second_pause["node_id"] == "review"
+        assert handle.debug_until_label is None
+        assert handle.get_debug_snapshot()["active_node_id"] == "review"
+        assert handle.get_debug_snapshot()["active_node_kind"] == "tool"
+
+        assert handle.step_debugger() is True
+        assert handle.wait(timeout=1.0) == "done"
+
+    def test_start_request_debugger_can_resume_to_persistent_breakpoint(self):
+        engine = _build_engine(_NodeDebugRuntime())
+
+        handle = engine.start_request(
+            "hello",
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            debug=True,
+        )
+
+        for _ in range(100):
+            if handle.is_debug_paused:
+                break
+            time.sleep(0.01)
+
+        first_pause = handle.debug_pause_event
+        assert first_pause is not None
+        assert first_pause["node_id"] == "start"
+
+        breakpoint_id = handle.add_debug_breakpoint(
+            lambda event, _snapshot: str(event.get("node_id") or "") == "review",
+            label="until node review",
+        )
+        assert breakpoint_id == 1
+        assert handle.list_debug_breakpoints() == [{"id": 1, "label": "until node review"}]
+
+        assert handle.continue_debugger() is True
+        for _ in range(100):
+            if handle.is_debug_paused:
+                break
+            time.sleep(0.01)
+
+        second_pause = handle.debug_pause_event
+        assert second_pause is not None
+        assert second_pause["node_id"] == "review"
+        assert second_pause["debug_breakpoint_id"] == 1
+        assert second_pause["debug_breakpoint_label"] == "until node review"
+
+        assert handle.clear_debug_breakpoint(1) is True
+        assert handle.list_debug_breakpoints() == []
+        assert handle.step_debugger() is True
+        assert handle.wait(timeout=1.0) == "done"
+
+    def test_start_request_restores_session_debugger_breakpoints(self):
+        engine = _build_engine(_NodeDebugRuntime())
+        engine.session_debugger_breakpoints = ["until node review"]
+
+        handle = engine.start_request(
+            "hello",
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            debug=True,
+        )
+
+        assert handle.list_debug_breakpoints() == [{"id": 1, "label": "until node review"}]
+        assert handle.cancel("stop test")
+
     def test_format_runtime_event_includes_tool_arguments_and_handoff_return(self):
         tool_message = format_runtime_event(
             {
                 "type": "tool_started",
+                "step_index": 3,
                 "tool": "workspace::write_file",
                 "arguments": {"path": "notes.txt", "content": "hello"},
             }
@@ -232,6 +444,7 @@ class TestEngineRunHandle:
             }
         )
 
+        assert tool_message.startswith("Step 3: Tool call:")
         assert "workspace::write_file" in tool_message
         assert "notes.txt" in tool_message
         assert handoff_message == "Handoff return: core::agent <- planner::agent (transition=continue)."

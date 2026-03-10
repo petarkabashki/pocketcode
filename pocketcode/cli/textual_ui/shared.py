@@ -11,7 +11,7 @@ UNSET_OPTION = "__unset__"
 INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
 MAX_OUTPUT_LINES = 400
-DEFAULT_MAIN_INPUT_PLACEHOLDER = "Type a request or /command. F3 edit F4 clone F5 views F6 control"
+DEFAULT_MAIN_INPUT_PLACEHOLDER = "Type a request or /command. F2 history F3 edit F4 clone F5 views F6 control"
 SKILL_GROUP_PREFIX = "__skill_group__:"
 TEXTUAL_VIEWS = {
     "chat": {
@@ -351,6 +351,28 @@ class TextualUIState:
     header_agent_text: str
     header_llm_text: str
     view_title_text: str
+    debugger_attached: bool
+    debugger_paused: bool
+    debugger_breakpoint_count: int
+    selected_debugger_breakpoint_id: int | None
+    debugger_inline_breakpoint_visible: bool
+    debugger_inline_breakpoint_type: str
+    debugger_inline_breakpoint_placeholder: str
+    debugger_inline_breakpoint_help: str
+    debugger_inline_breakpoint_value: str
+    inline_prompt_visible: bool
+    inline_prompt_resolved: bool
+    inline_prompt_kind: str
+    inline_prompt_prompt: str
+    inline_prompt_help: str
+    inline_prompt_placeholder: str
+    inline_prompt_submit_label: str
+    inline_prompt_text_value: str
+    inline_prompt_selected_value: str
+    inline_prompt_selected_values: tuple[str, ...]
+    inline_prompt_summary_text: str
+    inline_prompt_select_options: tuple[tuple[str, str], ...]
+    inline_prompt_checklist_options: tuple[tuple[str, str, bool], ...]
     workspace_view_select: SelectViewState
     theme_select: SelectViewState
     profile_select: SelectViewState

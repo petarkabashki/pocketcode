@@ -7,11 +7,17 @@ class TestSessionManagerScaffold:
     def test_create_and_load_session_round_trip(self, tmp_path: Path):
         manager = SessionManager(tmp_path)
 
-        record = manager.create_session(state={"active_agent": "core::agent"})
+        record = manager.create_session(
+            state={
+                "active_agent": "core::agent",
+                "debugger_breakpoints": ["until tool core.write_file"],
+            }
+        )
         loaded = manager.load_session(record.session_id)
 
         assert loaded.session_id == record.session_id
         assert loaded.active_agent == "core::agent"
+        assert loaded.debugger_breakpoints == ["until tool core.write_file"]
         assert manager.storage_dir == tmp_path / ".pocketcode" / "state" / "sessions"
 
     def test_append_list_delete_and_clear_sessions(self, tmp_path: Path):

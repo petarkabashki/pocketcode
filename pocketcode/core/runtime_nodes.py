@@ -68,12 +68,31 @@ class BaseRuntimeNode(Node):
 
     def _run(self, shared_store: Dict[str, Any]) -> str | None:
         try:
+            node_kind = str(self.node_definition.attributes.get("kind", self.node_definition.attributes.get("type", "node"))).strip().lower()
+            self._emit_runtime_event(
+                shared_store,
+                "node_started",
+                node_id=self.node_definition.node_id,
+                node_kind=node_kind,
+                agent=shared_store.get("active_agent"),
+            )
+            shared_store["active_node_id"] = self.node_definition.node_id
+            shared_store["active_node_kind"] = node_kind
             self.runtime._raise_if_cancelled(shared_store)
             p = self.prep(shared_store)
             if p.get("halt"):
                 self.runtime._raise_if_cancelled(shared_store)
-                return self.post(shared_store, p, None)
-            
+                transition = self.post(shared_store, p, None)
+                self._emit_runtime_event(
+                    shared_store,
+                    "node_completed",
+                    node_id=self.node_definition.node_id,
+                    node_kind=node_kind,
+                    agent=shared_store.get("active_agent"),
+                    transition=transition,
+                )
+                return transition
+
             # Run "steps" as part of core logic or as actual exec
             step_handlers = coerce_str_list(self.node_definition.attributes.get("steps"))
             step_transition, step_halt = self.runtime._run_handler_references(
@@ -85,13 +104,31 @@ class BaseRuntimeNode(Node):
             )
 
             if step_halt:
-                                self.runtime._raise_if_cancelled(shared_store)
-                                return self.post(shared_store, p, step_transition)
+                self.runtime._raise_if_cancelled(shared_store)
+                transition = self.post(shared_store, p, step_transition)
+                self._emit_runtime_event(
+                    shared_store,
+                    "node_completed",
+                    node_id=self.node_definition.node_id,
+                    node_kind=node_kind,
+                    agent=shared_store.get("active_agent"),
+                    transition=transition,
+                )
+                return transition
 
-                        self.runtime._raise_if_cancelled(shared_store)
-            e = self.exec(shared_store) # Passing shared_store as prep_res for now to simplify
-                        self.runtime._raise_if_cancelled(shared_store)
-            return self.post(shared_store, p, e if e is not None else step_transition)
+            self.runtime._raise_if_cancelled(shared_store)
+            exec_result = self.exec(shared_store)
+            self.runtime._raise_if_cancelled(shared_store)
+            transition = self.post(shared_store, p, exec_result if exec_result is not None else step_transition)
+            self._emit_runtime_event(
+                shared_store,
+                "node_completed",
+                node_id=self.node_definition.node_id,
+                node_kind=node_kind,
+                agent=shared_store.get("active_agent"),
+                transition=transition,
+            )
+            return transition
         except Exception as exc:
             logger.error(
                 "Error while executing node '%s': %s",
@@ -101,6 +138,11 @@ class BaseRuntimeNode(Node):
             )
             shared_store["error_message"] = f"Node '{self.node_definition.node_id}' failed: {exc}"
             return "error"
+
+    def _emit_runtime_event(self, shared_store: Dict[str, Any], event_type: str, **payload: Any) -> None:
+        handler = shared_store.get("runtime_event_handler")
+        if callable(handler):
+            handler(event_type, **payload)
 
 class StartRuntimeNode(BaseRuntimeNode):
     def exec(self, shared_store: Dict[str, Any]) -> str | None:

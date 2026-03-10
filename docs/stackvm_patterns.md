@@ -2,7 +2,7 @@
 
 This document groups the checked-in StackVM examples by orchestration pattern so it is easier to find a close starting point when authoring a new VM-backed flow.
 
-Use this together with `markdown_assets.md` for the canonical StackVM surface and `pocketflow_agents.md` for how VM-backed flows fit into the broader runtime.
+Use this together with `markdown_assets.md` for the canonical StackVM surface, `stackvm_macros.md` for the macro surface, and `pocketflow_agents.md` for how VM-backed flows fit into the broader runtime.
 
 ## Shared Helper Conventions
 
@@ -13,6 +13,14 @@ Most payload-driven checked-in examples now keep reusable normalization helpers 
 Examples that use this helper style include `stackvm_buttons_plugin`, `stackvm_radio_plugin`, `stackvm_checklist_handoff_plugin`, `stackvm_multistage_pipeline_plugin`, the delegate-return routing/finalize examples, and the plain normalization examples.
 
 Use this convention when the example needs a stable normalized shared-state contract across multiple runtime paths. Keep flow-specific prompting, switching, handoff, and returned-decision parsing in the router instead of pushing those behaviors down into shared helpers.
+
+## Macro Authoring
+
+- `examples/stackvm_macro_authoring_plugin/`
+  - Uses a helper word for the repeated YAML request payload
+  - Defines user-authored macros with `defmacro` and `syntax-quote`
+  - Shows `unquote` and `unquote-splice` in a runnable end-to-end flow
+  - Good starting point when built-in macros are close but not quite enough
 
 ## Direct Answer
 
@@ -122,8 +130,9 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 - `examples/stackvm_radio_plugin/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Normalizes all payload item titles into shared state with `parallel-map`
-  - Uses `prompt-interaction` with a radio request and continues to a final answer from the selected mode
+  - Uses direct `prompt-interaction` with a radio request because the selected value stays on the stack for extra formatting work before the final answer
 
 These examples share the same authoring pattern: define `item-title` plus reusable `normalize-item-titles`, `store-normalized-source`, `store-normalized-enabled` where needed, and `store-normalized-summary` helpers in `vm/common.vm`, keep the aggregated summary in shared state, and let the structured interaction operate on that stable summary instead of a single raw item.
 
@@ -210,7 +219,7 @@ Together with `stackvm_buttons_plugin` and `stackvm_radio_plugin`, these checkli
 - Start from `stackvm_normalize_ask_plugin` when the VM should turn normalized state, including multi-item title summaries, into a user-facing question.
 - Start from `stackvm_normalize_confirm_plugin` when the VM should collect a bridged text reply and keep executing in the same turn after multi-item normalization.
 - Start from `stackvm_buttons_plugin` when the VM should present structured choices and keep executing from the selected option value through `prompt-route`.
-- Start from `stackvm_radio_plugin` when the VM should enforce a single structured choice but keep executing from that selected value.
+- Start from `stackvm_radio_plugin` when the VM should enforce a single structured choice but keep executing from that selected value without immediately switching on exact-match cases.
 - Start from `stackvm_prompt_return_plugin` when a VM delegate should collect user input and return a decision to its caller instead of finalizing the overall run directly, and the caller should use `finalize-from`.
 - Start from `stackvm_delegate_return_plugin` when a VM delegate should return the final answer text and the caller should pass that answer through via `delegate-return`.
 - Start from `stackvm_checklist_return_plugin` when a VM delegate should collect multiple selections and return that decision to its caller while the caller uses `finalize-from`.
@@ -221,3 +230,4 @@ Together with `stackvm_buttons_plugin` and `stackvm_radio_plugin`, these checkli
 - Start from `stackvm_checklist_handoff_plugin` when checklist input should determine which downstream delegate handles the request.
 - Start from `stackvm_multistage_pipeline_plugin` when one VM stage should collect the first decision, delegate a second decision, and then finalize back in the original caller after multi-item normalization through `finalize-from`.
 - Start from `stackvm_nested_router_plugin` when the incoming data is deeply nested and partially optional.
+- Start from `stackvm_macro_authoring_plugin` when you need a checked-in reference for user-authored macros layered on top of helper words and built-in macros.

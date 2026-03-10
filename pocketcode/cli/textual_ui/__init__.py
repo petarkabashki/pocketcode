@@ -1,5 +1,6 @@
 from .app import PocketCodeTextualApp, run_textual_cli
 from .editor_screens import NameInputScreen, SystemSettingsScreen, TextEditorScreen, ToolPolicyEditorScreen
+from .interaction_screens import InteractionControlsScreen, PromptInputScreen
 from .picker_screens import AssetPickerScreen, ToolSelectionScreen
 from .shared import (
     PickerOption,
@@ -18,9 +19,11 @@ from .shared import (
 
 __all__ = [
     "AssetPickerScreen",
+    "InteractionControlsScreen",
     "NameInputScreen",
     "PickerOption",
     "PocketCodeTextualApp",
+    "PromptInputScreen",
     "SelectViewState",
     "SystemSettingsScreen",
     "THEME_PALETTES",

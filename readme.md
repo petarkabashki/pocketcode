@@ -250,9 +250,9 @@ Interactive workspace presets:
 
 - `Balanced`: chat-first layout with both side panels visible
 - `Chat Focus`: larger chat area with the left navigator hidden
-- `Control Desk`: opens directly into the form-driven control surface
+- `Control Desk`: form-driven control preset with the inspector visible
 - `Minimal`: pure chat canvas with both side panels hidden
-- `Review`: jumps to the run inspector for runtime/debugging work
+- `Review`: run/debugging-oriented preset with the inspector visible
 
 Theme presets:
 

@@ -137,7 +137,16 @@ class TextualAppUiStateMixin:
         status_for_display = dict(status)
         status_for_display.setdefault("selected_agent", active_profile_name or "none")
         status_for_display.setdefault("selected_llm_profile", effective_llm_profile)
-        run_preview_blocks = select_run_preview_blocks(self._runtime_state, status)
+        debugger_state = self._current_textual_debugger_state() if hasattr(self, "_current_textual_debugger_state") else None
+        debugger_attached = bool(isinstance(debugger_state, dict) and debugger_state.get("attached"))
+        debugger_paused = bool(isinstance(debugger_state, dict) and debugger_state.get("paused"))
+        debugger_breakpoint_count = len(tuple(debugger_state.get("breakpoints", ()))) if isinstance(debugger_state, dict) else 0
+        run_preview_blocks = select_run_preview_blocks(self._runtime_state, status, debugger_state=debugger_state)
+        selected_debugger_breakpoint_id = (
+            self._selected_textual_breakpoint_id(run_preview_blocks=run_preview_blocks)
+            if hasattr(self, "_selected_textual_breakpoint_id")
+            else None
+        )
         profile_select_options = (
             tuple((profile_name, profile_name) for profile_name in all_profile_names)
             if all_profile_names
@@ -154,6 +163,44 @@ class TextualAppUiStateMixin:
             header_agent_text=_build_header_agent_text(status_for_display),
             header_llm_text=_build_header_llm_text(status_for_display),
             view_title_text=_build_view_title_text(self._cli_state.current_view),
+            debugger_attached=debugger_attached,
+            debugger_paused=debugger_paused,
+            debugger_breakpoint_count=debugger_breakpoint_count,
+            selected_debugger_breakpoint_id=selected_debugger_breakpoint_id,
+            debugger_inline_breakpoint_visible=bool(
+                debugger_attached
+                and getattr(self, "_control_presentation", "inline") == "inline"
+                and getattr(self, "_debugger_inline_breakpoint_visible", False)
+            ),
+            debugger_inline_breakpoint_type=str(getattr(self, "_debugger_inline_breakpoint_type", "node")),
+            debugger_inline_breakpoint_placeholder=str(
+                getattr(self, "_debugger_inline_breakpoint_placeholder", "review_route")
+            ),
+            debugger_inline_breakpoint_help=str(
+                getattr(self, "_debugger_inline_breakpoint_help", "Choose a breakpoint type and enter a target if required.")
+            ),
+            debugger_inline_breakpoint_value=str(getattr(self, "_debugger_inline_breakpoint_value", "")),
+            inline_prompt_visible=bool(getattr(self, "_inline_prompt_visible", False)),
+            inline_prompt_resolved=bool(getattr(self, "_inline_prompt_resolved", False)),
+            inline_prompt_kind=str(getattr(self, "_inline_prompt_kind", "text")),
+            inline_prompt_prompt=str(getattr(self, "_inline_prompt_prompt", "")),
+            inline_prompt_help=str(getattr(self, "_inline_prompt_help", "")),
+            inline_prompt_placeholder=str(getattr(self, "_inline_prompt_placeholder", "")),
+            inline_prompt_submit_label=str(getattr(self, "_inline_prompt_submit_label", "Submit")),
+            inline_prompt_text_value=str(getattr(self, "_inline_prompt_text_value", "")),
+            inline_prompt_selected_value=str(getattr(self, "_inline_prompt_selected_value", "")),
+            inline_prompt_selected_values=tuple(
+                str(item) for item in getattr(self, "_inline_prompt_selected_values", ())
+            ),
+            inline_prompt_summary_text=str(getattr(self, "_inline_prompt_summary_text", "")),
+            inline_prompt_select_options=tuple(
+                (str(label), str(value))
+                for label, value in getattr(self, "_inline_prompt_select_options", ())
+            ),
+            inline_prompt_checklist_options=tuple(
+                (str(label), str(value), bool(selected))
+                for label, value, selected in getattr(self, "_inline_prompt_checklist_options", ())
+            ),
             workspace_view_select=SelectViewState(
                 options=tuple((item["label"], key) for key, item in WORKSPACE_VIEWS.items()),
                 value=self._cli_state.workspace_view,
@@ -216,5 +263,5 @@ class TextualAppUiStateMixin:
             profile_list_names=all_profile_names,
             profile_list_labels=profile_list_labels,
             run_preview_blocks=run_preview_blocks,
-            run_preview_text=select_run_preview_text(self._runtime_state, status),
+            run_preview_text=select_run_preview_text(self._runtime_state, status, debugger_state=debugger_state),
         )

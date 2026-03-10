@@ -1,0 +1,7 @@
+[ "{path: macro_payload.yaml}" yaml> ] "macro-payload-request" define
+[
+  "message" dict-get? dup none?
+  [ drop "missing message" ]
+  [ ]
+  if
+] "payload-message" define

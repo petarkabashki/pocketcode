@@ -198,6 +198,7 @@ Runtime session state is persisted under `<primary_resource_root>/state/sessions
 Direct resource-root prompts, tools, and flows are registered under resource-root namespaces. For backward compatibility, the default `.pocketcode/` resource root also exposes its direct prompts, tools, and Markdown flows under the legacy `workspace` namespace.
 
 Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/session_manager.py` and scoped to the current workspace root.
+Each saved session record now also persists debugger breakpoint labels and a derived breakpoint count so debugger intent survives session resume and UI restart.
 
 ## Execution Loop
 
@@ -217,11 +218,17 @@ Saved sessions are runtime-generated JSON snapshots managed by `pocketcode/core/
 7. If the transition requests a handoff, update active flow and handoff context.
 8. Continue until final answer, user question, error, or step limit.
 
+During request execution, `PocketCodeEngine.start_request()` now wraps the runtime event handler with a request-scoped observer in `pocketcode/core/runtime_observability.py`. That observer annotates emitted lifecycle events with stable step metadata and accumulates a structured step timeline for the completed run summary.
+
+When `start_request(..., debug=True)` is used, the engine also enables the request `RunHandle`'s cooperative debugger. That debugger pauses the worker thread after queueing selected completed or instantaneous runtime-step events, while exposing a live snapshot callback back into the current shared store.
+
 Tool results with `success: false` are kept in `last_tool_result` and do not automatically terminate the run. Flows may inspect the failure and decide whether to retry, answer, or hand off. Runtime errors are reserved for malformed tool requests, missing tool targets, unhandled exceptions, and other engine-level failures.
 
 Programmatic PocketFlow flows are loaded from manifest `module` plus `entry_fn` and stored as `flow_instance`.
 
 StackVM-backed flows are resolved from VM source metadata on the flow definition. At runtime, `AgentRuntime` assembles inline and file-backed VM source through `pocketcode/core/stackvm_loader.py`, parses it through `pocketcode/core/stackvm_parser.py`, collects non-fatal source authoring warnings plus executable-AST validation through `pocketcode/core/stackvm_validator.py`, expands compile-time macros through `pocketcode/core/stackvm_expander.py`, injects the same prompt/tool/LLM services used by PocketFlow agents, and runs the selected StackVM entry word through `pocketcode/core/agent_stack_vm.py` when configured. Because `AgentRuntime.run()` remains synchronous, VM execution moves to a dedicated worker thread when the caller is already inside a running asyncio event loop.
+
+The `/stackvm run` and `/stackvm debug` CLI commands use that same runtime path. Registered StackVM flows execute directly against their loaded `FlowDefinition`, while standalone scripts under `<primary_resource_root>/vm/` are wrapped into a temporary synthetic `FlowDefinition` for the duration of the command so tool calls, handoffs, result routing, and final-answer handling still use the normal execution loop.
 
 LLM decision parsing uses a shared YAML-mapping parser. It accepts fenced YAML blocks and also trims leading prose before the first YAML key so responses like `Here is the YAML:` followed by a valid mapping do not abort the run.
 
@@ -247,10 +254,50 @@ Common runtime-managed keys include:
 - `llm_usage_totals`
 - `llm_cost_usd_total`
 - `_registry`
+- `_runtime_observability`
 
 `workspace_root` and `filesystem_root` currently resolve to the same absolute directory: the process working directory used to start PocketCoder. Core filesystem and staged-edit tools use `filesystem_root` as their allowlisted boundary.
 
 Programmatic PocketFlow flows also receive runtime helpers such as `_llm_router`, `_tool_runtime`, `_agent_llm_profile`, `_agent_system_prompt`, and `_agent_tool_definitions`.
+
+The request-scoped observability helper stores:
+
+- `event_count`: total runtime events seen for the request
+- `steps`: ordered structured steps for agent turns, LLM calls, tool calls, handoffs, handoff returns, and runtime errors
+- `active_steps`: in-flight step bookkeeping used to pair started and completed events
+
+The request `RunHandle` also owns the cooperative debugger state:
+
+- whether debugging is enabled for the request
+- whether the run is currently paused at a debugger boundary
+- the paused runtime event payload
+- the current debugger mode (`step` versus `continue`)
+- an optional step budget for counted stepping such as `next 5`
+- an optional one-shot until predicate for commands such as `until node review_route` or `until when pending_tool.name == "core.write_file"`
+- an optional persistent breakpoint list, each with an id, label, and predicate
+- an engine-provided live snapshot callback used by the CLI debugger surfaces
+- interface-specific debugger controls layered on top of the shared `RunHandle` operations such as `step_debugger()`, `continue_debugger()`, breakpoint creation, and breakpoint clearing
+- Textual maps those controls onto both button actions and selected run-inspector breakpoint blocks so individual saved breakpoints can be cleared without raw command input
+- the active session snapshot now includes canonical debugger breakpoint labels, and `start_request(..., debug=True)` restores those saved labels onto each new request `RunHandle` before execution begins
+
+Generated Markdown graph flows in `pocketcode/core/markdown_graph_flow.py` now publish `node_started` and `node_completed` events through the same runtime event handler, and they keep `active_node_id` / `active_node_kind` current in the request shared store. That gives the debugger a concrete node boundary for generated graph flows, lets paused snapshots show the current node directly, and lets the observability layer record node steps alongside agent turns, tool calls, and handoffs.
+
+`PocketCodeEngine._build_run_summary()` copies that state into the persisted `last_run_summary` as:
+
+- `runtime_event_count`
+- `step_count`
+- `steps`
+
+Each public step entry currently includes:
+
+- `index`
+- `kind`
+- `label`
+- `status`
+- `parent_step_index`
+- `duration_ms`
+- `summary`
+- compact `details`
 
 ## Resolution Orders
 
@@ -330,11 +377,13 @@ Current behavior:
 - each request gets a generated `run_id` in the shared store
 - request lifecycle hooks append user and assistant or system transcript entries to the active saved session after each run
 - session snapshots persist active agent, active profile, active mode, enabled skills, global LLM override, session-scoped profile tool/skill overrides, and session confirmation overrides
+- session snapshots also persist debugger breakpoint labels so future debug runs can restore the same breakpoint set onto the next `RunHandle`
 - starting a new session creates a new saved-session file and switches the active session pointer
 - starting a new session clears prior session-only tool and skill overrides, then reseeds the new session from the active agent/profile file state
 - resuming a session restores runtime selections from the saved snapshot and marks the active session as history-backed
 - deleting a session is blocked when the target matches the active session id
 - clearing saved sessions removes only non-active saved sessions
+- the engine exposes saved-session detail and breakpoint-pruning helpers so `/session show <id>`, `/session clear-breakpoints <id> --yes`, and the Textual Control Center can inspect or clear persisted debugger breakpoints without resuming the session first
 
 ## Agent Profile Precedence
 

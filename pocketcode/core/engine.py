@@ -42,9 +42,18 @@ from pocketcode.core.reference_syntax import (
     validate_registry_reference,
 )
 from pocketcode.core.run_handle import RunCancelledError, RunHandle
-from pocketcode.core.runtime_models import AgentProfile
+from pocketcode.core.runtime_observability import (
+    build_runtime_observability_summary,
+    initialize_runtime_observability,
+    observe_runtime_event,
+)
+from pocketcode.core.runtime_models import AgentProfile, FlowDefinition
 from pocketcode.core.resource_roots import primary_resource_root
 from pocketcode.core.session_manager import SessionManager
+from pocketcode.core.stackvm_expander import expand_stackvm_ast
+from pocketcode.core.stackvm_loader import load_stackvm_program_source
+from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast, tokenize_stackvm_source
+from pocketcode.core.stackvm_validator import collect_stackvm_authoring_warnings, validate_stackvm_ast
 from pocketcode.core.tool_runtime import ToolRuntime
 from pocketcode.core.workspace_llm_profile_manager import WorkspaceLlmProfileManager
 from pocketcode.core.markdown_assets import (
@@ -54,6 +63,7 @@ from pocketcode.core.markdown_assets import (
     parse_markdown_asset_text_document,
 )
 from pocketcode.core.markdown_graph_flow import build_graph_flow_from_metadata
+from pocketcode.cli.debugger_commands import build_debugger_predicate_from_label
 
 logger = logging.getLogger(__name__)
 _UNSET = object()
@@ -125,6 +135,7 @@ class PocketCodeEngine:
             "tool_policies": {},
             "agent_policies": {},
         }
+        self.session_debugger_breakpoints: List[str] = []
         self.active_session_id: str | None = None
         self.active_session_title: str | None = None
         self.active_session_loaded_from_history = False
@@ -136,6 +147,9 @@ class PocketCodeEngine:
             "llm_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "llm_cost_usd": 0.0,
             "context_stats": {"files": 0, "folders": 0, "urls": 0, "snippets": 0, "snippet_chars": 0},
+            "runtime_event_count": 0,
+            "step_count": 0,
+            "steps": [],
         }
 
         self._validate_current_selections()
@@ -177,6 +191,284 @@ class PocketCodeEngine:
             "companion_path": companion_path,
             "resource_root": resource_root.path,
         }
+
+    def create_stackvm_flow(
+        self,
+        name: str,
+        *,
+        entry: str = "decide",
+        agent_name: str | None = None,
+    ) -> Dict[str, Any]:
+        normalized_name = self._normalize_asset_file_name(name)
+        normalized_entry = self._normalize_stackvm_entry_word(entry)
+        self.create_markdown_asset("flow", normalized_name)
+        markdown_text = self._stackvm_flow_scaffold(normalized_name, entry=normalized_entry)
+        updated = self.update_markdown_asset("flow", normalized_name, markdown_text=markdown_text)
+
+        created_agent: Dict[str, Any] | None = None
+        if agent_name:
+            created_agent = self.create_stackvm_agent(agent_name, flow_name=normalized_name)
+
+        return {
+            "kind": "flow",
+            "name": normalized_name,
+            "path": updated["path"],
+            "entry": normalized_entry,
+            "agent": created_agent,
+        }
+
+    def create_stackvm_script(
+        self,
+        name: str,
+        *,
+        entry: str = "main",
+    ) -> Dict[str, Any]:
+        normalized_name = self._normalize_stackvm_script_name(name)
+        normalized_entry = self._normalize_stackvm_entry_word(entry)
+        script_path = self._stackvm_script_root() / f"{normalized_name}.vm"
+        if script_path.exists():
+            raise ValueError(f"StackVM script already exists: {script_path}")
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(
+            self._stackvm_script_scaffold(normalized_name, entry=normalized_entry),
+            encoding="utf-8",
+        )
+        return {
+            "kind": "script",
+            "name": normalized_name,
+            "path": script_path,
+            "entry": normalized_entry,
+        }
+
+    def create_stackvm_agent(self, name: str, *, flow_name: str) -> Dict[str, Any]:
+        normalized_name = self._normalize_asset_file_name(name)
+        normalized_flow = self._require_known_agent_name(flow_name)
+        existing_profile = self.get_agent_profile(normalized_name)
+        if existing_profile is not None:
+            raise ValueError(f"Agent profile '{normalized_name}' already exists.")
+
+        resource_root = primary_resource_root(self._workspace_root)
+        target_dir = resource_root.path / "agents"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        asset_path = target_dir / f"{normalized_name}.md"
+        if asset_path.exists():
+            raise ValueError(f"Agent asset already exists: {asset_path}")
+        markdown_text = self._stackvm_agent_scaffold(normalized_name, flow_name=normalized_flow)
+        asset_path.write_text(markdown_text, encoding="utf-8")
+        self.reload()
+        return {
+            "kind": "agent",
+            "name": normalized_name,
+            "path": asset_path,
+            "flow": normalized_flow,
+        }
+
+    def list_stackvm_scripts(self) -> List[str]:
+        script_root = self._stackvm_script_root()
+        if not script_root.is_dir():
+            return []
+
+        scripts: list[str] = []
+        for path in sorted(script_root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in {".vm", ".md"}:
+                continue
+            scripts.append(path.relative_to(script_root).as_posix())
+        return scripts
+
+    def get_stackvm_script(self, name_or_path: str) -> Dict[str, Any]:
+        script_path = self._resolve_stackvm_script_path(name_or_path)
+        return {
+            "name": self._stackvm_script_display_name(script_path),
+            "path": script_path,
+            "text": script_path.read_text(encoding="utf-8"),
+        }
+
+    def update_stackvm_script(self, name_or_path: str, *, source_text: str) -> Dict[str, Any]:
+        script_path = self._resolve_stackvm_script_path(name_or_path, create_if_missing=True)
+        validation_source = self._stackvm_source_from_script_text(script_path=script_path, source_text=source_text)
+        compiled = self._compile_stackvm_program(
+            source=validation_source,
+            source_files=[str(script_path)],
+            entry=None,
+        )
+        if not compiled["source"].strip():
+            raise ValueError(f"StackVM script '{script_path}' has no executable source.")
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(source_text.rstrip() + "\n", encoding="utf-8")
+        return {
+            "name": self._stackvm_script_display_name(script_path),
+            "path": script_path,
+            "warnings": compiled["warnings"],
+        }
+
+    def inspect_stackvm_target(
+        self,
+        target_kind: str,
+        target_name: str,
+        *,
+        entry: str | None = None,
+    ) -> Dict[str, Any]:
+        normalized_kind = str(target_kind or "").strip().lower()
+        normalized_entry = self._normalize_stackvm_entry_word(entry) if entry else None
+
+        if normalized_kind == "flow":
+            flow_name, definition = self._resolve_stackvm_flow_definition(target_name)
+            compiled = self._load_and_compile_stackvm_flow(definition=definition, entry=normalized_entry)
+            return {
+                "target_kind": "flow",
+                "name": flow_name,
+                "path": self._flow_markdown_path(definition),
+                "flow": flow_name,
+                "agent": None,
+                "execution_mode": definition.execution_mode,
+                "vm_entry": normalized_entry or definition.vm_entry,
+                "llm_profile": definition.llm_profile,
+                "tools": list(definition.tools),
+                "prompt_sources": list(definition.prompt_sources),
+                **compiled,
+            }
+
+        if normalized_kind == "script":
+            script_path = self._resolve_stackvm_script_path(target_name)
+            script_entry = normalized_entry or "main"
+            source, source_files = load_stackvm_program_source(
+                vm_source=None,
+                vm_entry=script_entry,
+                vm_module=None,
+                vm_modules=[],
+                vm_file=str(script_path),
+                vm_files=[],
+                base_dir=script_path.parent,
+                search_roots=[script_path.parent, self._stackvm_script_root(), self._workspace_root],
+            )
+            compiled = self._compile_stackvm_program(
+                source=source,
+                source_files=source_files,
+                entry=script_entry,
+            )
+            return {
+                "target_kind": "script",
+                "name": self._stackvm_script_display_name(script_path),
+                "path": script_path,
+                "flow": None,
+                "agent": None,
+                "execution_mode": "vm",
+                "vm_entry": script_entry,
+                "llm_profile": None,
+                "tools": [],
+                "prompt_sources": [],
+                **compiled,
+            }
+
+        if normalized_kind == "agent":
+            profile = self.get_agent_profile(target_name)
+            if profile is None:
+                raise ValueError(f"Unknown agent profile '{target_name}'.")
+            flow_name, definition = self._resolve_stackvm_flow_definition(profile.agent)
+            compiled = self._load_and_compile_stackvm_flow(definition=definition, entry=normalized_entry)
+            return {
+                "target_kind": "agent",
+                "name": profile.name,
+                "path": getattr(profile, "source_path", None),
+                "flow": flow_name,
+                "agent": profile.name,
+                "execution_mode": definition.execution_mode,
+                "vm_entry": normalized_entry or definition.vm_entry,
+                "llm_profile": profile.llm_profile,
+                "tools": list(profile.tools) if profile.tools is not None else self.list_tools_for_agent(flow_name),
+                "prompt_sources": list(profile.extra_prompts),
+                "profile_source": getattr(profile, "source", None),
+                "profile_path": getattr(profile, "source_path", None),
+                **compiled,
+            }
+
+        raise ValueError("Unsupported StackVM target. Expected one of: flow, script, agent.")
+
+    def run_stackvm_target(
+        self,
+        target_kind: str,
+        target_name: str,
+        *,
+        request: str = "",
+        entry: str | None = None,
+        debug: bool = False,
+        auto_confirm_tools: bool = True,
+    ) -> Dict[str, Any]:
+        normalized_kind = str(target_kind or "").strip().lower()
+        normalized_entry = self._normalize_stackvm_entry_word(entry) if entry else None
+
+        if normalized_kind == "flow":
+            flow_name, definition = self._resolve_stackvm_flow_definition(target_name)
+            profile = self._get_default_profile_for(flow_name)
+            return self._run_stackvm_flow_definition(
+                flow_name=flow_name,
+                definition=definition,
+                request=request,
+                active_profile=profile,
+                debug=debug,
+                auto_confirm_tools=auto_confirm_tools,
+                entry_override=normalized_entry,
+            )
+
+        if normalized_kind == "agent":
+            profile = self.get_agent_profile(target_name)
+            if profile is None:
+                raise ValueError(f"Unknown agent profile '{target_name}'.")
+            flow_name, definition = self._resolve_stackvm_flow_definition(profile.agent)
+            return self._run_stackvm_flow_definition(
+                flow_name=flow_name,
+                definition=definition,
+                request=request,
+                active_profile=profile,
+                debug=debug,
+                auto_confirm_tools=auto_confirm_tools,
+                entry_override=normalized_entry,
+            )
+
+        if normalized_kind == "script":
+            script_path = self._resolve_stackvm_script_path(target_name)
+            script_entry = normalized_entry or "main"
+            source, source_files = load_stackvm_program_source(
+                vm_source=None,
+                vm_entry=script_entry,
+                vm_module=None,
+                vm_modules=[],
+                vm_file=str(script_path),
+                vm_files=[],
+                base_dir=script_path.parent,
+                search_roots=[script_path.parent, self._stackvm_script_root(), self._workspace_root],
+            )
+            definition = FlowDefinition(
+                name=script_path.stem,
+                description=f"StackVM script '{script_path.name}'",
+                execution_mode="vm",
+                tools=sorted(self._plugins.tools.keys()),
+                vm_entry=script_entry,
+                vm_file=str(script_path),
+                metadata={
+                    "plugin": "__stackvm_cli__",
+                    "plugin_root": str(script_path.parent),
+                    "resource_root": str(self._stackvm_script_root().parent),
+                    "markdown_path": str(script_path),
+                },
+            )
+            temp_profile = AgentProfile(
+                name=f"stackvm-script::{script_path.stem}",
+                flow="__stackvm_cli__.script",
+                description=f"Temporary profile for {script_path.name}",
+                source="synthesised",
+            )
+            return self._run_stackvm_temp_script(
+                script_path=script_path,
+                source_files=source_files,
+                definition=definition,
+                active_profile=temp_profile,
+                request=request,
+                debug=debug,
+                auto_confirm_tools=auto_confirm_tools,
+            )
+
+        raise ValueError("Unsupported StackVM target. Expected one of: flow, script, agent.")
 
     def list_markdown_assets(self, asset_kind: str) -> List[str]:
         normalized_kind = str(asset_kind or "").strip().lower()
@@ -757,15 +1049,27 @@ class PocketCodeEngine:
     def get_current_flow(self):
         return self.get_current_agent()
 
+    def _normalize_textual_control_presentation(self, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"modal", "popup", "popups"}:
+            return "modal"
+        return "inline"
+
     def get_system_settings(self) -> Dict[str, Any]:
         textual_config = self._runtime_config.get("textual", {})
         if not isinstance(textual_config, dict):
             textual_config = {}
+        control_presentation = self._normalize_textual_control_presentation(
+            textual_config.get("control_presentation")
+            if "control_presentation" in textual_config
+            else ("modal" if textual_config.get("user_input_popups") else "inline")
+        )
         return {
             "theme_name": str(textual_config.get("theme_name") or "ocean"),
             "workspace_view": str(textual_config.get("workspace_view") or textual_config.get("workspace_mode") or "balanced"),
             "default_agent": self._normalize_agent_name(self._runtime_config.get("default_agent")),
             "default_llm_profile": self._llm_config.get("default_profile"),
+            "control_presentation": control_presentation,
         }
 
     def get_textual_selection_settings(self) -> Dict[str, Any]:
@@ -800,6 +1104,8 @@ class PocketCodeEngine:
         workspace_view: str,
         default_agent: Optional[str],
         default_llm_profile: Optional[str],
+        control_presentation: str = "inline",
+        user_input_popups: bool | None = None,
     ) -> Path:
         normalized_default_agent = self._normalize_agent_name(default_agent)
         if normalized_default_agent:
@@ -807,6 +1113,9 @@ class PocketCodeEngine:
                 raise KeyError(f"Unknown agent '{default_agent}'.")
         if default_llm_profile:
             self._llm_router.resolve_profile_config(default_llm_profile)
+        normalized_control_presentation = self._normalize_textual_control_presentation(
+            "modal" if user_input_popups is True else control_presentation
+        )
 
         runtime_section = self._config.setdefault("runtime", {})
         if not isinstance(runtime_section, dict):
@@ -827,7 +1136,9 @@ class PocketCodeEngine:
             textual_section = {}
         textual_section["theme_name"] = str(theme_name)
         textual_section["workspace_view"] = str(workspace_view)
+        textual_section["control_presentation"] = normalized_control_presentation
         textual_section.pop("workspace_mode", None)
+        textual_section.pop("user_input_popups", None)
         runtime_section["textual"] = textual_section
 
         if default_llm_profile:
@@ -840,6 +1151,33 @@ class PocketCodeEngine:
         config_path = self._write_workspace_config()
         self._reload_llm_runtime()
         return config_path
+
+    def get_textual_entry_history(self) -> List[str]:
+        last_used = self._textual_last_used_config(create=False)
+        raw_history = last_used.get("entry_history", [])
+        if not isinstance(raw_history, list):
+            return []
+        history: List[str] = []
+        for item in raw_history:
+            text = str(item or "").strip()
+            if text:
+                history.append(text)
+        return history[-100:]
+
+    def set_last_used_entry_history(self, entries: List[str]) -> Path:
+        last_used = self._textual_last_used_config(create=True)
+        normalized_entries: List[str] = []
+        for item in entries:
+            text = str(item or "").strip()
+            if text:
+                normalized_entries.append(text)
+        normalized_entries = normalized_entries[-100:]
+        if normalized_entries:
+            last_used["entry_history"] = normalized_entries
+        else:
+            last_used.pop("entry_history", None)
+        self._cleanup_textual_last_used_config()
+        return self._write_workspace_config()
 
     @property
     def active_agent(self):
@@ -1218,6 +1556,63 @@ class PocketCodeEngine:
         if normalized.startswith(".") or ".." in normalized:
             raise ValueError("Asset name must not start with '.' or contain '..'.")
         return normalized
+
+    def _normalize_stackvm_script_name(self, name: str) -> str:
+        normalized = str(name or "").strip().replace("\\", "/")
+        if not normalized:
+            raise ValueError("StackVM script name must not be empty.")
+        if normalized.startswith(".") or ".." in normalized:
+            raise ValueError("StackVM script name must not start with '.' or contain '..'.")
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/")
+        if any(character not in allowed for character in normalized):
+            raise ValueError(
+                "StackVM script names may contain only letters, numbers, slash, dot, underscore, and hyphen."
+            )
+        return normalized.lstrip("/")
+
+    def _normalize_stackvm_entry_word(self, entry: str | None) -> str:
+        normalized = str(entry or "").strip()
+        if not normalized:
+            raise ValueError("StackVM entry word must not be empty.")
+        if any(char.isspace() for char in normalized):
+            raise ValueError("StackVM entry word must not contain whitespace.")
+        return normalized
+
+    def _stackvm_script_root(self) -> Path:
+        return primary_resource_root(self._workspace_root).path / "vm"
+
+    def _stackvm_flow_scaffold(self, name: str, *, entry: str) -> str:
+        front_matter = {
+            "name": name,
+            "description": f"Workspace StackVM flow '{name}'.",
+            "execution_mode": "vm",
+            "vm_entry": entry,
+        }
+        front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
+        return (
+            f"---\n{front_matter_text}\n---\n\n"
+            "```vm\n"
+            f"[ \"StackVM flow {name} ready.\" answer ] \"{entry}\" define\n"
+            "```\n"
+        )
+
+    def _stackvm_script_scaffold(self, name: str, *, entry: str) -> str:
+        return (
+            f"! StackVM script scaffold for {name}\n"
+            f"[ request \"Request: \" swap concat answer ] \"{entry}\" define\n"
+        )
+
+    def _stackvm_agent_scaffold(self, name: str, *, flow_name: str) -> str:
+        front_matter = {
+            "name": name,
+            "flow": flow_name,
+            "description": f"Workspace agent '{name}' for StackVM flow '{flow_name}'.",
+        }
+        front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
+        return (
+            f"---\n{front_matter_text}\n---\n"
+            "Describe the role, boundaries, and priorities for this StackVM-backed agent here.\n"
+        )
 
     def _markdown_asset_scaffold(self, asset_kind: str, name: str) -> str:
         if asset_kind == "agent":
@@ -1680,6 +2075,274 @@ class PocketCodeEngine:
             raise ValueError(f"Ambiguous workspace markdown flow name: {name}")
         return matches[0]
 
+    def _resolve_stackvm_flow_definition(self, name: str) -> tuple[str, FlowDefinition]:
+        normalized_name = self._require_known_agent_name(name)
+        definition = self._plugins.agents.get(normalized_name)
+        if definition is None:
+            raise ValueError(f"Unknown flow '{name}'.")
+        if str(getattr(definition, "execution_mode", "")).strip().lower() != "vm":
+            raise ValueError(f"Flow '{normalized_name}' is not StackVM-backed.")
+        return normalized_name, definition
+
+    def _resolve_stackvm_script_path(self, name_or_path: str, *, create_if_missing: bool = False) -> Path:
+        raw_target = str(name_or_path or "").strip()
+        if not raw_target:
+            raise ValueError("StackVM script target must not be empty.")
+
+        raw_path = Path(raw_target).expanduser()
+        if raw_path.is_absolute() or "/" in raw_target or "\\" in raw_target:
+            candidate = raw_path if raw_path.is_absolute() else (self._workspace_root / raw_path)
+            if candidate.suffix.lower() not in {".vm", ".md"}:
+                candidate = candidate.with_suffix(".vm")
+            resolved = candidate.resolve()
+            if resolved.is_file() or create_if_missing:
+                return resolved
+            raise ValueError(f"StackVM script not found: {resolved}")
+
+        normalized_name = self._normalize_stackvm_script_name(raw_target)
+        script_root = self._stackvm_script_root()
+        direct_candidates = [
+            (script_root / normalized_name).with_suffix(".vm"),
+            (script_root / normalized_name).with_suffix(".md"),
+        ]
+        module_relative = Path(*[part for part in normalized_name.split(".") if part])
+        module_candidates = [
+            (script_root / module_relative).with_suffix(".vm"),
+            (script_root / module_relative).with_suffix(".md"),
+        ]
+        for candidate in [*direct_candidates, *module_candidates]:
+            resolved = candidate.resolve()
+            if resolved.is_file():
+                return resolved
+
+        if create_if_missing:
+            return direct_candidates[0].resolve()
+        raise ValueError(f"StackVM script not found: {normalized_name}")
+
+    def _stackvm_script_display_name(self, script_path: Path) -> str:
+        try:
+            return script_path.resolve().relative_to(self._stackvm_script_root()).as_posix()
+        except ValueError:
+            return str(script_path.resolve())
+
+    def _stackvm_source_from_script_text(self, *, script_path: Path, source_text: str) -> str:
+        if script_path.suffix.lower() != ".md":
+            return str(source_text or "").strip()
+        document = parse_markdown_asset_text_document(
+            source_text,
+            source_path=script_path,
+        )
+        vm_sections = [
+            block.content.strip()
+            for block in document.find_blocks(languages=("vm", "stackvm"))
+            if block.content.strip()
+        ]
+        if vm_sections:
+            return "\n\n".join(vm_sections).strip()
+        return document.body.strip()
+
+    def _stackvm_search_roots_for_definition(self, definition: FlowDefinition) -> list[Path]:
+        metadata = dict(getattr(definition, "metadata", {}) or {})
+        search_roots: list[Path] = []
+        markdown_path = metadata.get("markdown_path")
+        plugin_root = metadata.get("plugin_root")
+        resource_root = metadata.get("resource_root")
+        if markdown_path:
+            search_roots.append(Path(str(markdown_path)).resolve().parent)
+        if plugin_root:
+            search_roots.append(Path(str(plugin_root)).resolve())
+        if resource_root:
+            search_roots.append(Path(str(resource_root)).resolve())
+        if not search_roots:
+            search_roots.append(self._workspace_root)
+        return list(dict.fromkeys(search_roots))
+
+    def _load_and_compile_stackvm_flow(
+        self,
+        *,
+        definition: FlowDefinition,
+        entry: str | None = None,
+    ) -> Dict[str, Any]:
+        search_roots = self._stackvm_search_roots_for_definition(definition)
+        source, source_files = load_stackvm_program_source(
+            vm_source=definition.vm_source,
+            vm_entry=entry or definition.vm_entry,
+            vm_module=definition.vm_module,
+            vm_modules=definition.vm_modules,
+            vm_file=definition.vm_file,
+            vm_files=definition.vm_files,
+            base_dir=search_roots[0],
+            search_roots=search_roots,
+        )
+        return self._compile_stackvm_program(
+            source=source,
+            source_files=source_files,
+            entry=entry or definition.vm_entry,
+        )
+
+    def _compile_stackvm_program(
+        self,
+        *,
+        source: str,
+        source_files: List[str],
+        entry: str | None,
+    ) -> Dict[str, Any]:
+        compiled_source = str(source or "").strip()
+        if not compiled_source and not entry:
+            raise ValueError("StackVM target has no executable source or entry word.")
+
+        warnings: list[dict[str, Any]] = []
+        expanded_ast: list[Any] = []
+        expansion_metadata = {
+            "expansion_count": 0,
+            "macro_names": [],
+            "builtin_macro_names": [],
+            "gensym_count": 0,
+            "expansion_trace": [],
+        }
+        token_count = 0
+
+        if compiled_source:
+            source_ast = parse_stackvm_source(compiled_source)
+            token_count = len(tokenize_stackvm_source(compiled_source))
+            warnings = collect_stackvm_authoring_warnings(source_ast, source=compiled_source)
+            expanded = expand_stackvm_ast(source_ast)
+            validate_stackvm_ast(expanded.ast)
+            expanded_ast = expanded.ast
+            used_macro_names = list(dict.fromkeys(expanded.expansion_trace))
+            builtin_macro_names = [
+                name
+                for name in used_macro_names
+                if name in expanded.macros and expanded.macros[name].builtin
+            ]
+            expansion_metadata = {
+                "expansion_count": expanded.expansion_count,
+                "macro_names": used_macro_names,
+                "builtin_macro_names": builtin_macro_names,
+                "gensym_count": expanded.gensym_count,
+                "expansion_trace": list(expanded.expansion_trace),
+            }
+
+        return {
+            "source": compiled_source,
+            "source_files": list(source_files),
+            "expanded_source": serialize_stackvm_ast(expanded_ast) if expanded_ast else "",
+            "expanded_ast": expanded_ast,
+            "warnings": warnings,
+            "warning_count": len(warnings),
+            "expansion_metadata": expansion_metadata,
+            "token_count": token_count,
+        }
+
+    def _run_stackvm_flow_definition(
+        self,
+        *,
+        flow_name: str,
+        definition: FlowDefinition,
+        request: str,
+        active_profile: Any,
+        debug: bool,
+        auto_confirm_tools: bool,
+        entry_override: str | None = None,
+    ) -> Dict[str, Any]:
+        original_entry = definition.vm_entry
+        if entry_override:
+            definition.vm_entry = entry_override
+
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+            "interface": "stackvm",
+        }
+        shared_store = self._build_shared_store(
+            user_input=str(request or ""),
+            cli_context=cli_context,
+            event_handler=None,
+            interaction_handler=None,
+            user_input_handler=None,
+            run_handle=None,
+        )
+        shared_store["active_agent"] = flow_name
+        shared_store["active_flow"] = flow_name
+        shared_store["active_agent_profile"] = active_profile
+        shared_store["stackvm_trace_enabled"] = bool(debug)
+        shared_store["auto_confirm_tools"] = bool(auto_confirm_tools)
+
+        try:
+            self._agent_runtime.run(shared_store)
+        finally:
+            definition.vm_entry = original_entry
+
+        summary = self._build_run_summary(shared_store, cli_context)
+        self.last_run_summary = dict(summary)
+        return {
+            "target_kind": "agent" if active_profile is not None and getattr(active_profile, "name", None) else "flow",
+            "flow": flow_name,
+            "agent": getattr(active_profile, "name", None),
+            "request": str(request or ""),
+            "output": str(shared_store.get("final_output") or shared_store.get("final_answer") or ""),
+            "final_answer": shared_store.get("final_answer"),
+            "question_to_ask": shared_store.get("question_to_ask"),
+            "error_message": shared_store.get("error_message"),
+            "run_summary": summary,
+            "trace": list(shared_store.get("vm_trace", [])),
+            "trace_count": len(shared_store.get("vm_trace", [])),
+            "last_vm_source": shared_store.get("last_vm_source", ""),
+            "last_vm_expanded_source": shared_store.get("last_vm_expanded_source", ""),
+            "last_vm_sources": list(shared_store.get("last_vm_sources", [])),
+            "last_vm_expansion_metadata": dict(shared_store.get("last_vm_expansion_metadata", {})),
+            "last_vm_validation_warnings": list(shared_store.get("last_vm_validation_warnings", [])),
+            "pending_tool": shared_store.get("pending_tool"),
+            "last_tool_result": shared_store.get("last_tool_result"),
+            "tool_history": list(shared_store.get("tool_history", [])),
+            "pending_handoff_agent": shared_store.get("pending_handoff_agent"),
+            "results": dict(shared_store.get("results", {})) if isinstance(shared_store.get("results"), dict) else {},
+        }
+
+    def _run_stackvm_temp_script(
+        self,
+        *,
+        script_path: Path,
+        source_files: List[str],
+        definition: FlowDefinition,
+        active_profile: AgentProfile,
+        request: str,
+        debug: bool,
+        auto_confirm_tools: bool,
+    ) -> Dict[str, Any]:
+        namespace = "__stackvm_cli__"
+        flow_name = "script"
+        qualified_name = f"{namespace}.{flow_name}"
+        definition.name = flow_name
+        definition.metadata = {
+            **dict(definition.metadata or {}),
+            "source_files": list(source_files),
+        }
+        active_profile.flow = qualified_name
+
+        self._plugins.agents.unregister_plugin(namespace)
+        self._plugins.agents.register(namespace, flow_name, definition)
+        try:
+            result = self._run_stackvm_flow_definition(
+                flow_name=qualified_name,
+                definition=definition,
+                request=request,
+                active_profile=active_profile,
+                debug=debug,
+                auto_confirm_tools=auto_confirm_tools,
+                entry_override=definition.vm_entry,
+            )
+        finally:
+            self._plugins.agents.unregister_plugin(namespace)
+
+        result["target_kind"] = "script"
+        result["name"] = self._stackvm_script_display_name(script_path)
+        result["path"] = script_path
+        result["flow"] = None
+        return result
+
     def _resolve_workspace_markdown_tool(self, name: str) -> tuple[str, str, Any, Path]:
         candidates: list[str] = []
         if "." in name and name in self._plugins.tools:
@@ -2132,20 +2795,39 @@ class PocketCodeEngine:
         cli_context: Dict[str, Any],
         *,
         bridge_user_input: bool = False,
+        debug: bool = False,
     ) -> RunHandle:
         handle = RunHandle()
         shared_store = self._build_shared_store(
             user_input=user_input,
             cli_context=cli_context,
-            event_handler=handle.emit,
+            event_handler=None,
             interaction_handler=handle.request_interaction if bridge_user_input else None,
             user_input_handler=handle.request_user_input if bridge_user_input else None,
             run_handle=handle,
         )
+        initialize_runtime_observability(shared_store)
+        handle.set_debug_snapshot_provider(
+            lambda: self._build_live_debug_snapshot(shared_store=shared_store, cli_context=cli_context)
+        )
+        if debug:
+            handle.enable_debugger(start_mode="step")
+            for label in self._copy_session_debugger_breakpoints():
+                predicate_config = build_debugger_predicate_from_label(label)
+                if predicate_config is None:
+                    continue
+                predicate, normalized_label = predicate_config
+                handle.add_debug_breakpoint(predicate, label=normalized_label)
+
+        def emit_runtime_event(event_type: str, **payload: Any) -> None:
+            annotated_payload = observe_runtime_event(shared_store, event_type, payload)
+            handle.emit(event_type, **annotated_payload)
+
+        shared_store["runtime_event_handler"] = emit_runtime_event
 
         def runner() -> None:
             try:
-                handle.emit(
+                emit_runtime_event(
                     "run_started",
                     request=user_input,
                     agent=shared_store.get("active_agent") or "auto",
@@ -2273,7 +2955,55 @@ class PocketCodeEngine:
             "vm_validation_warnings": list(vm_validation_warnings),
             "vm_validation_warning_count": len(vm_validation_warnings),
             "context_stats": self._build_context_stats(cli_context),
+            **build_runtime_observability_summary(shared_store),
         }
+
+    def _build_live_debug_snapshot(
+        self,
+        *,
+        shared_store: Dict[str, Any],
+        cli_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        active_mode = getattr(self, "active_mode", None)
+        return {
+            "active_agent": shared_store.get("active_agent") or self.current_agent,
+            "active_mode": shared_store.get("active_mode") or (active_mode.name if active_mode else None),
+            "active_node_id": shared_store.get("active_node_id"),
+            "active_node_kind": shared_store.get("active_node_kind"),
+            "pending_tool": self._debug_snapshot_value(shared_store.get("pending_tool")),
+            "pending_handoff_agent": shared_store.get("pending_handoff_agent"),
+            "question_to_ask": shared_store.get("question_to_ask"),
+            "final_answer": shared_store.get("final_answer"),
+            "error_message": shared_store.get("error_message"),
+            "last_agent_decision": self._debug_snapshot_value(shared_store.get("last_agent_decision")),
+            "last_tool_route": self._debug_snapshot_value(shared_store.get("last_tool_route")),
+            "current_llm_profile": shared_store.get("last_llm_profile"),
+            "current_llm_model": (
+                shared_store.get("last_llm_generation", {}).get("model")
+                if isinstance(shared_store.get("last_llm_generation"), dict)
+                else None
+            ),
+            "llm_usage": dict(shared_store.get("llm_usage_totals", {}))
+            if isinstance(shared_store.get("llm_usage_totals", {}), dict)
+            else {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "llm_cost_usd": float(shared_store.get("llm_cost_usd_total", 0.0)),
+            "context_stats": self._build_context_stats(cli_context),
+            **build_runtime_observability_summary(shared_store),
+        }
+
+    def _debug_snapshot_value(self, value: Any, *, depth: int = 0) -> Any:
+        if depth >= 4:
+            return repr(value)
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {
+                str(key): self._debug_snapshot_value(item, depth=depth + 1)
+                for key, item in list(value.items())[:16]
+            }
+        if isinstance(value, (list, tuple)):
+            return [self._debug_snapshot_value(item, depth=depth + 1) for item in list(value)[:16]]
+        return repr(value)
 
     def status(self) -> Dict[str, Any]:
         selected_agent = self.active_agent_profile.name if self.active_agent_profile else None
@@ -2302,6 +3032,7 @@ class PocketCodeEngine:
             "default_llm_profile": self.default_llm_profile,
             "tool_confirmation": self._tool_confirmation_config,
             "session_tool_confirmation_overrides": self._copy_session_confirmation_overrides(),
+            "session_debugger_breakpoints": self._copy_session_debugger_breakpoints(),
             "active_session_id": getattr(self, "active_session_id", None),
             "active_session_title": getattr(self, "active_session_title", None),
             "active_session_loaded_from_history": bool(getattr(self, "active_session_loaded_from_history", False)),
@@ -2323,11 +3054,14 @@ class PocketCodeEngine:
     def get_active_session_info(self) -> Dict[str, Any]:
         self._ensure_active_session()
         updated_at = None
+        debugger_breakpoint_count = 0
         session_manager = getattr(self, "_session_manager", None)
         session_id = getattr(self, "active_session_id", None)
         if session_manager is not None and session_id:
             try:
-                updated_at = session_manager.load_session(session_id).updated_at
+                record = session_manager.load_session(session_id)
+                updated_at = record.updated_at
+                debugger_breakpoint_count = len(getattr(record, "debugger_breakpoints", []) or [])
             except Exception:
                 updated_at = None
         return {
@@ -2335,6 +3069,7 @@ class PocketCodeEngine:
             "title": getattr(self, "active_session_title", None),
             "updated_at": updated_at,
             "loaded_from_history": bool(getattr(self, "active_session_loaded_from_history", False)),
+            "debugger_breakpoint_count": debugger_breakpoint_count,
         }
 
     def list_saved_sessions(self) -> List[Dict[str, Any]]:
@@ -2351,6 +3086,26 @@ class PocketCodeEngine:
             items.append(item)
         return items
 
+    def get_saved_session_details(self, session_id: str | None = None) -> Dict[str, Any]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        self._ensure_active_session()
+        target_id = str(session_id or getattr(self, "active_session_id", None) or "").strip()
+        if not target_id:
+            raise ValueError("Session id is required.")
+        record = session_manager.load_session(target_id)
+        return {
+            "session_id": record.session_id,
+            "title": record.title,
+            "updated_at": record.updated_at,
+            "created_at": record.created_at,
+            "is_active": record.session_id == getattr(self, "active_session_id", None),
+            "debugger_breakpoints": list(getattr(record, "debugger_breakpoints", []) or []),
+            "debugger_breakpoint_count": len(getattr(record, "debugger_breakpoints", []) or []),
+            "transcript_entries": len(getattr(record, "transcript", []) or []),
+        }
+
     def start_new_session(self, title: str | None = None) -> Dict[str, Any]:
         self._update_active_session_snapshot()
         session_manager = getattr(self, "_session_manager", None)
@@ -2362,6 +3117,7 @@ class PocketCodeEngine:
         self.session_profile_overrides = {}
         self.session_global_skills_override = None
         self.clear_session_confirmation_overrides()
+        self.clear_session_debugger_breakpoints(update_session=False)
         if active_mode_name:
             self.set_mode(active_mode_name)
         elif active_profile_name:
@@ -2411,6 +3167,24 @@ class PocketCodeEngine:
         excluded = [active_session_id] if active_session_id else []
         return session_manager.clear_sessions(exclude_ids=excluded)
 
+    def clear_saved_session_debugger_breakpoints(self, session_id: str | None = None) -> Dict[str, Any]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        self._ensure_active_session()
+        target_id = str(session_id or getattr(self, "active_session_id", None) or "").strip()
+        if not target_id:
+            raise ValueError("Session id is required.")
+        record = session_manager.load_session(target_id)
+        prior = len(getattr(record, "debugger_breakpoints", []) or [])
+        updated = session_manager.update_session(target_id, debugger_breakpoints=[])
+        if updated.session_id == getattr(self, "active_session_id", None):
+            self.session_debugger_breakpoints = []
+        return {
+            "session_id": updated.session_id,
+            "cleared": prior,
+        }
+
     def _selected_llm_profile(self) -> Optional[str]:
         if self.active_agent_profile is not None and self.active_agent_profile.llm_profile:
             return self.active_agent_profile.llm_profile
@@ -2425,6 +3199,40 @@ class PocketCodeEngine:
     def replace_session_confirmation_overrides(self, overrides: Dict[str, Any]) -> None:
         self.session_confirmation_overrides = self._normalize_session_confirmation_overrides(overrides)
         self._update_active_session_snapshot()
+
+    def list_session_debugger_breakpoints(self) -> List[str]:
+        return list(self._copy_session_debugger_breakpoints())
+
+    def add_session_debugger_breakpoint(self, label: str) -> str:
+        predicate_config = build_debugger_predicate_from_label(label)
+        if predicate_config is None:
+            raise ValueError("Invalid debugger breakpoint label.")
+        _, normalized_label = predicate_config
+        existing = self._copy_session_debugger_breakpoints()
+        if normalized_label not in existing:
+            existing.append(normalized_label)
+            self.session_debugger_breakpoints = existing
+            self._update_active_session_snapshot()
+        return normalized_label
+
+    def clear_session_debugger_breakpoint(self, label: str) -> bool:
+        predicate_config = build_debugger_predicate_from_label(label)
+        if predicate_config is None:
+            return False
+        _, normalized_label = predicate_config
+        existing = self._copy_session_debugger_breakpoints()
+        if normalized_label not in existing:
+            return False
+        self.session_debugger_breakpoints = [item for item in existing if item != normalized_label]
+        self._update_active_session_snapshot()
+        return True
+
+    def clear_session_debugger_breakpoints(self, *, update_session: bool = True) -> int:
+        count = len(self._copy_session_debugger_breakpoints())
+        self.session_debugger_breakpoints = []
+        if update_session:
+            self._update_active_session_snapshot()
+        return count
 
     def set_persistent_tool_confirmation(self, tool_name: str, policy: Optional[str]) -> Path:
         runtime_section = self._config.setdefault("runtime", {})
@@ -2465,6 +3273,24 @@ class PocketCodeEngine:
             "tool_policies": {},
             "agent_policies": {},
         }
+
+    def _normalize_session_debugger_breakpoints(self, raw: Any) -> List[str]:
+        normalized: list[str] = []
+        if not isinstance(raw, list):
+            return normalized
+        for item in raw:
+            predicate_config = build_debugger_predicate_from_label(str(item or ""))
+            if predicate_config is None:
+                continue
+            _, label = predicate_config
+            if label not in normalized:
+                normalized.append(label)
+        return normalized
+
+    def _copy_session_debugger_breakpoints(self) -> List[str]:
+        return self._normalize_session_debugger_breakpoints(
+            getattr(self, "session_debugger_breakpoints", [])
+        )
 
     def grant_session_profile_tool_access(self, profile_name: str, tool_name: str) -> Any:
         profile = self._base_agent_profile(profile_name)
@@ -2528,6 +3354,9 @@ class PocketCodeEngine:
 
         self.replace_session_confirmation_overrides(
             dict(getattr(record, "session_confirmation_overrides", {}) or {})
+        )
+        self.session_debugger_breakpoints = self._normalize_session_debugger_breakpoints(
+            getattr(record, "debugger_breakpoints", []) or []
         )
         self._refresh_runtime_components()
 
@@ -2851,6 +3680,7 @@ class PocketCodeEngine:
                 if isinstance(source.get("session_tool_confirmation"), dict)
                 else self._copy_session_confirmation_overrides()
             ),
+            "debugger_breakpoints": self._copy_session_debugger_breakpoints(),
         }
 
     def _ensure_active_session(self) -> None:

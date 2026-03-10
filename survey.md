@@ -1,16 +1,16 @@
-# Survey Results
+# Funny Programmer Survey Results
 
-1. **Question 1 (Text): What is your favorite programming language?**
-   - Answer: jaba
+**Question 1: What is your preferred way to handle an error you don't understand?**
+Answer: Google it
 
-2. **Question 2 (Buttons): How often do you code?**
-   - Answer: Daily
+**Question 2: How do you feel about writing documentation?**
+Answer: It's a love letter to my future self.
 
-3. **Question 3 (Radio Group): Which operating system do you primarily use?**
-   - Answer: Linux
+**Question 3: What is your favorite variable name for a temporary value?**
+Answer: tmp
 
-4. **Question 4 (Checklist): Which of these technologies have you used?**
-   - Answer: Python, JavaScript
+**Question 4: What is your stance on tabs vs spaces?**
+Answer: Tabs (the only logical choice)
 
-5. **Question 5 (Confirmation): Do you enjoy participating in surveys?**
-   - Answer: Yes (Approved)
+**Question 5: What is your reaction when the code works on the first try?**
+Answer: Suspicion. Something is definitely wrong.

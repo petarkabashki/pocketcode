@@ -302,6 +302,8 @@ Current source loading rules:
 
 Current compile-time macro behavior:
 
+For the canonical macro reference, including syntax examples and builtin macro guidance, see `stackvm_macros.md`.
+
 - `defmacro` is available as a compile-time StackVM form with postfix shape `"[ params ] [ template ] \"name\" defmacro"`
 - macro parameters must be symbols listed in the parameter quotation
 - legacy macro templates are expanded by AST substitution rather than raw string replacement
@@ -314,6 +316,7 @@ Current compile-time macro behavior:
 - built-in macros that need multi-step expressions, such as `tool-once` and `prompt-route`, currently expect those expressions to be passed as quotations and execute them with `call` after expansion
 - `delegate-return` currently handles the common “handoff when no delegated result exists, otherwise answer from a result path” branch shape, but it does not set `pending_handoff_policy` automatically
 - `examples/stackvm_delegate_return_plugin/` is the checked-in reference for using `delegate-return` together with explicit `pending_handoff_policy` setup
+- `examples/stackvm_macro_authoring_plugin/` is the checked-in reference for user-authored `defmacro` plus `syntax-quote` usage
 - `last_vm_validation_warnings` currently surfaces non-fatal source-level authoring warnings such as the legacy manual `last-tool-result none? ... tool-request ... if` loop and direct `prompt-interaction ... switch` exact-match routing, which should normally be replaced by `tool-once` and `prompt-route`
 - macro expansion errors now retain an ordered macro trace so nested failures can identify the expansion path that led to the error
 - current macro support is still intentionally limited: there is not yet a richer compile-time evaluator, source-map reporting, or hygienic binding system beyond generated symbol names
