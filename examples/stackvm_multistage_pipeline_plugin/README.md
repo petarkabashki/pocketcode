@@ -10,15 +10,15 @@ Layout:
 - `flows/normalize.md`: caller flow that normalizes data, collects checklist actions, and finalizes after the delegate returns
 - `flows/confirm_delegate.md`: delegate flow that collects a second structured decision
 - `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: caller script that normalizes data with `parallel-map`, asks the first question, hands off, and finalizes on return
+- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, asks the first question, hands off, and uses `finalize-from` in the caller-finalized paths
 - `vm/delegate.vm`: delegate script that asks the second question and returns a final answer to the caller
 
 The example demonstrates:
 
-- tool-first normalization of all payload item titles in a StackVM caller
+- tool-first normalization of all payload item titles in a StackVM caller through `tool-once`
 - pure data fan-out with `parallel-map` before the first structured interaction
 - a first-stage checklist interaction in the caller
 - a second-stage radio interaction in a VM delegate
 - a direct caller-finalized branch when the first-stage selection does not require delegation
 - `return_to_caller` handoff flow between VM stages
-- finalization back in the caller from both the first-stage selection summary and `last_delegated_result`
+- finalization back in the caller from both the first-stage selection summary and `last_delegated_result` through `finalize-from`

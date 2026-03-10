@@ -324,6 +324,31 @@ class TestTextualRuntimeSelectors:
                 "current_llm_model": "gpt-test",
                 "llm_usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
                 "llm_cost_usd": 0.01,
+                "vm_validation_warning_count": 2,
+                "vm_validation_warnings": [
+                    {
+                        "code": "legacy-tool-loop",
+                        "message": "Prefer tool-once.",
+                        "location": "line 4, cols 1-12",
+                        "span": {
+                            "start_line": 4,
+                            "start_column": 1,
+                            "end_line": 4,
+                            "end_column": 12,
+                        },
+                    },
+                    {
+                        "code": "legacy-prompt-route",
+                        "message": "Prefer prompt-route.",
+                        "location": "line 9, cols 5-22",
+                        "span": {
+                            "start_line": 9,
+                            "start_column": 5,
+                            "end_line": 9,
+                            "end_column": 22,
+                        },
+                    },
+                ],
                 "context_stats": {"files": 2},
             },
         }
@@ -342,9 +367,11 @@ class TestTextualRuntimeSelectors:
         assert "Modal: Pick Tools" in summary_text
         assert "Agent note: Focus mode" in summary_text
         assert "Active session: Review Session (session-1)" in summary_text
+        assert "VM warnings: legacy-tool-loop@4:1-12; legacy-prompt-route@9:5-22" in summary_text
         assert "active_modal: tool_selection" in preview_text
         assert "active_modal_title: Pick Tools" in preview_text
         assert "current_llm_model: gpt-test" in preview_text
+        assert "vm_validation_warning_count: 2" in preview_text
 
     def test_context_session_and_prompt_selectors_render_expected_text(self):
         status = {

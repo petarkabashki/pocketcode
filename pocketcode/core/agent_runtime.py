@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import sys
+import threading
 import types
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -17,7 +18,11 @@ from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.plugin_manager import PluginManager
 from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
 from pocketcode.core.run_handle import RunCancelledError
-from pocketcode.core.agent_stack_vm import AgentStackVM, StackVmExecutionResult, StackVmHostContext, load_stackvm_program_source
+from pocketcode.core.agent_stack_vm import AgentStackVM, StackVmExecutionResult, StackVmHostContext
+from pocketcode.core.stackvm_expander import expand_stackvm_ast
+from pocketcode.core.stackvm_loader import load_stackvm_program_source
+from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast
+from pocketcode.core.stackvm_validator import collect_stackvm_authoring_warnings, validate_stackvm_ast
 from pocketcode.core.runtime_models import AgentDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
 
@@ -376,6 +381,35 @@ class AgentRuntime:
             if not source.strip() and not agent_definition.vm_entry:
                 raise ValueError(f"VM agent '{agent_name}' has no executable StackVM source.")
 
+            expanded_ast: list[Any] = []
+            validation_warnings: list[dict[str, str]] = []
+            expansion_metadata = {
+                "expansion_count": 0,
+                "macro_names": [],
+                "builtin_macro_names": [],
+                "gensym_count": 0,
+                "expansion_trace": [],
+            }
+            if source.strip():
+                source_ast = parse_stackvm_source(source)
+                validation_warnings = collect_stackvm_authoring_warnings(source_ast, source=source)
+                expanded = expand_stackvm_ast(source_ast)
+                validate_stackvm_ast(expanded.ast)
+                expanded_ast = expanded.ast
+                used_macro_names = list(dict.fromkeys(expanded.expansion_trace))
+                builtin_macro_names = [
+                    name
+                    for name in used_macro_names
+                    if name in expanded.macros and expanded.macros[name].builtin
+                ]
+                expansion_metadata = {
+                    "expansion_count": expanded.expansion_count,
+                    "macro_names": used_macro_names,
+                    "builtin_macro_names": builtin_macro_names,
+                    "gensym_count": expanded.gensym_count,
+                    "expansion_trace": list(expanded.expansion_trace),
+                }
+
             result = StackVmExecutionResult(source_files=source_files)
             host_context = StackVmHostContext(
                 agent_name=agent_name,
@@ -387,8 +421,12 @@ class AgentRuntime:
             )
             vm = AgentStackVM(shared_store=shared_store)
             vm.register_host_words(host_context=host_context, result=result)
-            self._run_stackvm_program(vm=vm, source=source, entry=agent_definition.vm_entry)
+            self._run_stackvm_program(vm=vm, ast=expanded_ast, entry=agent_definition.vm_entry)
             shared_store["last_vm_sources"] = list(source_files)
+            shared_store["last_vm_source"] = source
+            shared_store["last_vm_expanded_source"] = serialize_stackvm_ast(expanded_ast) if expanded_ast else ""
+            shared_store["last_vm_expansion_metadata"] = expansion_metadata
+            shared_store["last_vm_validation_warnings"] = list(validation_warnings)
 
             if result.transition:
                 return result.transition
@@ -408,21 +446,32 @@ class AgentRuntime:
             shared_store["error_message"] = f"VM execution failed: {exc}"
             return "error"
 
-    def _run_stackvm_program(self, *, vm: AgentStackVM, source: str, entry: str | None) -> None:
+    def _run_stackvm_program(self, *, vm: AgentStackVM, ast: list[Any], entry: str | None) -> None:
         async def _runner() -> None:
-            if source.strip():
-                await vm.eval(source)
+            if ast:
+                await vm.execute_ast(ast)
             if entry:
                 await vm.execute_word(entry)
 
         try:
-            asyncio.run(_runner())
+            asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
+            asyncio.run(_runner())
+            return
+
+        thread_error: dict[str, BaseException] = {}
+
+        def _thread_runner() -> None:
             try:
-                loop.run_until_complete(_runner())
-            finally:
-                loop.close()
+                asyncio.run(_runner())
+            except BaseException as exc:  # pragma: no cover - reraised in caller thread
+                thread_error["exc"] = exc
+
+        worker = threading.Thread(target=_thread_runner, name="stackvm-runner")
+        worker.start()
+        worker.join()
+        if "exc" in thread_error:
+            raise thread_error["exc"]
 
     def _run_deterministic_agent(
         self,

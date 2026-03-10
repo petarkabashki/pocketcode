@@ -7,11 +7,11 @@ Layout:
 - `plugin.yaml`: registers the VM normalization flow
 - `flows/normalize.md`: StackVM-backed normalization flow
 - `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: normalization script using `parallel-map`, `get-in?`, `bool>`, and `shared!?`
+- `vm/router.vm`: normalization script using `tool-once`, `parallel-map`, `get-in?`, `bool>`, and `shared!?`
 
 The example demonstrates:
 
-- tool-first orchestration with `tool-request`
+- tool-first orchestration with the built-in `tool-once` macro
 - YAML parsing from a tool result with `yaml>`
 - safe extraction from nested tool-derived data with `get-in?`
 - fan-out normalization of all payload item titles with `parallel-map`

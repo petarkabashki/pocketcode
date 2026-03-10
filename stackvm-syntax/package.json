@@ -1,0 +1,26 @@
+{
+  "name": "stackvm-syntax",
+  "displayName": "StackVM Syntax Highlighting",
+  "description": "Syntax highlighting for the PocketCoder StackVM language.",
+  "version": "0.0.2",
+  "publisher": "your-name",
+  "engines": { "vscode": ">=1.50.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "stackvm",
+        "aliases": ["StackVM", "stackvm"],
+        "extensions": [".vm"],
+        "configuration": "./stackvm-language.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "stackvm",
+        "scopeName": "source.stackvm",
+        "path": "./stackvm.tmLanguage.json"
+      }
+    ]
+  }
+}

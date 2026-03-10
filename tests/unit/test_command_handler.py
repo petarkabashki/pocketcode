@@ -309,6 +309,51 @@ class _StatusEngineStub(_EngineStub):
             "default_llm_profile": "balanced",
             "tool_confirmation": {},
             "session_tool_confirmation_overrides": {},
+            "last_run_summary": {},
+        }
+
+
+class _WarningStatusEngineStub(_EngineStub):
+    def status(self):
+        return {
+            "runtime_flow": "internal-router",
+            "flow": "core::react",
+            "agent": "coder.safe",
+            "mode": "review",
+            "skills": ["python-testing"],
+            "global_llm_override": None,
+            "agent_llm_overrides": {},
+            "handoff_llm_overrides": {},
+            "config_llm_overrides": {},
+            "default_llm_profile": "balanced",
+            "tool_confirmation": {},
+            "session_tool_confirmation_overrides": {},
+            "last_run_summary": {
+                "vm_validation_warnings": [
+                    {
+                        "code": "legacy-tool-loop",
+                        "message": "Prefer tool-once.",
+                        "location": "line 4, cols 1-12",
+                        "span": {
+                            "start_line": 4,
+                            "start_column": 1,
+                            "end_line": 4,
+                            "end_column": 12,
+                        },
+                    },
+                    {
+                        "code": "legacy-prompt-route",
+                        "message": "Prefer prompt-route.",
+                        "location": "line 9, cols 5-22",
+                        "span": {
+                            "start_line": 9,
+                            "start_column": 5,
+                            "end_line": 9,
+                            "end_column": 22,
+                        },
+                    },
+                ]
+            },
         }
 
 
@@ -712,6 +757,42 @@ class TestCommandHandlerParsing:
         assert "Internal flow: internal-router" in captured.out
         assert "Selected flow: core::react" in captured.out
         assert "workflow" not in captured.out.lower()
+
+    def test_status_output_includes_vm_validation_warning_codes_when_present(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+
+        handle_command(
+            "/status",
+            engine=_WarningStatusEngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "VM Validation Warnings: legacy-tool-loop, legacy-prompt-route" in captured.out
+
+    def test_status_verbose_output_includes_vm_validation_warning_messages(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+
+        handle_command(
+            "/status verbose",
+            engine=_WarningStatusEngineStub(),
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "VM Validation Warnings: legacy-tool-loop, legacy-prompt-route" in captured.out
+        assert "- legacy-tool-loop (line 4, cols 1-12): Prefer tool-once." in captured.out
+        assert "- legacy-prompt-route (line 9, cols 5-22): Prefer prompt-route." in captured.out
 
     def test_context_add_snippet_uses_shell_style_quoting(self):
         cli_context = {

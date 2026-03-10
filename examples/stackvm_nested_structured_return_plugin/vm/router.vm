@@ -1,12 +1,8 @@
 [
   "last_delegated_result" shared@ none?
   [
-    last-tool-result none?
-    [
-      "core.read_file"
-      "{path: nested_structured_return_payload.yaml}" yaml>
-      tool-request
-    ]
+    "core.read_file"
+    [ "{path: nested_structured_return_payload.yaml}" yaml> ]
     [
       last-tool-result failure?
       [ "Could not load the payload." answer ]
@@ -25,43 +21,44 @@
       ]
       if
     ]
-    if
+    tool-once
   ]
   [
     "last_delegated_result" shared@ "answer" dict-get dup none?
     [ drop "Delegate returned without an answer." answer ]
     [
-      yaml>
-      dup "decision.mode" get-in? dup none?
-      [ drop "unknown" ]
-      [ ]
-      if
-      dup "normalized.delegate_mode" shared!? drop
-      drop
+      [
+        yaml>
+        dup "decision.mode" get-in? dup none?
+        [ drop "unknown" ]
+        [ ]
+        if
+        dup "normalized.delegate_mode" shared!? drop
+        drop
 
-      dup "decision.note" get-in? dup none?
-      [ drop "no note" ]
-      [ ]
-      if
-      dup "normalized.delegate_note" shared!? drop
-      drop
+        dup "decision.note" get-in? dup none?
+        [ drop "no note" ]
+        [ ]
+        if
+        dup "normalized.delegate_note" shared!? drop
+        drop
 
-      "meta.source" get-in? dup none?
-      [ drop "unspecified" ]
-      [ ]
-      if
-      dup "normalized.delegate_source" shared!? drop
-      drop
+        "meta.source" get-in? dup none?
+        [ drop "unspecified" ]
+        [ ]
+        if
+        dup "normalized.delegate_source" shared!? drop
+        drop
 
-      "nested finalized: "
-      "normalized.summary" shared@ concat
-      " | mode=" concat
-      "normalized.delegate_mode" shared@ concat
-      " | note=" concat
-      "normalized.delegate_note" shared@ concat
-      " | delegate_source=" concat
-      "normalized.delegate_source" shared@ concat
-      answer
+        "nested finalized: "
+        "normalized.summary" shared@ concat
+        " | mode=" concat
+        "normalized.delegate_mode" shared@ concat
+        " | note=" concat
+        "normalized.delegate_note" shared@ concat
+        " | delegate_source=" concat
+        "normalized.delegate_source" shared@ concat
+      ] finalize-from
     ]
     if
   ]

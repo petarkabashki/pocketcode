@@ -9,4 +9,4 @@ vm_modules:
   - vm/router
 ---
 
-Read a YAML payload through `core.read_file`, normalize all payload item titles plus selected fields, collect checklist actions, hand off to a delegate for a second decision, and finalize back in the caller after the delegate returns.
+Read a YAML payload through `core.read_file` with `tool-once`, normalize all payload item titles plus selected fields, collect checklist actions, hand off to a delegate for a second decision, and finalize back in the caller with `finalize-from` after the delegate returns.

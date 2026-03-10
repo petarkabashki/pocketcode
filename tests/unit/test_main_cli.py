@@ -27,6 +27,7 @@ class _EngineStub:
             "default_llm_profile": "balanced",
             "tool_confirmation": {},
             "session_tool_confirmation_overrides": {},
+            "last_run_summary": {},
         }
 
     def set_flow(self, flow_name):
@@ -89,6 +90,45 @@ def test_one_shot_status_uses_agent_centered_labels(monkeypatch):
     assert "Internal flow: internal-router" in stdout
     assert "Agent: coder.safe" in stdout
     assert "workflow" not in stdout.lower()
+
+
+def test_one_shot_status_verbose_prints_vm_warning_messages(monkeypatch):
+    engine = _EngineStub()
+    engine.status = lambda: {
+        "runtime_flow": "internal-router",
+        "flow": "core::react",
+        "agent": "coder.safe",
+        "mode": None,
+        "skills": [],
+        "global_llm_override": engine.global_llm_override,
+        "agent_llm_overrides": {},
+        "handoff_llm_overrides": {},
+        "config_llm_overrides": {},
+        "default_llm_profile": "balanced",
+        "tool_confirmation": {},
+        "session_tool_confirmation_overrides": {},
+            "last_run_summary": {
+                "vm_validation_warnings": [
+                    {
+                        "code": "legacy-tool-loop",
+                        "message": "Prefer tool-once.",
+                        "location": "line 4, cols 1-12",
+                        "span": {
+                            "start_line": 4,
+                            "start_column": 1,
+                            "end_line": 4,
+                            "end_column": 12,
+                        },
+                    },
+                ]
+            },
+        }
+
+    exit_code, stdout, _, _ = _run_cli(monkeypatch, ["--prompt", "/status verbose"], engine=engine)
+
+    assert exit_code == 0
+    assert "VM Validation Warnings: legacy-tool-loop" in stdout
+    assert "- legacy-tool-loop (line 4, cols 1-12): Prefer tool-once." in stdout
 
 
 def test_one_shot_textual_command_reports_scope(monkeypatch):

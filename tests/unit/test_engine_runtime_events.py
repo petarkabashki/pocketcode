@@ -51,6 +51,25 @@ class _EventfulRuntime:
         shared_store["final_output"] = "ready"
 
 
+class _WarningRuntime:
+    def run(self, shared_store):
+        shared_store["active_agent"] = "core::agent"
+        shared_store["last_vm_validation_warnings"] = [
+            {
+                "code": "legacy-tool-loop",
+                "message": "Prefer tool-once.",
+                "location": "line 4, cols 1-12",
+                "span": {
+                    "start_line": 4,
+                    "start_column": 1,
+                    "end_line": 4,
+                    "end_column": 12,
+                },
+            }
+        ]
+        shared_store["final_output"] = "ready"
+
+
 class _CancellableRuntime:
     def run(self, shared_store):
         for _ in range(100):
@@ -152,6 +171,28 @@ class TestEngineRunHandle:
             "tool_started",
             "handoff_return",
             "run_completed",
+        ]
+
+    def test_start_request_includes_vm_validation_warnings_in_run_summary(self):
+        engine = _build_engine(_WarningRuntime())
+
+        handle = engine.start_request("hello", {"files": set(), "folders": set(), "urls": set(), "snippets": {}})
+        result = handle.wait(timeout=1.0)
+
+        assert result == "ready"
+        assert engine.last_run_summary["vm_validation_warning_count"] == 1
+        assert engine.last_run_summary["vm_validation_warnings"] == [
+            {
+                "code": "legacy-tool-loop",
+                "message": "Prefer tool-once.",
+                "location": "line 4, cols 1-12",
+                "span": {
+                    "start_line": 4,
+                    "start_column": 1,
+                    "end_line": 4,
+                    "end_column": 12,
+                },
+            }
         ]
 
     def test_start_request_can_be_cancelled(self):

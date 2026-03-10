@@ -1,4 +1,6 @@
+from pocketcode.core.stackvm_expander import expand_stackvm_source
 from tests.integration.stackvm_test_utils import (
+    EXAMPLES_ROOT,
     make_example_engine,
     write_fixture,
     write_temp_stackvm_plugin,
@@ -169,6 +171,8 @@ def test_real_engine_runs_checked_in_stackvm_tool_normalize_example(tmp_path):
 
     assert result == "Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_tool_normalize_example.normalize"
+    router_source = (EXAMPLES_ROOT / "stackvm_tool_normalize_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_tool_normalize_example_disabled_payload(tmp_path):

@@ -11,12 +11,12 @@ Layout:
 - `flows/escalate_route.py`: PocketFlow delegate for escalate decisions
 - `flows/review_route.py`: PocketFlow delegate for review decisions
 - `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: caller script that normalizes data with `parallel-map`, hands off, parses the returned YAML, and routes to the final delegate
+- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, parses the returned YAML, and routes to the final delegate
 - `vm/delegate.vm`: delegate script that collects a radio choice and returns a YAML mapping string to the caller
 
 The example demonstrates:
 
-- tool-first normalization of all payload item titles in a StackVM caller
+- tool-first normalization of all payload item titles in a StackVM caller through `tool-once`
 - pure data fan-out with `parallel-map` before the delegate handoff
 - `return_to_caller` handoff to a VM delegate
 - delegate answers encoded as stable YAML strings instead of free-form text

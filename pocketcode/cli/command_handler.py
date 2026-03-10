@@ -307,6 +307,10 @@ def handle_command(
 
     if command in {"/status"}:
         status = engine.status()
+        run_summary = status.get("last_run_summary", {}) if isinstance(status, dict) else {}
+        if not isinstance(run_summary, dict):
+            run_summary = {}
+        verbose = bool(args) and args[0].lower() in {"verbose", "--verbose", "-v"}
         print("Runtime status:")
         print(f"  Internal flow: {status.get('runtime_flow') or 'internal-flow'}")
         print(f"  Selected flow: {status.get('flow') or 'auto'}")
@@ -320,6 +324,23 @@ def handle_command(
         print(f"  Default LLM Profile: {status['default_llm_profile']}")
         print(f"  Tool Confirmation (config): {status.get('tool_confirmation', {})}")
         print(f"  Tool Confirmation (session overrides): {status.get('session_tool_confirmation_overrides', {})}")
+        warning_codes = [
+            str(item.get("code") or "").strip()
+            for item in run_summary.get("vm_validation_warnings", [])
+            if isinstance(item, dict) and str(item.get("code") or "").strip()
+        ]
+        if warning_codes:
+            print(f"  VM Validation Warnings: {', '.join(warning_codes)}")
+            if verbose:
+                for item in run_summary.get("vm_validation_warnings", []):
+                    if not isinstance(item, dict):
+                        continue
+                    code = str(item.get("code") or "").strip() or "warning"
+                    message = str(item.get("message") or "").strip()
+                    location = str(item.get("location") or "").strip()
+                    if message:
+                        prefix = f"{code} ({location})" if location else code
+                        print(f"    - {prefix}: {message}")
         return None
 
     if command in {"/flows", "/agents", "/prompts", "/modes", "/skills", "/llms", "/tools", "/list"}:
@@ -885,7 +906,7 @@ Pocketcode Commands:
   /skill <cmd> [opts]            Manage runtime skills. Run '/skill help'.
   /reload                        Reload plugins and runtime catalogs.
   /stop, /cancel                 Request cancellation of the active run.
-  /status                        Show runtime status.
+  /status [verbose]              Show runtime status.
   /context <cmd> [opts]          Manage context. Run '/context help'.
     /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
     /session <cmd> [opts]          Manage saved sessions. Run '/session help'.

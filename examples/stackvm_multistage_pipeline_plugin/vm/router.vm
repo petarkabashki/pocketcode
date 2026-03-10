@@ -1,12 +1,8 @@
 [
   "last_delegated_result" shared@ none?
   [
-    last-tool-result none?
-    [
-      "core.read_file"
-      "{path: multistage_payload.yaml}" yaml>
-      tool-request
-    ]
+    "core.read_file"
+    [ "{path: multistage_payload.yaml}" yaml> ]
     [
       last-tool-result failure?
       [ "Could not load the payload." answer ]
@@ -32,28 +28,30 @@
           "stackvm_multistage_pipeline_example.confirm_delegate" handoff
         ]
         [
-          swap drop drop
-          "pipeline complete: "
-          "normalized.summary" shared@ concat
-          " | actions=" concat
-          "normalized.selected_actions_text" shared@ concat
-          " | delegate=skipped" concat
-          answer
+          [
+            swap drop drop
+            "pipeline complete: "
+            "normalized.summary" shared@ concat
+            " | actions=" concat
+            "normalized.selected_actions_text" shared@ concat
+            " | delegate=skipped" concat
+          ] finalize-from
         ]
         if
       ]
       if
     ]
-    if
+    tool-once
   ]
   [
-    "pipeline complete: "
-    "normalized.summary" shared@ concat
-    " | actions=" concat
-    "normalized.selected_actions_text" shared@ concat
-    " | delegate=" concat
-    "last_delegated_result" shared@ "answer" dict-get concat
-    answer
+    [
+      "pipeline complete: "
+      "normalized.summary" shared@ concat
+      " | actions=" concat
+      "normalized.selected_actions_text" shared@ concat
+      " | delegate=" concat
+      "last_delegated_result" shared@ "answer" dict-get concat
+    ] finalize-from
   ]
   if
 ] "decide" define

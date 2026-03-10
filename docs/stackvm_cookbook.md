@@ -58,7 +58,7 @@ parallel-map
 "results" store-set
 ```
 
-`parallel-map` is intended for pure data transforms and helper-word pipelines. Child quotations should not perform `tool-request`, `handoff`, `ask-user`, or `answer`.
+`parallel-map` is intended for pure data transforms and helper-word pipelines. Each child receives a cloned snapshot of the parent shared store, so any `shared!` or `store-set` mutation inside the child is discarded when the child finishes. Child quotations should not perform `tool-request`, `handoff`, `ask-user`, or `answer`.
 
 See `examples/stackvm_parallel_map_plugin/` for a checked-in end-to-end example that reuses a user-defined helper word inside each child VM.
 See `examples/stackvm_parallel_tool_map_plugin/` for the same pattern after a tool-loaded YAML payload has been normalized into a list.
@@ -74,7 +74,7 @@ Use `reduce` when you already have a list on the stack and want to fold it into 
 reduce
 ```
 
-`reduce` expects the list first, then the initial accumulator, then a quotation. Each child quotation receives the current accumulator beneath the current item and must leave the next accumulator on top of the stack.
+`reduce` expects the list first, then the initial accumulator, then a quotation. Each child quotation receives the current accumulator beneath the current item and must leave the next accumulator on top of the stack. Like `parallel-map`, each reducer step runs with a cloned shared-store snapshot, so reducer-local `shared!` or `store-set` changes do not leak back to the parent flow.
 
 See `examples/stackvm_reduce_plugin/` for a checked-in end-to-end example that combines `parallel-map` and `reduce` in one pure pipeline.
 See `examples/stackvm_reduce_tool_plugin/` for the same pattern after a tool-loaded YAML payload has been normalized into a list.
@@ -102,23 +102,28 @@ See `examples/stackvm_threshold_router_plugin/` for a checked-in end-to-end exam
 
 ## Load A Tool Result Once
 
-When a flow should call a tool on the first turn and consume its result on the second turn, branch on `last-tool-result none?`.
+Prefer the built-in `tool-once` macro when a flow should call a tool on the first turn and consume its result on the second turn.
 
 ```text
 [
-  last-tool-result none?
+  "core.read_file"
+  [ "{path: payload.yaml}" yaml> ]
   [
-    "core.read_file"
-    "{path: payload.yaml}" yaml>
-    tool-request
+    last-tool-result failure?
+    [ "Could not load the payload." answer ]
+    [
+      last-tool-result "content" dict-get yaml>
+      "payload" store-set
+    ]
+    if
   ]
-  [
-    last-tool-result "content" dict-get yaml>
-    "payload" store-set
-  ]
-  if
+  tool-once
 ] "decide" define
 ```
+
+`tool-once` expands to the same `last-tool-result none?` pattern the runtime already understands, but it keeps the router focused on the later-turn logic instead of repeating the request branch in every tool-first example.
+
+When a flow still uses the manual `last-tool-result none? ... tool-request ... if` pattern, runtime metadata now records a non-fatal `legacy-tool-loop` authoring warning in `last_vm_validation_warnings`.
 
 ## Normalize Optional Nested Values
 
@@ -219,16 +224,22 @@ dup "normalized.summary" shared!? drop
 
 ## Prompt For Structured Choices And Continue
 
-Use `prompt-interaction` for `buttons`, `radio`, or `checklist` requests.
+Use `prompt-route` when a structured interaction should immediately branch into exact-match cases. `prompt-interaction` is still available directly when the flow needs to keep the raw selected value on the stack for additional work before routing.
 
 ```text
-"{kind: radio, prompt: Choose mode, options: [{id: fast, label: Fast, value: fast}, {id: safe, label: Safe, value: safe}]}" yaml>
-prompt-interaction
-dup "normalized.mode" shared!? drop
-"Selected mode " swap concat answer
+[
+  "{kind: radio, prompt: Choose mode, options: [{id: fast, label: Fast, value: fast}, {id: safe, label: Safe, value: safe}]}" yaml>
+]
+[
+  "fast" [ "Selected mode fast" answer ]
+  "default" [ "Selected mode safe" answer ]
+]
+prompt-route
 ```
 
-`prompt-interaction` pushes the selected scalar for `buttons` and `radio`, and a value list for `checklist`.
+`prompt-route` expands to `prompt-interaction` plus `switch`. The request expression and case table are passed as quotations, so multi-step setup such as `dict-set` or `shared!?` can stay inside the macro arguments.
+
+When a flow still uses direct `prompt-interaction ... switch` exact-match routing, runtime metadata now records a non-fatal `legacy-prompt-route` authoring warning in `last_vm_validation_warnings`.
 
 ## Format Checklist Selections Cleanly
 
@@ -255,16 +266,32 @@ Use `pending_handoff_policy` with `return_to_caller: true` when the delegate sho
 
 The caller can then read `last_delegated_result` on the next turn.
 
+## Pass A Delegate Answer Straight Through
+
+Use `delegate-return` when the caller should hand off with `return_to_caller` and then answer directly from a returned path without any extra caller-side formatting.
+
+```text
+"{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
+"pending_handoff_policy" store-set
+"plugin.delegate"
+"last_delegated_result.answer"
+delegate-return
+```
+
+`delegate-return` does not set the return policy automatically, so the `pending_handoff_policy` setup stays explicit in the caller. See `examples/stackvm_delegate_return_plugin/` for the checked-in end-to-end reference.
+
 ## Finalize From A Delegate Return
 
-When a delegate returns, the caller usually wants the delegate answer or question.
+When a delegate returns and the caller should still compose the final answer, prefer `finalize-from` around the caller-side formatting or parsing logic.
 
 ```text
 "last_delegated_result" shared@ "answer" dict-get dup none?
 [ drop "Delegate returned without an answer." answer ]
-[ "Caller received: " swap concat answer ]
+[ [ "Caller received: " swap concat ] finalize-from ]
 if
 ```
+
+`finalize-from` keeps the returned-value shaping inside a quotation and leaves the outer branch focused on the missing-result fallback.
 
 ## Parse A Structured Delegate Return And Route
 
@@ -489,17 +516,35 @@ Use a caller flow for the first interaction, hand off with `return_to_caller`, l
 
 ```text
 ! caller
-prompt-interaction
-dup "normalized.selected_actions" shared!? drop
-dup ", " join dup "normalized.selected_actions_text" shared!? drop
-swap drop drop
-"{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
-"pending_handoff_policy" store-set
-"plugin.confirm_delegate" handoff
+"core.read_file"
+[ "{path: payload.yaml}" yaml> ]
+[
+  prompt-interaction
+  dup "normalized.selected_actions" shared!? drop
+  dup ", " join dup "normalized.selected_actions_text" shared!? drop
+  swap drop drop
+  "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
+  "pending_handoff_policy" store-set
+  "plugin.confirm_delegate" handoff
+]
+tool-once
 
 ! caller on return
-"last_delegated_result" shared@ "answer" dict-get
-"pipeline complete: " swap concat answer
+[ 
+  "last_delegated_result" shared@ "answer" dict-get
+  "pipeline complete: " swap concat
+] finalize-from
+```
+
+```text
+! caller direct-finalize branch
+[
+  "pipeline complete: "
+  "normalized.summary" shared@ concat
+  " | actions=" concat
+  "normalized.selected_actions_text" shared@ concat
+  " | delegate=skipped" concat
+] finalize-from
 ```
 
 ```text
@@ -511,7 +556,7 @@ prompt-interaction
 
 This pattern is used by `stackvm_multistage_pipeline_plugin`.
 
-If the first-stage choice should sometimes skip the delegate entirely, branch before setting `pending_handoff_policy` and finalize directly in the caller for the no-delegate path.
+If the first-stage choice should sometimes skip the delegate entirely, branch before setting `pending_handoff_policy` and use `finalize-from` directly in the caller for the no-delegate path.
 
 ## When To Prefer Checked-In Examples
 

@@ -1,12 +1,8 @@
 [
   "last_delegated_result" shared@ none?
   [
-    last-tool-result none?
-    [
-      "core.read_file"
-      "{path: nested_structured_return_routing_payload.yaml}" yaml>
-      tool-request
-    ]
+    "core.read_file"
+    [ "{path: nested_structured_return_routing_payload.yaml}" yaml> ]
     [
       last-tool-result failure?
       [ "Could not load the payload." answer ]
@@ -25,7 +21,7 @@
       ]
       if
     ]
-    if
+    tool-once
   ]
   [
     "last_delegated_result" shared@ "answer" dict-get dup none?

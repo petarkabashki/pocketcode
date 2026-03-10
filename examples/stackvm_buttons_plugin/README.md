@@ -7,12 +7,12 @@ Layout:
 - `plugin.yaml`: registers the StackVM normalization flow
 - `flows/normalize.md`: StackVM-backed normalization, interaction, and answer flow
 - `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: normalization script using `dict-get?`, `parallel-map`, `shared!?`, `dict-set`, and `prompt-interaction`
+- `vm/router.vm`: normalization script using `tool-once`, `prompt-route`, `dict-get?`, `parallel-map`, `shared!?`, and `dict-set`
 
 The example demonstrates:
 
-- tool-first orchestration with `tool-request`
+- tool-first orchestration with the built-in `tool-once` macro
 - normalization of all tool-derived item titles into shared state
 - pure data fan-out with `parallel-map` before the interaction step
-- structured `buttons` interaction through `prompt-interaction`
+- structured `buttons` interaction through the built-in `prompt-route` macro
 - continued VM execution from the selected option value

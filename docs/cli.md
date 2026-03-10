@@ -488,7 +488,8 @@ Behavior:
 
 - `/reload` rebuilds plugins, agents, tools, skills, and LLM profile mappings
 - `/stop` and `/cancel` request cooperative cancellation on the active run if one exists
-- `/status` prints runtime flow, selected flow, active agent, active mode, skills, LLM overrides, default LLM, and confirmation state
+- `/status` prints runtime flow, selected flow, active agent, active mode, skills, LLM overrides, default LLM, confirmation state, and any last-run StackVM validation warning codes recorded in `last_run_summary.vm_validation_warnings`
+- `/status verbose` or `/status --verbose` also prints the full warning messages and any recorded exact StackVM warning spans, while the Textual inspector summary renders the same warnings with compact `line:column` labels derived from the stored `span` metadata
 
 `/stop` and `/cancel` only work when the interface passes an active run handle to the command layer.
 
@@ -639,7 +640,9 @@ The main chat console is rendered through a Rich-capable log surface rather than
 
 Assistant and user messages render as bordered panels under the active theme. Assistant responses that contain fenced code blocks are decomposed into prose panels plus syntax-highlighted code panels. Fenced `diff` blocks render through a dedicated diff view with line-level add/remove styling. Tool calls and tool results render as dedicated panels, while runtime, info, warning, and error entries render as themed inline log records. The plain-text transcript is still preserved in runtime state for clipboard copy and other text-only flows.
 
-The `run` view now uses the same Rich-capable rendering path as the main chat console. Instead of a plain text dump, the run preview presents semantic overview and summary blocks, including YAML-formatted run metadata and recent live events.
+The `run` view now uses the same Rich-capable rendering path as the main chat console. Instead of a plain text dump, the run preview presents semantic overview and summary blocks, including YAML-formatted run metadata, StackVM authoring warnings from `last_run_summary.vm_validation_warnings` when present, and recent live events.
+
+The right-side inspector summary also surfaces StackVM authoring warning codes from the last run when the active run summary recorded any `vm_validation_warnings`.
 
 The right-side inspector panel now follows the same pattern for its summary, session context, saved sessions, and prompt-source panes. Those sections render semantic Rich blocks rather than plain text areas, while the profile list, skill selection list, and tool selection list remain interactive list widgets.
 

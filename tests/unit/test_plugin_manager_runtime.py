@@ -212,6 +212,25 @@ class TestPluginManagerRuntimeLoading:
         assert delegate_def.vm_entry == "decide"
         assert delegate_def.vm_modules == ["vm/delegate"]
 
+    def test_repo_stackvm_delegate_return_example_plugin_loads(self, tmp_path):
+        repo_root = Path(__file__).resolve().parents[2]
+        examples_root = repo_root / "examples"
+        manager = PluginManager(
+            config={"runtime": {"plugin_paths": [str(examples_root)]}},
+            workspace_root=tmp_path,
+        )
+
+        manager.load()
+
+        normalize_def = manager.agents.resolve("stackvm_delegate_return_example.normalize")
+        delegate_def = manager.agents.resolve("stackvm_delegate_return_example.confirm_delegate")
+        assert normalize_def.execution_mode == "vm"
+        assert normalize_def.vm_entry == "decide"
+        assert normalize_def.vm_modules == ["vm/common", "vm/router"]
+        assert delegate_def.execution_mode == "vm"
+        assert delegate_def.vm_entry == "decide"
+        assert delegate_def.vm_modules == ["vm/delegate"]
+
     def test_repo_stackvm_checklist_return_example_plugin_loads(self, tmp_path):
         repo_root = Path(__file__).resolve().parents[2]
         examples_root = repo_root / "examples"

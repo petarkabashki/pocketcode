@@ -2,20 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
-import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 import yaml
 
-from pocketcode.core.markdown_assets import load_markdown_asset_document
-
-logger = logging.getLogger(__name__)
-
-_COMMENT_LINE_RE = re.compile(r"(?m)^\s*!.*$")
-_TOKEN_RE = re.compile(r'"(?:[^"\\]|\\.)*"|\[|\]|[^\s\[\]]+')
+from pocketcode.core.stackvm_expander import expand_stackvm_source
+from pocketcode.core.stackvm_validator import validate_stackvm_ast
 
 
 @dataclass
@@ -59,6 +52,68 @@ def _extract_vm_interaction_value(response: Any) -> Any:
     return response
 
 
+def _emit_runtime_event(shared_store: dict[str, Any], event_type: str, **payload: Any) -> None:
+    handler = shared_store.get("runtime_event_handler")
+    if callable(handler):
+        handler(event_type, **payload)
+
+
+def _accumulate_llm_usage(
+    *,
+    shared_store: dict[str, Any],
+    agent_name: str,
+    profile_name: str | None,
+    generation_info: dict[str, Any] | None,
+) -> None:
+    info = generation_info if isinstance(generation_info, dict) else {}
+    usage = info.get("usage", {}) if isinstance(info.get("usage", {}), dict) else {}
+    shared_store["last_llm_generation"] = info
+    shared_store["last_llm_profile"] = profile_name
+
+    totals = shared_store.setdefault(
+        "llm_usage_totals",
+        {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    )
+    if isinstance(totals, dict):
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+        if isinstance(prompt_tokens, (int, float)):
+            totals["prompt_tokens"] = int(totals.get("prompt_tokens", 0)) + int(prompt_tokens)
+        if isinstance(completion_tokens, (int, float)):
+            totals["completion_tokens"] = int(totals.get("completion_tokens", 0)) + int(completion_tokens)
+        if isinstance(total_tokens, (int, float)):
+            totals["total_tokens"] = int(totals.get("total_tokens", 0)) + int(total_tokens)
+
+    estimated_cost = info.get("estimated_cost_usd", 0.0)
+    if isinstance(estimated_cost, (int, float)):
+        shared_store["llm_cost_usd_total"] = float(shared_store.get("llm_cost_usd_total", 0.0)) + float(estimated_cost)
+    else:
+        estimated_cost = 0.0
+
+    shared_store.setdefault("llm_calls", []).append(
+        {
+            "agent": agent_name,
+            "profile": info.get("profile_name") if info else profile_name,
+            "model": info.get("model") if info else None,
+            "usage": usage,
+            "estimated_cost_usd": float(estimated_cost),
+        }
+    )
+
+
+def _clone_for_child(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _clone_for_child(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_clone_for_child(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_clone_for_child(item) for item in value)
+    if isinstance(value, set):
+        return {_clone_for_child(item) for item in value}
+    return value
+
+
 class AgentStackVM:
     def __init__(self, shared_store: dict[str, Any] | None = None):
         self.stack: list[Any] = []
@@ -72,8 +127,9 @@ class AgentStackVM:
         self.words[str(name)] = func
 
     async def eval(self, code_string: str) -> None:
-        ast = self._tokenize_and_parse(code_string)
-        await self.execute_ast(ast)
+        expanded = expand_stackvm_source(code_string)
+        validate_stackvm_ast(expanded.ast)
+        await self.execute_ast(expanded.ast)
 
     async def execute_word(self, word_name: str) -> None:
         if word_name not in self.words:
@@ -203,7 +259,35 @@ class AgentStackVM:
             else:
                 full_prompt = prompt
             profile_name = host_context.llm_profile or getattr(host_context.llm_router, "default_profile_name", None)
+            _emit_runtime_event(
+                self.store,
+                "llm_call_started",
+                agent=host_context.agent_name,
+                profile=profile_name,
+            )
             response = host_context.llm_router.generate(profile_name=profile_name, prompt=full_prompt)
+            generation_info = None
+            if hasattr(host_context.llm_router, "get_last_generation_info"):
+                info = host_context.llm_router.get_last_generation_info()
+                if isinstance(info, dict):
+                    generation_info = info
+            _accumulate_llm_usage(
+                shared_store=self.store,
+                agent_name=host_context.agent_name,
+                profile_name=profile_name,
+                generation_info=generation_info,
+            )
+            usage = generation_info.get("usage", {}) if isinstance(generation_info, dict) else {}
+            estimated_cost = generation_info.get("estimated_cost_usd", 0.0) if isinstance(generation_info, dict) else 0.0
+            _emit_runtime_event(
+                self.store,
+                "llm_call_completed",
+                agent=host_context.agent_name,
+                profile=profile_name,
+                model=generation_info.get("model") if isinstance(generation_info, dict) else None,
+                usage=usage if isinstance(usage, dict) else {},
+                estimated_cost_usd=estimated_cost if isinstance(estimated_cost, (int, float)) else 0.0,
+            )
             self.stack.append(response)
 
         self.register_word("answer", answer)
@@ -221,46 +305,6 @@ class AgentStackVM:
         self.register_word("last-tool-result", lambda: self.stack.append(self.store.get("last_tool_result")))
         self.register_word("last-tool-route", lambda: self.stack.append(self.store.get("last_tool_route")))
         self.register_word("results", lambda: self.stack.append(self.store.get("results", {})))
-
-    def _tokenize_and_parse(self, code: str) -> list[Any]:
-        tokens = _TOKEN_RE.findall(_COMMENT_LINE_RE.sub("", code or ""))
-        ast: list[Any] = []
-        parse_stack: list[list[Any]] = [ast]
-
-        for token in tokens:
-            if token == "[":
-                nested: list[Any] = []
-                parse_stack[-1].append(nested)
-                parse_stack.append(nested)
-                continue
-            if token == "]":
-                if len(parse_stack) <= 1:
-                    raise SyntaxError("Unexpected closing bracket ']'")
-                parse_stack.pop()
-                continue
-            parse_stack[-1].append(self._parse_token(token))
-
-        if len(parse_stack) > 1:
-            raise SyntaxError("Missing closing bracket ']'")
-        return ast
-
-    def _parse_token(self, token: str) -> tuple[str, Any]:
-        if token.startswith('"') and token.endswith('"'):
-            return ("str", yaml.safe_load(token))
-        if token in {"True", "False"}:
-            return ("bool", token == "True")
-        if token in {"None", "null"}:
-            return ("none", None)
-        try:
-            return ("int", int(token))
-        except ValueError:
-            pass
-        try:
-            if any(char in token for char in (".", "e", "E")):
-                return ("float", float(token))
-        except ValueError:
-            pass
-        return ("sym", token)
 
     async def _call_word(self, func: Callable[..., Any]) -> None:
         if inspect.iscoroutinefunction(func):
@@ -717,7 +761,7 @@ class AgentStackVM:
         self.register_word(str(word_name), custom_user_word)
 
     def _make_child_vm(self) -> AgentStackVM:
-        child_vm = AgentStackVM(shared_store=dict(self.store))
+        child_vm = AgentStackVM(shared_store=_clone_for_child(self.store))
         if self._host_context is not None:
             child_vm.register_host_words(
                 host_context=self._host_context,
@@ -761,97 +805,6 @@ class AgentStackVM:
             raise RuntimeError(f"{combinator_name} child quotations cannot ask the user.")
         if self.store.get("final_answer"):
             raise RuntimeError(f"{combinator_name} child quotations cannot finalize answers.")
-
-
-def load_stackvm_program_source(
-    *,
-    vm_source: str | None,
-    vm_entry: str | None,
-    vm_module: str | None,
-    vm_modules: Sequence[str] | None,
-    vm_file: str | None,
-    vm_files: Sequence[str] | None,
-    base_dir: Path,
-    search_roots: Sequence[Path] = (),
-) -> tuple[str, list[str]]:
-    sections: list[str] = []
-    source_files: list[str] = []
-    refs: list[str] = []
-    if vm_modules:
-        refs.extend(str(item).strip() for item in vm_modules if str(item).strip())
-    if vm_module:
-        refs.append(str(vm_module).strip())
-    if vm_files:
-        refs.extend(str(item).strip() for item in vm_files if str(item).strip())
-    if vm_file:
-        refs.append(str(vm_file).strip())
-
-    seen_paths: set[Path] = set()
-    for ref in refs:
-        path = _resolve_stackvm_ref(ref=ref, base_dir=base_dir, search_roots=search_roots)
-        if path in seen_paths:
-            continue
-        seen_paths.add(path)
-        source_files.append(str(path))
-        sections.append(_load_stackvm_file(path))
-
-    inline_source = str(vm_source or "").strip()
-    if inline_source:
-        sections.append(inline_source)
-    if vm_entry and not sections:
-        logger.debug("StackVM flow uses entry '%s' without preloaded source.", vm_entry)
-    return "\n\n".join(section for section in sections if section).strip(), source_files
-
-
-def _resolve_stackvm_ref(*, ref: str, base_dir: Path, search_roots: Sequence[Path]) -> Path:
-    cleaned = str(ref or "").strip()
-    if not cleaned:
-        raise ValueError("Empty StackVM source reference.")
-
-    roots = [base_dir.resolve(), *(Path(root).resolve() for root in search_roots)]
-    raw_path = Path(cleaned)
-    candidates: list[Path] = []
-    if raw_path.is_absolute():
-        candidates.append(raw_path.resolve())
-    elif any(separator in cleaned for separator in ("/", "\\")) or raw_path.suffix in {".vm", ".md"}:
-        for root in roots:
-            direct = (root / cleaned).resolve()
-            nested = (root / "vm" / cleaned).resolve()
-            candidates.append(direct)
-            candidates.append(nested)
-            if raw_path.suffix not in {".vm", ".md"}:
-                candidates.append(direct.with_suffix(".vm"))
-                candidates.append(direct.with_suffix(".md"))
-                candidates.append(nested.with_suffix(".vm"))
-                candidates.append(nested.with_suffix(".md"))
-    else:
-        relative = Path(*cleaned.split("."))
-        for root in roots:
-            candidates.append((root / "vm" / relative).with_suffix(".vm").resolve())
-            candidates.append((root / "vm" / relative).with_suffix(".md").resolve())
-            candidates.append((root / relative).with_suffix(".vm").resolve())
-            candidates.append((root / relative).with_suffix(".md").resolve())
-
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise FileNotFoundError(f"StackVM source reference '{ref}' could not be resolved from {base_dir}.")
-
-
-def _load_stackvm_file(path: Path) -> str:
-    if path.suffix.lower() == ".md":
-        document = load_markdown_asset_document(path)
-        vm_sections = [
-            block.content.strip()
-            for block in document.find_blocks(languages=("vm", "stackvm"))
-            if block.content.strip()
-        ]
-        if vm_sections:
-            return "\n\n".join(vm_sections).strip()
-        return document.body.strip()
-    return _COMMENT_LINE_RE.sub("", path.read_text(encoding="utf-8")).strip()
-
-
 def _lookup_path(mapping: dict[str, Any], path: str) -> Any:
     return _lookup_segments(mapping, _normalize_path_segments(path))
 

@@ -9,4 +9,4 @@ vm_modules:
   - vm/router
 ---
 
-Read a YAML payload through `core.read_file`, normalize all payload item titles into shared state, present structured button choices through the bridged interaction channel, and continue to a final answer.
+Read a YAML payload through `core.read_file` with `tool-once`, normalize all payload item titles into shared state, present structured button choices through `prompt-route`, and continue to a final answer.

@@ -28,6 +28,9 @@ def select_inspector_summary_text(
 ) -> str:
     session_default = status.get("session_tool_confirmation_overrides", {}).get("default_policy") or "__inherit__"
     active_profile_name = active_profile.name if active_profile else None
+    run_summary = status.get("last_run_summary", {})
+    if not isinstance(run_summary, dict):
+        run_summary = {}
     summary_lines = [
         f"Agent: {active_profile_name or 'none'}",
         f"Internal flow: {status.get('runtime_flow') or 'internal-flow'}",
@@ -46,6 +49,17 @@ def select_inspector_summary_text(
         summary_lines.append(
             f"Active session: {active_session.get('title')} ({active_session.get('session_id') or '-'})"
         )
+    warning_labels: list[str] = []
+    for item in run_summary.get("vm_validation_warnings", []):
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "").strip()
+        if not code:
+            continue
+        location = _build_warning_location_label(item)
+        warning_labels.append(f"{code}@{location}" if location else code)
+    if warning_labels:
+        summary_lines.append(f"VM warnings: {'; '.join(warning_labels)}")
     return "\n".join(summary_lines)
 
 
@@ -92,6 +106,8 @@ def select_run_preview_text(state: TextualRuntimeState, status: Dict[str, Any]) 
         f"current_llm_model: {run_summary.get('current_llm_model') or '-'}",
         f"llm_usage: {run_summary.get('llm_usage', {})}",
         f"llm_cost_usd: {run_summary.get('llm_cost_usd', 0.0)}",
+        f"vm_validation_warning_count: {run_summary.get('vm_validation_warning_count', 0)}",
+        f"vm_validation_warnings: {run_summary.get('vm_validation_warnings', [])}",
         f"context_stats: {run_summary.get('context_stats', {})}",
         f"session_confirmation: {status.get('session_tool_confirmation_overrides', {})}",
     ]
@@ -108,6 +124,22 @@ def _dump_preview_value(value: Any) -> str:
         dumped = yaml.safe_dump(value, sort_keys=False, allow_unicode=False).strip()
         return dumped or repr(value)
     return repr(value)
+
+
+def _build_warning_location_label(item: Dict[str, Any]) -> str:
+    span = item.get("span")
+    if isinstance(span, dict):
+        start_line = span.get("start_line")
+        start_column = span.get("start_column")
+        end_line = span.get("end_line")
+        end_column = span.get("end_column")
+        if all(isinstance(value, int) and value > 0 for value in (start_line, start_column, end_line, end_column)):
+            if start_line == end_line:
+                if start_column == end_column:
+                    return f"{start_line}:{start_column}"
+                return f"{start_line}:{start_column}-{end_column}"
+            return f"{start_line}:{start_column}-{end_line}:{end_column}"
+    return str(item.get("location") or "").strip()
 
 
 def select_run_preview_blocks(state: TextualRuntimeState, status: Dict[str, Any]) -> tuple[OutputBlock, ...]:
@@ -136,6 +168,8 @@ def select_run_preview_blocks(state: TextualRuntimeState, status: Dict[str, Any]
                     "current_llm_model": run_summary.get("current_llm_model") or "-",
                     "llm_usage": run_summary.get("llm_usage", {}),
                     "llm_cost_usd": run_summary.get("llm_cost_usd", 0.0),
+                    "vm_validation_warning_count": run_summary.get("vm_validation_warning_count", 0),
+                    "vm_validation_warnings": run_summary.get("vm_validation_warnings", []),
                     "context_stats": run_summary.get("context_stats", {}),
                     "session_confirmation": status.get("session_tool_confirmation_overrides", {}),
                 }

@@ -9,4 +9,4 @@ vm_modules:
   - vm/router
 ---
 
-Read a YAML payload via a tool, normalize all payload item titles plus selected fields into shared state, and answer from the normalized view.
+Read a YAML payload via a tool through the built-in `tool-once` macro, normalize all payload item titles plus selected fields into shared state, and answer from the normalized view.

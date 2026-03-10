@@ -221,7 +221,7 @@ Tool results with `success: false` are kept in `last_tool_result` and do not aut
 
 Programmatic PocketFlow flows are loaded from manifest `module` plus `entry_fn` and stored as `flow_instance`.
 
-StackVM-backed flows are resolved from VM source metadata on the flow definition. At runtime, `AgentRuntime` loads inline and file-backed VM sources, injects the same prompt/tool/LLM services used by PocketFlow agents, and runs the selected StackVM entry word when configured.
+StackVM-backed flows are resolved from VM source metadata on the flow definition. At runtime, `AgentRuntime` assembles inline and file-backed VM source through `pocketcode/core/stackvm_loader.py`, parses it through `pocketcode/core/stackvm_parser.py`, collects non-fatal source authoring warnings plus executable-AST validation through `pocketcode/core/stackvm_validator.py`, expands compile-time macros through `pocketcode/core/stackvm_expander.py`, injects the same prompt/tool/LLM services used by PocketFlow agents, and runs the selected StackVM entry word through `pocketcode/core/agent_stack_vm.py` when configured. Because `AgentRuntime.run()` remains synchronous, VM execution moves to a dedicated worker thread when the caller is already inside a running asyncio event loop.
 
 LLM decision parsing uses a shared YAML-mapping parser. It accepts fenced YAML blocks and also trims leading prose before the first YAML key so responses like `Here is the YAML:` followed by a valid mapping do not abort the run.
 

@@ -297,6 +297,34 @@ Current source loading rules:
 - `vm_module` and `vm_modules` resolve module-like refs such as `vm/common` or `vm.common`
 - `vm_file` and `vm_files` resolve explicit `.vm` or `.md` files relative to the flow file or resource/plugin roots
 - Markdown module files contribute fenced `vm`/`stackvm` blocks when present, otherwise their body text is used as VM source
+- standalone `.vm` source files use `!` for line comments; the same `!` convention applies inside fenced `vm` and `stackvm` blocks
+- runtime loading currently assembles VM source in `pocketcode/core/stackvm_loader.py`, parses it in `pocketcode/core/stackvm_parser.py`, collects non-fatal authoring warnings plus executable-AST validation in `pocketcode/core/stackvm_validator.py`, expands compile-time macros in `pocketcode/core/stackvm_expander.py`, and then executes the resulting AST through `AgentStackVM`
+
+Current compile-time macro behavior:
+
+- `defmacro` is available as a compile-time StackVM form with postfix shape `"[ params ] [ template ] \"name\" defmacro"`
+- macro parameters must be symbols listed in the parameter quotation
+- legacy macro templates are expanded by AST substitution rather than raw string replacement
+- macro invocations use ordinary postfix StackVM syntax and consume the required number of immediately preceding syntax arguments
+- quotations can be passed as syntax arguments and substituted into macro templates
+- `syntax-quote` is currently available in postfix form for macro definitions as `"[ params ] [ template ] syntax-quote \"name\" defmacro"`
+- inside syntax-quoted templates, `[ name unquote ]` inserts one syntax argument and `[ name unquote-splice ]` splices a quotation/list syntax argument into the surrounding template list
+- inside syntax-quoted templates, `[ "prefix" gensym ]` produces a fresh symbol node such as `__prefix_1` during expansion
+- the current built-in macro library is loaded automatically and includes `when`, `unless`, `shared-or`, `tool-once`, `delegate-return`, `finalize-from`, and `prompt-route`
+- built-in macros that need multi-step expressions, such as `tool-once` and `prompt-route`, currently expect those expressions to be passed as quotations and execute them with `call` after expansion
+- `delegate-return` currently handles the common “handoff when no delegated result exists, otherwise answer from a result path” branch shape, but it does not set `pending_handoff_policy` automatically
+- `examples/stackvm_delegate_return_plugin/` is the checked-in reference for using `delegate-return` together with explicit `pending_handoff_policy` setup
+- `last_vm_validation_warnings` currently surfaces non-fatal source-level authoring warnings such as the legacy manual `last-tool-result none? ... tool-request ... if` loop and direct `prompt-interaction ... switch` exact-match routing, which should normally be replaced by `tool-once` and `prompt-route`
+- macro expansion errors now retain an ordered macro trace so nested failures can identify the expansion path that led to the error
+- current macro support is still intentionally limited: there is not yet a richer compile-time evaluator, source-map reporting, or hygienic binding system beyond generated symbol names
+
+Current runtime debug fields for VM flows:
+
+- `last_vm_source` stores the combined pre-expansion StackVM source string
+- `last_vm_expanded_source` stores a normalized serialized form of the expanded executable AST
+- `last_vm_expansion_metadata` currently includes `expansion_count`, `macro_names`, `builtin_macro_names`, `gensym_count`, and the ordered `expansion_trace`
+- `last_vm_validation_warnings` records non-fatal source-level authoring warnings collected before macro expansion, including an exact source-derived `location` such as `line 12, cols 1-48` plus a structured `span` payload with `start_line`, `start_column`, `end_line`, and `end_column` when the original VM source is available
+- `last_vm_sources` continues to store the resolved module/file source paths that contributed to the loaded program
 
 Current runtime host words provided by the engine include:
 
@@ -385,11 +413,19 @@ Current orchestration combinators:
 - `cond` expects a quotation of alternating condition/action pairs, evaluates each condition quotation from top to bottom, and executes the first truthy action quotation
 - `fallback` expects primary and fallback quotations; it executes the fallback quotation only when the primary quotation raises during VM evaluation, and it restores the stack snapshot taken before the primary quotation started
 - `parallel-map` expects a list or tuple beneath a quotation and returns a single list containing one result per input item
-- `parallel-map` runs each item in an isolated child VM with the parent's built-ins and user-defined words, so it is intended for pure data transforms and LLM calls rather than tool requests, handoffs, questions, or answers
+- `parallel-map` runs each item in an isolated child VM with the parent's built-ins and user-defined words plus a cloned shared-store snapshot, so child `shared!` and `store-set` mutations do not leak back to the parent flow
+- `parallel-map` is intended for pure data transforms and LLM calls rather than tool requests, handoffs, questions, or answers
 - `reduce` expects a list or tuple beneath an initial accumulator and a quotation; for each item it runs the quotation in an isolated child VM with the accumulator beneath the current item and uses the top stack value as the next accumulator
+- `reduce` also uses a cloned shared-store snapshot per child step, so shared-store mutations inside the reducer do not flow back to the parent run
 - `reduce` is intended for pure fan-in over already loaded data and rejects tool requests, handoffs, questions, and answers inside child quotations
 
 StackVM flows execute against the same shared-store contract used by other flows, so they can populate `pending_tool`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, and other runtime-managed keys.
+
+Current VM `llm-call` behavior:
+
+- `llm-call` composes the active VM system prompt with the prompt on top of the stack and pushes the model response text back onto the stack
+- `llm-call` updates `last_llm_generation`, `last_llm_profile`, `llm_usage_totals`, `llm_cost_usd_total`, and `llm_calls` using the shared `LlmRouter` generation metadata
+- `llm-call` emits the same `llm_call_started` and `llm_call_completed` runtime events used by the standard LLM-agent path
 
 Current interactive input semantics:
 

@@ -1,10 +1,6 @@
 [
-  last-tool-result none?
-  [
-    "core.read_file"
-    "{path: buttons_payload.yaml}" yaml>
-    tool-request
-  ]
+  "core.read_file"
+  [ "{path: buttons_payload.yaml}" yaml> ]
   [
     last-tool-result failure?
     [ "Could not load the payload." answer ]
@@ -17,17 +13,18 @@
 
       store-normalized-summary
 
-      "{kind: buttons, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: deny, label: Deny, value: deny}]}" yaml>
-      dup "prompt" "Choose next step for " "normalized.summary" shared@ concat dict-set
-      prompt-interaction
-      dup "normalized.choice" shared!? drop
       [
-        "approve" [ "Approved " "normalized.summary" shared@ concat answer ]
-        "delegate" [ "Delegating " "normalized.summary" shared@ concat answer ]
-        "default" [ "Denied " "normalized.summary" shared@ concat answer ]
-      ] switch
+        "{kind: buttons, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: deny, label: Deny, value: deny}]}" yaml>
+        dup "prompt" "Choose next step for " "normalized.summary" shared@ concat dict-set
+      ]
+      [
+        "approve" [ "approve" dup "normalized.choice" shared!? drop drop "Approved " "normalized.summary" shared@ concat answer ]
+        "delegate" [ "delegate" dup "normalized.choice" shared!? drop drop "Delegating " "normalized.summary" shared@ concat answer ]
+        "default" [ "deny" dup "normalized.choice" shared!? drop drop "Denied " "normalized.summary" shared@ concat answer ]
+      ]
+      prompt-route
     ]
     if
   ]
-  if
+  tool-once
 ] "decide" define

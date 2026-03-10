@@ -1,0 +1,18 @@
+{
+  "scopeName": "source.stackvm",
+  "patterns": [
+    { "name": "comment.line.stackvm", "match": "!.*$" },
+    { "name": "keyword.control.flow.stackvm", "match": "\\b(call|if|while|define|switch|cond|fallback|parallel-map|reduce)\\b" },
+    { "name": "keyword.control.stack.stackvm", "match": "\\b(dup|drop|swap|over|stack-depth|stack-empty\\?|can-pop\\?|can-dup\\?|can-swap\\?|can-over\\?)\\b" },
+    { "name": "support.function.host.stackvm", "match": "\\b(answer|ask-user|prompt-user|prompt-interaction|handoff|tool-request|transition|llm-call|system-prompt|llm-profile|tool-definitions|request|last-tool-result|last-tool-route|results)\\b" },
+    { "name": "support.function.runtime.stackvm", "match": "(?<!\\S)(yaml>|int>|float>|bool>|str>|shared@|shared!\\?|shared!|none\\?|success\\?|failure\\?|dict-get\\?|dict-get|dict-set|get-in\\?|get-in|set-in\\?|set-in|list-get\\?|list-get|list-set|keys|values|list-append|len|empty\\?|contains\\?|join|concat|store-set|store-get)(?!\\S)" },
+    { "name": "keyword.operator.logic.stackvm", "match": "\\bnot\\b" },
+    { "name": "keyword.operator.symbol.stackvm", "match": "(?<!\\S)(\\+|\\-|\\*|/|>=|<=|>|<|=)(?!\\S)" },
+    { "name": "constant.language.boolean.stackvm", "match": "\\b(True|False|None|null)\\b" },
+    { "name": "constant.numeric.stackvm", "match": "\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b" },
+    { "name": "string.quoted.stackvm", "match": '"([^"\\\\]|\\\\.)*"' },
+    { "name": "variable.stackvm", "match": "\\b[a-zA-Z_][a-zA-Z0-9_!?-]*\\b" }
+  ],
+  "repository": {},
+  "extensions": [".vm"]
+}

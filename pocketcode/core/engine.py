@@ -2252,6 +2252,9 @@ class PocketCodeEngine:
 
     def _build_run_summary(self, shared_store: Dict[str, Any], cli_context: Dict[str, Any]) -> Dict[str, Any]:
         active_mode = getattr(self, "active_mode", None)
+        vm_validation_warnings = shared_store.get("last_vm_validation_warnings", {})
+        if not isinstance(vm_validation_warnings, list):
+            vm_validation_warnings = []
         return {
             "agent_path": self._build_agent_path(shared_store),
             "current_agent": shared_store.get("active_agent") or self.current_agent,
@@ -2267,6 +2270,8 @@ class PocketCodeEngine:
             if isinstance(shared_store.get("llm_usage_totals", {}), dict)
             else {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "llm_cost_usd": float(shared_store.get("llm_cost_usd_total", 0.0)),
+            "vm_validation_warnings": list(vm_validation_warnings),
+            "vm_validation_warning_count": len(vm_validation_warnings),
             "context_stats": self._build_context_stats(cli_context),
         }
 

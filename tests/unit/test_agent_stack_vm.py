@@ -7,8 +7,8 @@ from pocketcode.core.agent_stack_vm import (
     AgentStackVM,
     StackVmExecutionResult,
     StackVmHostContext,
-    load_stackvm_program_source,
 )
+from pocketcode.core.stackvm_loader import load_stackvm_program_source
 
 
 def test_load_stackvm_program_source_resolves_module_and_markdown_sources(tmp_path: Path):
@@ -294,6 +294,20 @@ def test_agent_stack_vm_parallel_map_replays_user_defined_words():
     )
 
     assert vm.store["mapped"] == [11, 12, 13]
+
+
+def test_agent_stack_vm_parallel_map_child_store_mutations_do_not_leak():
+    vm = AgentStackVM(shared_store={"normalized": {"count": 0}})
+
+    asyncio.run(
+        vm.eval(
+            '"[1, 2]" yaml> [ "mutated" "normalized.state" shared! "normalized.count" shared@ 1 + ] '
+            'parallel-map "mapped" store-set'
+        )
+    )
+
+    assert vm.store["mapped"] == [1, 1]
+    assert vm.store["normalized"] == {"count": 0}
 
 
 def test_agent_stack_vm_parallel_map_rejects_transition_words():

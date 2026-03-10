@@ -1,6 +1,8 @@
 import time
 
+from pocketcode.core.stackvm_expander import expand_stackvm_source
 from tests.integration.stackvm_test_utils import (
+    EXAMPLES_ROOT,
     make_example_engine,
     request_context,
     wait_for_new_interaction_request,
@@ -173,6 +175,8 @@ def test_real_engine_start_request_can_continue_after_stackvm_button_interaction
 
     result = handle.wait(timeout=1.0)
     assert result == "Delegating Alpha, Beta, untitled from fixture"
+    router_source = (EXAMPLES_ROOT / "stackvm_buttons_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["prompt-route", "tool-once"]
 
 
 def test_real_engine_start_request_can_return_from_prompted_stackvm_delegate(tmp_path):
@@ -215,6 +219,57 @@ def test_real_engine_start_request_can_return_from_prompted_stackvm_delegate(tmp
 
     assert result == "Caller received delegate decision: delegate approved Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_prompt_return_example.normalize"
+    router_source = (EXAMPLES_ROOT / "stackvm_prompt_return_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
+    event_types = [event["type"] for event in events]
+    assert "handoff" in event_types
+    assert "handoff_return" in event_types
+    assert event_types.index("handoff") < event_types.index("interaction_requested")
+    assert event_types.index("interaction_received") < event_types.index("handoff_return")
+
+
+def test_real_engine_start_request_can_pass_through_stackvm_delegate_return(tmp_path):
+    write_fixture(
+        tmp_path,
+        "delegate_return_payload.yaml",
+        [
+            'items:',
+            '  - title: "Alpha"',
+            '  - title: "Beta"',
+            '  - {}',
+            'meta:',
+            '  source: "fixture"',
+        ],
+    )
+    engine = make_example_engine(tmp_path, "stackvm_delegate_return_example.normalize")
+
+    handle = engine.start_request("normalize and pass through delegate answer", request_context(), bridge_user_input=True)
+
+    events = []
+    seen_request_ids = set()
+    prompt_event = wait_for_new_interaction_request(handle, events, seen_request_ids, attempts=40)
+
+    assert prompt_event is not None
+    assert prompt_event["kind"] == "buttons"
+    assert prompt_event["prompt"] == "Choose delegate action for Alpha, Beta, untitled from fixture"
+    assert handle.resolve_interaction(
+        str(prompt_event["request_id"]),
+        {
+            "kind": "buttons",
+            "value": "approve",
+            "values": ["approve"],
+            "selected_options": [{"id": "approve", "label": "Approve", "value": "approve"}],
+            "raw_input": "approve",
+        },
+    ) is True
+
+    result = handle.wait(timeout=1.0)
+    events.extend(handle.drain_events())
+
+    assert result == "delegate approved Alpha, Beta, untitled from fixture"
+    assert engine.last_run_summary["current_agent"] == "stackvm_delegate_return_example.normalize"
+    router_source = (EXAMPLES_ROOT / "stackvm_delegate_return_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["delegate-return", "tool-once"]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types
@@ -265,6 +320,8 @@ def test_real_engine_start_request_can_return_from_checklist_stackvm_delegate(tm
     events.extend(handle.drain_events())
 
     assert result == "Caller received delegate tools: delegate picked git, search for Alpha, Beta, untitled from fixture"
+    router_source = (EXAMPLES_ROOT / "stackvm_checklist_return_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types
@@ -459,6 +516,10 @@ def test_real_engine_start_request_can_run_stackvm_multistage_pipeline(tmp_path)
 
     assert result == "pipeline complete: Alpha, Beta, untitled from fixture | actions=delegate, review | delegate=delegate plan review-first"
     assert engine.last_run_summary["current_agent"] == "stackvm_multistage_pipeline_example.normalize"
+    router_source = (
+        EXAMPLES_ROOT / "stackvm_multistage_pipeline_plugin" / "vm" / "router.vm"
+    ).read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["finalize-from", "tool-once", "finalize-from"]
     event_types = [event["type"] for event in events]
     assert event_types.count("interaction_requested") == 2
     assert event_types.count("interaction_received") == 2

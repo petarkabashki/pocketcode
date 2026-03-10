@@ -284,6 +284,11 @@ Core implementation files:
 | `pocketcode/core/runtime_models.py` | `CompositeAgent` and `FlowDefinition` dataclasses |
 | `pocketcode/core/engine.py` | active flow/profile selection and persistence |
 | `pocketcode/core/agent_runtime.py` | LLM resolution, tool filtering, prompt overlay logic |
+| `pocketcode/core/stackvm_loader.py` | StackVM source assembly from inline, module, and file-backed flow fields |
+| `pocketcode/core/stackvm_parser.py` | StackVM tokenization and AST parsing before execution |
+| `pocketcode/core/stackvm_expander.py` | StackVM compile-time macro expansion over parsed AST |
+| `pocketcode/core/stackvm_validator.py` | StackVM executable-AST validation, compile-only form checks, and source-level authoring warnings for legacy tool-loop and prompt-route patterns |
+| `pocketcode/core/agent_stack_vm.py` | StackVM execution engine, built-in words, and runtime host words |
 | `pocketcode/core/tool_runtime.py` | confirmation policy resolution and allowlist enforcement |
 | `pocketcode/cli/command_handler.py` | `/flow` and `/agent` CLI surface |
 | `pocketcode/cli/completers.py` | profile completion support |

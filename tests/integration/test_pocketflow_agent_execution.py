@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from typing import Any, Dict
 from pocketflow import Node, Flow
@@ -193,6 +194,437 @@ def test_stackvm_agent_execution():
     assert shared_store.get("final_output") == "hello from vm"
 
 
+def test_stackvm_agent_execution_with_user_defined_macro():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-macro-agent",
+        execution_mode="vm",
+        vm_source='[ value ] [ value "Macro says: " swap concat answer ] "emit-answer" defmacro "hello" emit-answer',
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-macro-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-macro-agent",
+        "initial_request": "hello",
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "Macro says: hello"
+    assert not shared_store.get("error_message")
+
+
+def test_stackvm_agent_execution_with_syntax_quote_macro():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-syntax-macro-agent",
+        execution_mode="vm",
+        vm_source=(
+            '[ value ] [ [ value unquote ] "Syntax macro: " swap concat answer ] '
+            'syntax-quote "emit-answer" defmacro "hello" emit-answer'
+        ),
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-syntax-macro-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-syntax-macro-agent",
+        "initial_request": "hello",
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "Syntax macro: hello"
+    assert not shared_store.get("error_message")
+    assert shared_store.get("last_vm_expansion_metadata") == {
+        "expansion_count": 1,
+        "macro_names": ["emit-answer"],
+        "builtin_macro_names": [],
+        "gensym_count": 0,
+        "expansion_trace": ["emit-answer"],
+    }
+    assert shared_store.get("last_vm_expanded_source") == '"hello" "Syntax macro: " swap concat answer'
+
+
+def test_stackvm_agent_execution_with_builtin_when_macro():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-builtin-macro-agent",
+        execution_mode="vm",
+        vm_source='True [ "builtin when worked" answer ] when',
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-builtin-macro-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-builtin-macro-agent",
+        "initial_request": "hello",
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "builtin when worked"
+    assert shared_store.get("last_vm_expansion_metadata") == {
+        "expansion_count": 1,
+        "macro_names": ["when"],
+        "builtin_macro_names": ["when"],
+        "gensym_count": 0,
+        "expansion_trace": ["when"],
+    }
+
+
+def test_stackvm_agent_execution_with_builtin_tool_once_macro():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = [
+        {"name": "workspace.echo", "description": "Echo text", "schema": {"type": "object"}}
+    ]
+    tool_runtime.execute_tool.return_value = {"success": True, "text": "echoed from tool"}
+    plugin_manager.resolve_tools_for_agent.return_value = ["workspace.echo"]
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-tool-once-agent",
+        execution_mode="vm",
+        vm_source=(
+            '"workspace.echo" [ "{text: ping}" yaml> ] [ "last_tool_result.text" shared@ answer ] tool-once'
+        ),
+        tools=["workspace.echo"],
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-tool-once-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-tool-once-agent",
+        "initial_request": "ping",
+    }
+
+    runtime.run(shared_store)
+
+    tool_runtime.execute_tool.assert_called_once()
+    assert shared_store.get("final_output") == "echoed from tool"
+    assert shared_store.get("last_vm_expansion_metadata") == {
+        "expansion_count": 1,
+        "macro_names": ["tool-once"],
+        "builtin_macro_names": ["tool-once"],
+        "gensym_count": 0,
+        "expansion_trace": ["tool-once"],
+    }
+
+
+def test_stackvm_agent_execution_with_builtin_delegate_return_macro_handoffs_when_missing():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    caller_agent = AgentDefinition(
+        name="vm-delegate-return-agent",
+        execution_mode="vm",
+        vm_source='"delegate.agent" "last_delegated_result.answer" delegate-return',
+        metadata={},
+    )
+    delegate_agent = AgentDefinition(
+        name="delegate.agent",
+        is_programmatic=True,
+        flow_instance=Flow(start=_ArchitectNode()),
+        metadata={"plugin_name": "delegate", "plugin": "delegate"},
+    )
+
+    plugin_manager.agents = {
+        "vm-delegate-return-agent": caller_agent,
+        "delegate.agent": delegate_agent,
+    }
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-delegate-return-agent",
+        "initial_request": "route me",
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("handoff_history") == ["delegate.agent"]
+    assert shared_store.get("final_output") == "architect plan ready"
+    assert shared_store.get("last_vm_expansion_metadata") == {
+        "expansion_count": 1,
+        "macro_names": ["delegate-return"],
+        "builtin_macro_names": ["delegate-return"],
+        "gensym_count": 0,
+        "expansion_trace": ["delegate-return"],
+    }
+
+
+def test_stackvm_agent_execution_with_builtin_delegate_return_macro_answers_when_result_exists():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-delegate-return-answer-agent",
+        execution_mode="vm",
+        vm_source='"delegate.agent" "last_delegated_result.answer" delegate-return',
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-delegate-return-answer-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-delegate-return-answer-agent",
+        "initial_request": "route me",
+        "last_delegated_result": {"answer": "delegate approved"},
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "delegate approved"
+    assert shared_store.get("last_vm_expansion_metadata") == {
+        "expansion_count": 1,
+        "macro_names": ["delegate-return"],
+        "builtin_macro_names": ["delegate-return"],
+        "gensym_count": 0,
+        "expansion_trace": ["delegate-return"],
+    }
+
+
+def test_stackvm_agent_execution_with_builtin_finalize_from_macro():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-finalize-from-agent",
+        execution_mode="vm",
+        vm_source='[ "Finalized through macro" ] finalize-from',
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-finalize-from-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-finalize-from-agent",
+        "initial_request": "finalize me",
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "Finalized through macro"
+    assert shared_store.get("last_vm_expansion_metadata") == {
+        "expansion_count": 1,
+        "macro_names": ["finalize-from"],
+        "builtin_macro_names": ["finalize-from"],
+        "gensym_count": 0,
+        "expansion_trace": ["finalize-from"],
+    }
+
+
+def test_stackvm_agent_execution_with_builtin_prompt_route_macro():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-prompt-route-agent",
+        execution_mode="vm",
+        vm_source=(
+            '[ "{kind: buttons, prompt: Choose action, options: '
+            '[{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}]}" yaml> ] '
+            '[ "approve" [ "Approved" answer ] "delegate" [ "Delegated" answer ] "default" [ "Fallback" answer ] ] '
+            'prompt-route'
+        ),
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-prompt-route-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-prompt-route-agent",
+        "initial_request": "route me",
+        "interaction_handler": lambda request: {
+            "kind": request.get("kind", "buttons"),
+            "value": "delegate",
+            "values": ["delegate"],
+            "selected_options": [{"id": "delegate", "label": "Delegate", "value": "delegate"}],
+            "raw_input": "delegate",
+        },
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "Delegated"
+    assert shared_store.get("last_vm_expansion_metadata") == {
+        "expansion_count": 1,
+        "macro_names": ["prompt-route"],
+        "builtin_macro_names": ["prompt-route"],
+        "gensym_count": 0,
+        "expansion_trace": ["prompt-route"],
+    }
+
+
+def test_stackvm_agent_llm_call_records_usage_and_events():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    llm_router.generate.return_value = "llm reply"
+    llm_router.get_last_generation_info.return_value = {
+        "profile_name": "default",
+        "provider": "mock",
+        "model": "mock-model",
+        "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+        "estimated_cost_usd": 0.125,
+    }
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-llm-agent",
+        execution_mode="vm",
+        vm_source='request llm-call answer',
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-llm-agent": agent_def}
+    plugin_manager.plugins = {}
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    shared_store = {
+        "active_agent": "vm-llm-agent",
+        "initial_request": "summarize this",
+        "runtime_event_handler": lambda event_type, **payload: events.append((event_type, payload)),
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "llm reply"
+    assert shared_store.get("last_llm_profile") == "default"
+    assert shared_store.get("last_llm_generation", {}).get("model") == "mock-model"
+    assert shared_store.get("llm_usage_totals") == {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18,
+    }
+    assert shared_store.get("llm_cost_usd_total") == pytest.approx(0.125)
+    assert shared_store.get("llm_calls") == [
+        {
+            "agent": "vm-llm-agent",
+            "profile": "default",
+            "model": "mock-model",
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+            "estimated_cost_usd": 0.125,
+        }
+    ]
+    assert [event_type for event_type, _ in events if event_type.startswith("llm_call_")] == [
+        "llm_call_started",
+        "llm_call_completed",
+    ]
+
+
 def test_stackvm_agent_tool_roundtrip():
     plugin_manager = MagicMock(spec=PluginManager)
     llm_router = MagicMock(spec=LlmRouter)
@@ -233,6 +665,55 @@ def test_stackvm_agent_tool_roundtrip():
     assert shared_store.get("last_tool_failed") is False
     assert shared_store.get("last_tool_result") == {"success": True, "text": "echoed from tool"}
     assert shared_store.get("final_output") == "echoed from tool"
+    warnings = shared_store.get("last_vm_validation_warnings")
+    assert isinstance(warnings, list) and len(warnings) == 1
+    assert warnings[0]["code"] == "legacy-tool-loop"
+    assert warnings[0]["message"] == (
+        "StackVM source uses the manual 'last-tool-result none?' tool loop pattern. "
+        "Prefer the built-in 'tool-once' macro for tool-first flows."
+    )
+    assert str(warnings[0].get("location") or "").startswith("line 1, cols ")
+    assert warnings[0]["span"]["start_line"] == 1
+    assert warnings[0]["span"]["start_column"] == 1
+
+
+def test_stackvm_agent_execution_inside_async_loop():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="vm-agent",
+        execution_mode="vm",
+        vm_source='"hello from vm" answer',
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-agent": agent_def}
+    plugin_manager.plugins = {}
+
+    async def _run() -> dict[str, Any]:
+        shared_store = {
+            "active_agent": "vm-agent",
+            "initial_request": "hello",
+        }
+        runtime.run(shared_store)
+        return shared_store
+
+    shared_store = asyncio.run(_run())
+
+    assert shared_store.get("final_output") == "hello from vm"
+    assert not shared_store.get("error_message")
 
 
 def test_stackvm_agent_handoff_roundtrip():
@@ -401,6 +882,63 @@ def test_stackvm_agent_prompt_interaction_continues_with_button_value():
     assert shared_store.get("last_user_prompt") == "Choose action"
     assert shared_store.get("last_user_value") == "delegate"
     assert shared_store.get("final_output") == "Result: delegate"
+    assert shared_store.get("last_vm_validation_warnings") == []
+
+
+def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt_route_macro():
+    plugin_manager = MagicMock(spec=PluginManager)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+    plugin_manager.resolve_tools_for_agent.return_value = []
+
+    runtime = AgentRuntime(
+        plugin_manager=plugin_manager,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    vm_agent = AgentDefinition(
+        name="vm-legacy-prompt-route-agent",
+        execution_mode="vm",
+        vm_source=(
+            '"{kind: buttons, prompt: Choose action, options: [{id: approve, label: Approve, value: approve}, '
+            '{id: delegate, label: Delegate, value: delegate}]}" prompt-interaction '
+            '[ "approve" [ "Approved" answer ] "default" [ "Delegated" answer ] ] switch'
+        ),
+        metadata={},
+    )
+
+    plugin_manager.agents = {"vm-legacy-prompt-route-agent": vm_agent}
+    plugin_manager.plugins = {}
+
+    shared_store = {
+        "active_agent": "vm-legacy-prompt-route-agent",
+        "initial_request": "route me",
+        "interaction_handler": lambda request: {
+            "kind": request.get("kind", "buttons"),
+            "value": "delegate",
+            "values": ["delegate"],
+            "selected_options": [{"id": "delegate", "label": "Delegate", "value": "delegate"}],
+            "raw_input": "delegate",
+        },
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "Delegated"
+    warnings = shared_store.get("last_vm_validation_warnings")
+    assert isinstance(warnings, list) and len(warnings) == 1
+    assert warnings[0]["code"] == "legacy-prompt-route"
+    assert warnings[0]["message"] == (
+        "StackVM source uses the manual 'prompt-interaction' plus 'switch' routing pattern. "
+        "Prefer the built-in 'prompt-route' macro for exact-match interaction routing."
+    )
+    assert str(warnings[0].get("location") or "").startswith("line 1, cols ")
+    assert warnings[0]["span"]["start_line"] == 1
+    assert warnings[0]["span"]["start_column"] == 1
 
 
 def test_stackvm_agent_prompted_delegate_handoff_roundtrip():
