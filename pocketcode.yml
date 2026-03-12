@@ -1,7 +1,7 @@
 llm:
   providers:
     gemini:
-      api_key: AIzaSyCoYEVmng8ECth2e7wmxMZKSQUCNIJ8zq8
+      api_key: ${GEMINI_API_KEY}
       use_vertexai: false
     openai: ''
     openrouter: ''
@@ -41,8 +41,10 @@ runtime:
     nodes: {}
     handoffs: {}
   llm_pricing: {}
-  plugin_paths:
-  - .pocketcode/plugins
+  storage:
+    session_state_dir: .pocketstate
+    entry_history_dir: .pockethist
+  workspace_paths: []
   require_tool_confirmation: true
   auto_approved_tools: []
   auto_confirm_tools: false
@@ -53,7 +55,7 @@ runtime:
     agent_policies: {}
   textual:
     last_used:
-      active_profile: core.react
+      active_profile: my-react
       global_llm_profile: gemini-3-flash-preview
       skills:
       - pocketcode-plugin-authoring
@@ -62,34 +64,6 @@ runtime:
       - pocketcode-workspace-assets
       - pocketcode-workspace-builder
       - pocketcode-graph-authoring
-      entry_history:
-      - make a funny programmer survey of 5 questions, run it and save the result
-        in survey.md
-      - '2'
-      - '1'
-      - create a survey of 5 questions of different type and run it
-      - session
-      - jaba
-      - session
-      - intermediate
-      - session
-      - macos
-      - react,kubernetes
-      - session
-      - deny
-      - make a funny survey of 5 questions about my wife Ani and run it
-      - session
-      - vacuum
-      - nap
-      - burn_house
-      - snack_tax
-      - snooze_button
-      - create a 200 words funny story a obout my wife ani
-      - save it joke.md
-      - once
-      - ask a question and print it
-      - session
-      - green
     theme_name: forest
     workspace_view: control_desk
     default_skills:

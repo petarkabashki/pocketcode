@@ -42,7 +42,7 @@ Read:
 
 Use for:
 - `agents/*.yaml`
-- `.pocketcode/agents/*.yaml`
+- `.pocketcode/*.agent.yaml`
 - prompt includes and fallback resolution
 - mode and skill front matter
 - tool confirmation and LLM profile overlays
@@ -66,14 +66,14 @@ Use for:
 Read:
 - `readme.md`
 - `docs/modes_and_skills.md`
-- `.pocketcode/plugins/workspace_builder/prompts/authoring_reference.md`
+- `.pocketcode/workspace_builder.authoring_reference.prompt.md`
 - `references/workspace-assets.md`
 
 Use for:
-- `.pocketcode/plugins/`
-- `.pocketcode/tools/`
-- `.pocketcode/prompts/`
+- `.pocketcode/`
+- `.pocketcode/*.tool.py or .pocketcode/*.tool.md`
+- `.pocketcode/*.prompt.md`
 - `.pocketcode/skills/`
-- `.pocketcode/agents/`
+- `.pocketcode/*.agent.*`
 - portability when the current workspace is not the repo root
 

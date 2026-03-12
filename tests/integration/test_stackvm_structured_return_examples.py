@@ -54,7 +54,7 @@ def test_real_engine_start_request_can_finalize_after_structured_delegate_return
     assert result == "finalized: Alpha, Beta, untitled from fixture | mode=concise | note=concise summary requested"
     assert engine.last_run_summary["current_agent"] == "stackvm_structured_return_finalize_example.normalize"
     router_source = (
-        EXAMPLES_ROOT / "stackvm_structured_return_finalize_plugin" / "vm" / "router.vm"
+        EXAMPLES_ROOT / "stackvm_structured_return_finalize_example" / "vm" / "router.vm"
     ).read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
     event_types = [event["type"] for event in events]
@@ -154,7 +154,7 @@ def test_real_engine_start_request_can_route_after_structured_delegate_return_ap
     assert result == "approved route handled: Alpha, Beta, untitled from fixture (approved by delegate)"
     assert engine.last_run_summary["current_agent"] == "stackvm_structured_return_routing_example.approve_route"
     router_source = (
-        EXAMPLES_ROOT / "stackvm_structured_return_routing_plugin" / "vm" / "router.vm"
+        EXAMPLES_ROOT / "stackvm_structured_return_routing_example" / "vm" / "router.vm"
     ).read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
     event_types = [event["type"] for event in events]
@@ -252,7 +252,7 @@ def test_real_engine_start_request_can_finalize_after_nested_structured_delegate
     assert result == "nested finalized: Alpha, Beta, untitled from fixture | mode=concise | note=concise summary requested | delegate_source=delegate"
     assert engine.last_run_summary["current_agent"] == "stackvm_nested_structured_return_example.normalize"
     router_source = (
-        EXAMPLES_ROOT / "stackvm_nested_structured_return_plugin" / "vm" / "router.vm"
+        EXAMPLES_ROOT / "stackvm_nested_structured_return_example" / "vm" / "router.vm"
     ).read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
 
@@ -346,7 +346,7 @@ def test_real_engine_start_request_can_route_after_nested_structured_delegate_re
     assert result == "approved nested route handled: Alpha, Beta, untitled from fixture | note=approved by delegate | delegate_source=delegate"
     assert engine.last_run_summary["current_agent"] == "stackvm_nested_structured_return_routing_example.approve_route"
     router_source = (
-        EXAMPLES_ROOT / "stackvm_nested_structured_return_routing_plugin" / "vm" / "router.vm"
+        EXAMPLES_ROOT / "stackvm_nested_structured_return_routing_example" / "vm" / "router.vm"
     ).read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
     event_types = [event["type"] for event in events]

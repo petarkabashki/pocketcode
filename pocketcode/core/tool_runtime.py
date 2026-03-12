@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from pocketcode.core.interfaces import BaseTool
 from pocketcode.core.reference_syntax import normalize_registry_reference_compat
-from pocketcode.plugins.core.tools import ConfirmUserInputTool
+from pocketcode.core_tools import ConfirmUserInputTool
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ class ToolRuntime:
             # Or if it's a dynamic path
             if "/" in registered_tool_name or ".py:" in registered_tool_name:
                  # Attempt dynamic load? Actually ToolRuntime should probably just use what's in self._tools
-                 # which is populated by PluginManager.
+                 # which is populated by WorkspaceCatalog.
                  pass
             raise KeyError(f"Tool '{registered_tool_name}' is not registered.")
 
@@ -254,7 +254,7 @@ class ToolRuntime:
                 )
             
             if ":" in tool_impl:
-                # Handle path.py:ClassName if ToolRuntime is given raw strings (unlikely with current PluginManager)
+                # Handle path.py:ClassName if ToolRuntime is given raw strings (unlikely with current WorkspaceCatalog)
                 pass
 
             module_name, object_name = tool_impl.rsplit(".", 1)
@@ -642,7 +642,7 @@ class ToolRuntime:
         question = f"Allow tool '{tool_name}'"
         if agent_name:
             question += f" from agent '{agent_name}'"
-        question += f" with arguments {arguments!r}?"
+        question += "?"
         event_handler = shared_store.get("runtime_event_handler")
         if callable(event_handler):
             event_handler(

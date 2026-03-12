@@ -3,17 +3,17 @@
 Primary sources:
 - `readme.md`
 - `docs/modes_and_skills.md`
-- `.pocketcode/plugins/workspace_builder/prompts/authoring_reference.md`
+- `.pocketcode/workspace_builder.authoring_reference.prompt.md`
 - `pocketcode/core/markdown_profiles.py`
 - `pocketcode/core/discovery_rules.py`
 
 ## Workspace-owned locations
 
 Use these locations deliberately:
-- `.pocketcode/plugins/<plugin>/` for plugin-scoped manifests, flows, prompts, tools, and plugin-local agent YAML
-- `.pocketcode/agents/` for workspace agent profiles
-- `.pocketcode/prompts/` for shared prompt files
-- `.pocketcode/tools/` for shared workspace tools
+- `.pocketcode/ flat namespace-pack files with the `<plugin>.` prefix` for plugin-scoped manifests, flows, prompts, tools, and plugin-local agent YAML
+- `.pocketcode/*.agent.*` for workspace agent profiles
+- `.pocketcode/*.prompt.md` for shared prompt files
+- `.pocketcode/*.tool.py or .pocketcode/*.tool.md` for shared workspace tools
 - `.pocketcode/skills/<skill>/` for workspace skills
 - `.pocketcode/modes/` for workspace modes
 

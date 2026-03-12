@@ -336,7 +336,7 @@ class TextualAppInteractionMixin:
             return
         self._set_pending_input_request(None)
         self._set_main_input_placeholder()
-        self._show_inline_prompt_result(display_text)
+        self._clear_inline_prompt_display()
         self._commit_ui_update()
 
     def _should_open_pending_input_modal(self, request: dict[str, object] | None) -> bool:
@@ -655,7 +655,7 @@ class TextualAppInteractionMixin:
     def action_reload_runtime(self) -> None:
         try:
             self._engine.reload()
-            self._write_info("Reloaded plugins, agents, tools, and LLM mappings.")
+            self._write_info("Reloaded resource roots, namespaces, agents, tools, skills, and LLM mappings.")
         except Exception as exc:
             self._write_error(str(exc))
         finally:

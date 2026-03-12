@@ -24,13 +24,13 @@ Pocketcode now uses a small plugin-first core:
 
 ## Built-In Runtime
 
-- The package-owned `core` plugin lives under `pocketcode/plugins/core/`
-- Repo-shipped workspace plugins live under `.pocketcode/plugins/`
+- The package-owned `core` resource root lives under `pocketcode/.pocketcore/`
+- Repo-shipped workspace assets live under flat namespace/resource-root files in `.pocketcode/`
 - The default flow is `core::react`
 - `.pocketcode/plugins/workspace_builder/` ships a dedicated authoring agent for creating and editing workspace plugin resources plus workspace-level assets such as tools, prompts, skills, and agents.
-- Shared filesystem tool behavior is implemented once in `pocketcode/plugins/core/tools/filesystem.py`; plugin-local filesystem modules re-export that canonical implementation to avoid drift.
-- Structured file operation tools now also live in `pocketcode/plugins/core/tools/file_ops.py`, covering interactive file/folder selection, line/pattern-based extraction, staged replacements with diff previews, and explicit apply/cancel steps.
-- Git and context elephant store tools now live in separate workspace plugins at `.pocketcode/plugins/workspace_git/` and `.pocketcode/plugins/workspace_context/`; built-in flows reference those workspace plugins explicitly. The remaining public compatibility surface is the `pocketcode.tools` package exports, while `pocketcode.plugins.core.tools.context_elephant_store_tools` remains only as a compatibility shim for context-elephant imports.
+- Shared filesystem tool behavior is implemented in `pocketcode/core_tools/filesystem.py`.
+- Structured file operation tools live in `pocketcode/core_tools/file_ops.py`, covering interactive file/folder selection, line/pattern-based extraction, staged replacements with diff previews, and explicit apply/cancel steps.
+- Git and context elephant store tools are workspace-owned flat `.tool.py` assets under `.pocketcode/`, such as `.pocketcode/workspace_git.git.tool.py` and `.pocketcode/workspace_context.context_elephant_store_tools.tool.py`.
 
 ## Workspace Resources
 

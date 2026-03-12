@@ -130,11 +130,6 @@ def compile_markdown_flow_definition(
     definition.setdefault("name", default_name)
     _merge_yaml_blocks(definition, document, labels=("spec", "flow", "definition", "config"))
     _merge_prompt_sections(definition, _collect_prompt_sections(document, include_body=True))
-    graphs = _collect_graph_blocks(document)
-    if graphs:
-        metadata = _mapping_copy(definition.get("metadata"))
-        metadata["markdown_graphs"] = graphs
-        definition["metadata"] = metadata
     vm_sections = [
         block.content.strip()
         for block in document.find_blocks(languages=("vm", "stackvm"))
@@ -154,6 +149,8 @@ def compile_markdown_agent_definition(
     definition = _mapping_copy(document.front_matter)
     definition.setdefault("name", default_name)
     _merge_yaml_blocks(definition, document, labels=("spec", "agent", "profile", "config"))
+    if "base_agent" not in definition and "extends" in definition:
+        definition["base_agent"] = definition.get("extends")
     inline_prompt_sections = _collect_prompt_sections(document, include_body=True)
     if inline_prompt_sections:
         definition["inline_prompt"] = "\n\n".join(section for section in inline_prompt_sections if section).strip()
@@ -331,6 +328,8 @@ def serialize_markdown_agent_definition(agent: Any) -> str:
         "name": str(agent.name),
         "flow": str(agent.flow),
     }
+    if getattr(agent, "base_agent", None):
+        front_matter["extends"] = str(agent.base_agent)
     if getattr(agent, "description", ""):
         front_matter["description"] = str(agent.description)
     if getattr(agent, "llm_profile", None):
@@ -482,22 +481,6 @@ def _collect_prompt_sections(
         if block.content.strip():
             sections.append(block.content.strip())
     return sections
-
-
-def _collect_graph_blocks(document: MarkdownAssetDocument) -> list[dict[str, str]]:
-    graphs: list[dict[str, str]] = []
-    for block in document.blocks:
-        language = block.language.strip().lower()
-        if language not in {"mermaid", "dot"}:
-            continue
-        graphs.append(
-            {
-                "language": language,
-                "label": block.label,
-                "content": block.content,
-            }
-        )
-    return graphs
 
 
 def _merge_prompt_sections(target: Dict[str, Any], sections: Sequence[str]) -> None:

@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Dict, Generic, Iterator, List, Optional, TypeV
 from pocketcode.core.reference_syntax import parse_reference
 
 if TYPE_CHECKING:
-    # Avoid circular import at runtime; PluginManager imports NamespaceRegistry
-    from pocketcode.core.plugin_manager import PluginManager  # noqa: F401
+    # Avoid circular import at runtime; WorkspaceCatalog imports NamespaceRegistry
+    from pocketcode.core.workspace_catalog import WorkspaceCatalog  # noqa: F401
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -27,12 +27,12 @@ class RegistryError(Exception):
 
 class NamespaceRegistry(Generic[T]):
     """
-    Unified namespace registry for plugin resources (tools / agents / prompts).
+    Unified namespace registry for namespaced resources (tools / agents / prompts).
 
     Three-tier internal structure:
-        _ns   : Dict[str, Dict[str, T]]        # {plugin → {name → impl}}
-        _flat : Dict[str, T]                   # {"plugin.name" → impl}
-        _bare : Dict[str, List[str]]           # {"name" → ["plugin.name"]}
+        _ns   : Dict[str, Dict[str, T]]        # {namespace → {name → impl}}
+        _flat : Dict[str, T]                   # {"namespace.name" → impl}
+        _bare : Dict[str, List[str]]           # {"name" → ["namespace.name"]}
 
     Usage::
 
@@ -64,28 +64,27 @@ class NamespaceRegistry(Generic[T]):
         self._flat[qname] = impl
         self._bare[name].append(qname)
 
-    def unregister_plugin(self, plugin: str) -> None:
-        """Remove all resources owned by *plugin*. Used during hot-reload rebuild."""
-        for name in list(self._ns.get(plugin, {})):
-            qname = f"{plugin}.{name}"
+    def unregister_namespace(self, namespace: str) -> None:
+        """Remove all resources owned by *namespace*. Used during hot-reload rebuild."""
+        for name in list(self._ns.get(namespace, {})):
+            qname = f"{namespace}.{name}"
             self._flat.pop(qname, None)
             owners = self._bare.get(name, [])
             if qname in owners:
                 owners.remove(qname)
             if not owners:
                 self._bare.pop(name, None)
-        self._ns.pop(plugin, None)
+        self._ns.pop(namespace, None)
 
     # ── Reading API ──────────────────────────────────────────────────────────
 
     def resolve(self, ref: str, *, context_plugin: Optional[str] = None) -> T:
         """
-        Resolve a qualified (``"plugin.name"`` or ``"plugin::name"``) or unqualified
+        Resolve a qualified (``"namespace.name"``) or unqualified
         (``"name"``) reference.
 
         Resolution rules:
-            - ``"plugin::name"`` is normalised to ``"plugin.name"`` before lookup.
-            - ``"plugin.name"`` → direct ``_flat`` lookup; ``RegistryError`` if missing.
+            - ``"namespace.name"`` → direct ``_flat`` lookup; ``RegistryError`` if missing.
             - ``"name"`` with *context_plugin* → tries local plugin first, then global.
             - ``"name"`` (1 owner) → ``WARNING`` log; resolves.
             - ``"name"`` (2+ owners) → ``RegistryError``.
@@ -94,7 +93,7 @@ class NamespaceRegistry(Generic[T]):
         return self._flat[self.qualify(ref, context_plugin=context_plugin)]
 
     def qualify(self, ref: str, *, context_plugin: Optional[str] = None) -> str:
-        """Resolve *ref* to its qualified ``plugin.name`` form."""
+        """Resolve *ref* to its qualified ``namespace.name`` form."""
         ref = self._normalize_ref(ref)
 
         if not ref:
@@ -143,12 +142,12 @@ class NamespaceRegistry(Generic[T]):
         """All qualified names, sorted. O(n log n)."""
         return sorted(self._flat.keys())
 
-    def list_by_plugin(self, plugin: str) -> Dict[str, T]:
-        """All {name: impl} for resources owned by *plugin*."""
-        return dict(self._ns.get(plugin, {}))
+    def list_by_namespace(self, namespace: str) -> Dict[str, T]:
+        """All {name: impl} for resources owned by *namespace*."""
+        return dict(self._ns.get(namespace, {}))
 
-    def plugins(self) -> List[str]:
-        """All registered plugin namespaces, sorted."""
+    def namespaces(self) -> List[str]:
+        """All registered namespaces, sorted."""
         return sorted(self._ns.keys())
 
     def items(self) -> Iterator[tuple]:
@@ -159,9 +158,8 @@ class NamespaceRegistry(Generic[T]):
         """True if qualified name exists OR if a bare name has ≥1 owner.
 
         This supports both:
-        - ``"plugin.name" in registry`` → exact qualified lookup
-        - ``"plugin::name" in registry`` → normalised to ``"plugin.name"``
-        - ``"name" in registry`` → True if registered under any plugin
+        - ``"namespace.name" in registry`` → exact qualified lookup
+        - ``"name" in registry`` → True if registered under any namespace
         """
         ref = self._normalize_ref(ref)
         if "." in ref:
@@ -171,30 +169,26 @@ class NamespaceRegistry(Generic[T]):
     def __len__(self) -> int:
         return len(self._flat)
 
-    # ── Dict-compat API (backward-compat during migration) ───────────────────
-    # Callers that previously used self.tools["name"] or self.agents.get("name")
-    # will continue working. T030 migrates them to use .resolve() explicitly.
-
     def get(self, ref: str, default: Optional[T] = None) -> Optional[T]:  # type: ignore[override]
-        """Dict-compat: resolve *ref*, return *default* on miss or ambiguity."""
+        """Resolve *ref*, return *default* on miss or ambiguity."""
         try:
             return self.resolve(ref)
         except RegistryError:
             return default
 
     def __getitem__(self, ref: str) -> T:
-        """Dict-compat: resolve *ref*. Raises ``KeyError`` on miss (wraps RegistryError)."""
+        """Resolve *ref*. Raises ``KeyError`` on miss."""
         try:
             return self.resolve(ref)
         except RegistryError as exc:
             raise KeyError(str(exc)) from exc
 
     def keys(self):  # type: ignore[override]
-        """Dict-compat: all qualified names (e.g. 'core.read_file')."""
+        """All qualified names (e.g. 'core.read_file')."""
         return self._flat.keys()
 
     def values(self):  # type: ignore[override]
-        """Dict-compat: all registered implementations."""
+        """All registered implementations."""
         return self._flat.values()
 
     # ── Snapshot API (FR-011 Hot-Reload) ─────────────────────────────────────
@@ -206,8 +200,8 @@ class NamespaceRegistry(Generic[T]):
         Pattern::
 
             new_reg = NamespaceRegistry()
-            for plugin, name, impl in load_all_plugins():
-                new_reg.register(plugin, name, impl)
+            for namespace, name, impl in load_all_plugins():
+                new_reg.register(namespace, name, impl)
             holder.swap(new_pm)          # atomic pointer swap
         """
         clone: NamespaceRegistry[T] = NamespaceRegistry()
@@ -219,7 +213,7 @@ class NamespaceRegistry(Generic[T]):
 
 class RegistryHolder:
     """
-    Thread-safe wrapper that holds the active PluginManager snapshot.
+    Thread-safe wrapper that holds the active workspace catalog snapshot.
 
     Session-start code calls ``get()`` ONCE and stores result in a local variable.
     The entire ``flow.run(shared)`` call uses that frozen reference.
@@ -239,7 +233,7 @@ class RegistryHolder:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._registry: Optional[object] = None  # PluginManager at runtime
+        self._registry: Optional[object] = None  # WorkspaceCatalog at runtime
 
     def get(self) -> object:
         """Read active registry. Fast path — no lock needed (GIL-safe)."""

@@ -13,9 +13,6 @@ class _EngineStub:
     def list_prompts(self):
         return []
 
-    def list_modes(self):
-        return []
-
     def list_skills(self):
         return []
 
@@ -180,13 +177,13 @@ class _DuplicateAgentListingEngineStub(_EngineStub):
 
 class _AgentListingEngineStub(_EngineStub):
     def list_available_agents(self):
-        return ["core::react", "coder.safe", "review.safe"]
+        return ["core.react", "coder.safe", "review.safe"]
 
     def get_agent_profile(self, name=None):
         profiles = {
-            "core::react": SimpleNamespace(name="core::react", source="synthesised"),
+            "core.react": SimpleNamespace(name="core.react", source="synthesised"),
             "coder.safe": SimpleNamespace(name="coder.safe", source="workspace"),
-            "review.safe": SimpleNamespace(name="review.safe", source="plugin"),
+            "review.safe": SimpleNamespace(name="review.safe", source="namespace"),
         }
         if name is None:
             return profiles["coder.safe"]
@@ -268,52 +265,12 @@ class _EditableProfileEngineStub(_EngineStub):
 
 class _ModeSkillEngineStub(_EngineStub):
     def __init__(self):
-        self.active_mode = None
         self.active_skills = []
-        self.mode_switches = []
         self.skill_enabled = []
         self.skill_disabled = []
 
-    def list_modes(self):
-        return ["review", "build"]
-
     def list_skills(self):
         return ["python-testing", "azure-prepare"]
-
-    def get_mode(self, name=None):
-        modes = {
-            "review": SimpleNamespace(
-                name="review",
-                description="Review mode",
-                flow="core::react",
-                agent=None,
-                llm_profile="smart",
-                tools=["core.read_file"],
-                tools_specified=True,
-                extra_prompts=["prompts/review.md"],
-                tool_confirmation={"default": "confirm"},
-                source_path=Path("/tmp/review.md"),
-            ),
-            "build": SimpleNamespace(
-                name="build",
-                description="Build mode",
-                flow="core::react",
-                agent=None,
-                llm_profile=None,
-                tools=None,
-                tools_specified=False,
-                extra_prompts=[],
-                tool_confirmation={},
-                source_path=Path("/tmp/build.md"),
-            ),
-        }
-        if name is None:
-            return self.active_mode
-        return modes.get(name)
-
-    def set_mode(self, name):
-        self.mode_switches.append(name)
-        self.active_mode = self.get_mode(name) if name is not None else None
 
     def get_skill(self, name):
         skills = {
@@ -350,7 +307,6 @@ class _StatusEngineStub(_EngineStub):
             "runtime_flow": "internal-router",
             "flow": "core::react",
             "agent": "coder.safe",
-            "mode": "review",
             "skills": ["python-testing"],
             "global_llm_override": None,
             "agent_llm_overrides": {},
@@ -369,7 +325,6 @@ class _WarningStatusEngineStub(_EngineStub):
             "runtime_flow": "internal-router",
             "flow": "core::react",
             "agent": "coder.safe",
-            "mode": "review",
             "skills": ["python-testing"],
             "global_llm_override": None,
             "agent_llm_overrides": {},
@@ -437,15 +392,33 @@ class _AssetCommandEngineStub(_EngineStub):
         self.edit_calls: list[tuple[str, str, str]] = []
         self.delete_calls: list[tuple[str, str]] = []
 
+    def _asset_path(self, asset_kind: str, name: str) -> Path:
+        root = self.workspace_root / ".pocketcode"
+        if asset_kind == "agent":
+            parts = [part for part in name.split(".") if part]
+            group = parts[0]
+            relative_parts = parts[1:] or [group]
+            target_dir = root / f"agent.{group}"
+            if len(relative_parts) > 1:
+                target_dir = target_dir.joinpath(*relative_parts[:-1])
+            return target_dir / f"{relative_parts[-1]}.agent.md"
+        if asset_kind == "tool":
+            return root / f"{name}.tool.md"
+        return root / f"{name}.md"
+
+    def _companion_path(self, asset_kind: str, name: str) -> Path | None:
+        if asset_kind != "tool":
+            return None
+        return self.workspace_root / ".pocketcode" / f"{name}.tool.py"
+
     def create_markdown_asset(self, asset_kind: str, name: str):
         self.created_calls.append((asset_kind, name))
-        target_dir = self.workspace_root / ".pocketcode" / f"{asset_kind}s"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        asset_path = target_dir / f"{name}.md"
+        asset_path = self._asset_path(asset_kind, name)
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_text(f"{asset_kind}:{name}\n", encoding="utf-8")
-        companion_path = None
-        if asset_kind == "tool":
-            companion_path = target_dir / f"{name}.py"
+        companion_path = self._companion_path(asset_kind, name)
+        if companion_path is not None:
+            companion_path.parent.mkdir(parents=True, exist_ok=True)
             companion_path.write_text("class Placeholder: pass\n", encoding="utf-8")
         return {
             "kind": asset_kind,
@@ -460,26 +433,25 @@ class _AssetCommandEngineStub(_EngineStub):
 
     def get_markdown_asset(self, asset_kind: str, name: str):
         self.show_calls.append((asset_kind, name))
-        asset_path = self.workspace_root / ".pocketcode" / f"{asset_kind}s" / f"{name}.md"
+        asset_path = self._asset_path(asset_kind, name)
         asset_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_text(f"---\nname: {name}\n---\nbody\n", encoding="utf-8")
         return {
             "kind": asset_kind,
             "name": name,
             "path": asset_path,
-            "companion_path": None,
+            "companion_path": self._companion_path(asset_kind, name),
             "text": asset_path.read_text(encoding="utf-8"),
         }
 
     def clone_markdown_asset(self, asset_kind: str, source_name: str, new_name: str):
         self.clone_calls.append((asset_kind, source_name, new_name))
-        target_dir = self.workspace_root / ".pocketcode" / f"{asset_kind}s"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        asset_path = target_dir / f"{new_name}.md"
+        asset_path = self._asset_path(asset_kind, new_name)
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_text(f"clone:{source_name}->{new_name}\n", encoding="utf-8")
-        companion_path = None
-        if asset_kind == "tool":
-            companion_path = target_dir / f"{new_name}.py"
+        companion_path = self._companion_path(asset_kind, new_name)
+        if companion_path is not None:
+            companion_path.parent.mkdir(parents=True, exist_ok=True)
             companion_path.write_text("class Placeholder: pass\n", encoding="utf-8")
         return {
             "kind": asset_kind,
@@ -490,24 +462,23 @@ class _AssetCommandEngineStub(_EngineStub):
 
     def update_markdown_asset(self, asset_kind: str, name: str, *, markdown_text: str):
         self.edit_calls.append((asset_kind, name, markdown_text))
-        asset_path = self.workspace_root / ".pocketcode" / f"{asset_kind}s" / f"{name}.md"
+        asset_path = self._asset_path(asset_kind, name)
         asset_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_text(markdown_text, encoding="utf-8")
         return {
             "kind": asset_kind,
             "name": name,
             "path": asset_path,
-            "companion_path": None,
+            "companion_path": self._companion_path(asset_kind, name),
         }
 
     def delete_markdown_asset(self, asset_kind: str, name: str):
         self.delete_calls.append((asset_kind, name))
-        asset_path = self.workspace_root / ".pocketcode" / f"{asset_kind}s" / f"{name}.md"
+        asset_path = self._asset_path(asset_kind, name)
         asset_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_text("to-delete\n", encoding="utf-8")
-        companion_path = None
-        if asset_kind == "tool":
-            companion_path = asset_path.with_suffix(".py")
+        companion_path = self._companion_path(asset_kind, name)
+        if companion_path is not None:
             companion_path.write_text("class Placeholder: pass\n", encoding="utf-8")
         asset_path.unlink()
         return {
@@ -554,10 +525,16 @@ class _StackVmCommandEngineStub(_EngineStub):
         path = self.workspace_root / ".pocketcode" / "flows" / f"{name}.md"
         agent = None
         if agent_name:
+            parts = [part for part in agent_name.split(".") if part]
+            group = parts[0]
+            relative_parts = parts[1:] or [group]
+            agent_dir = self.workspace_root / ".pocketcode" / f"agent.{group}"
+            if len(relative_parts) > 1:
+                agent_dir = agent_dir.joinpath(*relative_parts[:-1])
             agent = {
                 "name": agent_name,
                 "flow": name,
-                "path": self.workspace_root / ".pocketcode" / "agents" / f"{agent_name}.md",
+                "path": agent_dir / f"{relative_parts[-1]}.agent.md",
             }
         return {"name": name, "path": path, "entry": entry, "agent": agent}
 
@@ -567,7 +544,13 @@ class _StackVmCommandEngineStub(_EngineStub):
 
     def create_stackvm_agent(self, name, *, flow_name):
         self.create_agent_calls.append((name, flow_name))
-        return {"name": name, "flow": flow_name, "path": self.workspace_root / ".pocketcode" / "agents" / f"{name}.md"}
+        parts = [part for part in name.split(".") if part]
+        group = parts[0]
+        relative_parts = parts[1:] or [group]
+        agent_dir = self.workspace_root / ".pocketcode" / f"agent.{group}"
+        if len(relative_parts) > 1:
+            agent_dir = agent_dir.joinpath(*relative_parts[:-1])
+        return {"name": name, "flow": flow_name, "path": agent_dir / f"{relative_parts[-1]}.agent.md"}
 
     def inspect_stackvm_target(self, kind, target, *, entry=None):
         self.inspect_calls.append((kind, target, entry))
@@ -734,7 +717,7 @@ class TestCommandHandlerParsing:
         captured = capsys.readouterr()
         assert engine.show_calls == [("tool", "sample_tool")]
         assert "Asset: tool sample_tool" in captured.out
-        assert ".pocketcode/tools/sample_tool.md" in captured.out
+        assert ".pocketcode/sample_tool.tool.md" in captured.out
         assert "name: sample_tool" in captured.out
 
     def test_asset_create_tool_creates_markdown_and_handler(self, tmp_path, capsys):
@@ -749,8 +732,8 @@ class TestCommandHandlerParsing:
         handle_command("/asset create tool sample_tool", engine=engine, cli_context=cli_context)
 
         captured = capsys.readouterr()
-        asset_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
-        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        asset_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
+        handler_path = tmp_path / ".pocketcode" / "sample_tool.tool.py"
         assert engine.created_calls == [("tool", "sample_tool")]
         assert asset_path.is_file()
         assert handler_path.is_file()
@@ -1435,26 +1418,6 @@ class TestModeAndSkillCommands:
         assert "  azure:" in captured.out
         assert "  python:" in captured.out
 
-    def test_mode_switch_activates_mode(self, capsys):
-        engine = _ModeSkillEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command("/mode switch review", engine=engine, cli_context=cli_context)
-
-        assert engine.mode_switches == ["review"]
-        captured = capsys.readouterr()
-        assert "Mode activated: review" in captured.out
-
-    def test_mode_show_prints_mode_details(self, capsys):
-        engine = _ModeSkillEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command("/mode show review", engine=engine, cli_context=cli_context)
-
-        captured = capsys.readouterr()
-        assert "Mode: review" in captured.out
-        assert "Flow     : core::react" in captured.out
-
     def test_skill_enable_updates_session(self, capsys):
         engine = _ModeSkillEngineStub()
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -1623,22 +1586,19 @@ class TestModeAndSkillCommands:
 
 
 class TestWorkspaceCanonicalToolImports:
-    def test_tools_package_exports_workspace_owned_git_class(self):
-        from pocketcode.tools import GitStatusTool
-        from pocketcode.core.workspace_module_loader import load_workspace_plugin_module
+    def test_workspace_git_tool_loads_from_flat_resource_root(self):
+        from pocketcode.core.workspace_module_loader import load_workspace_module
 
-        workspace_git = load_workspace_plugin_module(".pocketcode", "plugins", "workspace_git", "tools", "git.py")
+        workspace_git = load_workspace_module(".pocketcode", "workspace_git.git.tool.py")
 
-        assert GitStatusTool is workspace_git.GitStatusTool
+        assert "workspace_loader" in workspace_git.GitStatusTool.__module__
 
-    def test_legacy_context_shim_resolves_workspace_owned_class(self):
-        from pocketcode.tools.context_elephant_store_tools import ReadContextElephantStoreFileTool
-        from pocketcode.plugins.core.tools.context_elephant_store_tools import ReadContextElephantStoreFileTool as CoreTool
-        from pocketcode.core.workspace_module_loader import load_workspace_plugin_module
+    def test_workspace_context_tool_loads_from_flat_resource_root(self):
+        from pocketcode.core.workspace_module_loader import load_workspace_module
 
-        workspace_context = load_workspace_plugin_module(
-            ".pocketcode", "plugins", "workspace_context", "tools", "context_elephant_store_tools.py"
+        workspace_context = load_workspace_module(
+            ".pocketcode",
+            "workspace_context.context_elephant_store_tools.tool.py",
         )
 
-        assert ReadContextElephantStoreFileTool is CoreTool
-        assert CoreTool is workspace_context.ReadContextElephantStoreFileTool
+        assert workspace_context.ReadContextElephantStoreFileTool.__name__ == "ReadContextElephantStoreFileTool"

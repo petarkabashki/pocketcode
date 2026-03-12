@@ -27,7 +27,7 @@ def _make_agent_def(
     default_agent_profile: AgentProfile | None = None,
 ) -> tuple[str, AgentDefinition]:
     """Return (qualified_name, AgentDefinition) for test fixtures."""
-    qname = f"{plugin_name}::{agent_name}"
+    qname = f"{plugin_name}.{agent_name}"
     defn = AgentDefinition(
         name=agent_name,
         llm_profile=llm_profile,
@@ -83,14 +83,14 @@ class TestSynthesisedDefaults:
 # ---------------------------------------------------------------------------
 
 
-class TestPluginDeclaredProfile:
-    def test_plugin_declared_profile_wins_over_synthesised(self, tmp_path):
+class TestNamespaceDeclaredProfile:
+    def test_namespace_declared_profile_wins_over_synthesised(self, tmp_path):
         qname, defn = _make_agent_def("p", "a")
         declared = AgentProfile(
-            name="p::a:custom",
+            name="p.a:custom",
             flow=qname,
             llm_profile="gpt-4",
-            source="plugin",
+            source="namespace",
         )
         defn.default_agent_profile = declared
 
@@ -98,118 +98,113 @@ class TestPluginDeclaredProfile:
         apm.load({qname: defn})
 
         # Plugin-declared name must exist with the right LLM
-        plug = apm.get("p::a:custom")
+        plug = apm.get("p.a:custom")
         assert plug is not None
         assert plug.llm_profile == "gpt-4"
-        assert plug.source == "plugin"
-        # No separate synthesised entry — plugin declared its own explicit profile.
+        assert plug.source == "namespace"
+        # No separate synthesised entry — the namespace declared its own explicit profile.
         assert apm.get(qname) is None
 
-    def test_plugin_name_fallback_to_qualified(self, tmp_path):
+    def test_namespace_name_fallback_to_qualified(self, tmp_path):
         qname, defn = _make_agent_def("myplugin", "myagent")
-        # Simulate plugin YAML where name field is absent (plugin_manager sets name=qname)
-        declared = AgentProfile(name=qname, flow=qname, source="plugin")
+        declared = AgentProfile(name=qname, flow=qname, source="namespace")
         defn.default_agent_profile = declared
 
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
         profile = apm.get(qname)
-        assert profile.source == "plugin"
+        assert profile.source == "namespace"
 
-    def test_plugin_local_agent_yaml_loads_and_inherits_flow_defaults(self, tmp_path):
+    def test_namespace_local_agent_yaml_loads_without_copying_flow_defaults(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent", llm_profile="gemini_fast")
         defn.tools = ["tool.read", "tool.write"]
-        plugin_root = tmp_path / "plugins" / "plug"
-        agents_dir = plugin_root / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
-        (agents_dir / "agent.yaml").write_text(
+        plugin_root = tmp_path / "plug"
+        plugin_root.mkdir(parents=True, exist_ok=True)
+        (plugin_root / "agent.agent.yaml").write_text(
             yaml.safe_dump(
                 {
-                    "name": "plug::agent",
+                    "name": "plug.agent",
                     "flow": qname,
-                    "description": "Plugin-local composite agent.",
+                    "description": "Namespace-local composite agent.",
                 },
                 sort_keys=False,
             ),
             encoding="utf-8",
         )
-        defn.metadata = {"plugin_root": str(plugin_root)}
+        defn.metadata = {"namespace_root": str(plugin_root)}
 
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
-        profile = apm.get("plug::agent")
+        profile = apm.get("plug.agent")
         assert profile is not None
-        assert profile.source == "plugin"
-        assert profile.flow == qname.replace("::", ".")
-        assert profile.llm_profile == "gemini_fast"
-        assert profile.tools == ["tool.read", "tool.write"]
+        assert profile.source == "namespace"
+        assert profile.flow == qname
+        assert profile.llm_profile is None
+        assert profile.tools is None
 
-    def test_plugin_local_agent_yaml_normalizes_legacy_flow_reference(self, tmp_path):
+    def test_namespace_local_agent_yaml_uses_dotted_flow_reference(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        plugin_root = tmp_path / "plugins" / "plug"
-        agents_dir = plugin_root / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
-        (agents_dir / "agent.yaml").write_text(
+        plugin_root = tmp_path / "plug"
+        plugin_root.mkdir(parents=True, exist_ok=True)
+        (plugin_root / "agent.agent.yaml").write_text(
             yaml.safe_dump(
                 {
-                    "name": "plug::agent",
+                    "name": "plug.agent",
                     "flow": qname,
                 },
                 sort_keys=False,
             ),
             encoding="utf-8",
         )
-        defn.metadata = {"plugin_root": str(plugin_root)}
+        defn.metadata = {"namespace_root": str(plugin_root)}
 
         apm = AgentProfileManager(tmp_path)
-        apm.load({qname.replace("::", "."): defn})
+        apm.load({qname: defn})
 
-        profile = apm.get("plug::agent")
+        profile = apm.get("plug.agent")
         assert profile is not None
         assert profile.flow == "plug.agent"
 
-    def test_plugin_local_markdown_agent_resolves_prompt_imports_in_plugin_context(self, tmp_path):
+    def test_namespace_local_markdown_agent_resolves_prompt_imports_in_namespace_context(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        plugin_root = tmp_path / "plugins" / "plug"
-        agents_dir = plugin_root / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
-        (agents_dir / "agent.md").write_text(
+        plugin_root = tmp_path / "plug"
+        plugin_root.mkdir(parents=True, exist_ok=True)
+        (plugin_root / "agent.agent.md").write_text(
             """---
-name: plug::agent
-flow: plug::agent
+name: plug.agent
+flow: plug.agent
 ---
 {{ import:prompt:review }}
 """,
             encoding="utf-8",
         )
-        defn.metadata = {"plugin_root": str(plugin_root), "plugin": "plug"}
+        defn.metadata = {"namespace_root": str(plugin_root), "namespace": "plug"}
         prompts = NamespaceRegistry()
         prompts.register("plug", "review", "Plugin-local imported prompt.")
 
         apm = AgentProfileManager(tmp_path, prompt_registry=prompts)
         apm.load({qname: defn})
 
-        profile = apm.get("plug::agent")
+        profile = apm.get("plug.agent")
         assert profile is not None
         assert profile.inline_prompt == "Plugin-local imported prompt."
 
-    def test_plugin_agent_yaml_respects_plugin_ignore_rules(self, tmp_path):
+    def test_namespace_agent_yaml_respects_ignore_rules(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        plugin_root = tmp_path / "plugins" / "plug"
-        agents_dir = plugin_root / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
-        (tmp_path / ".pocketcodeignore").write_text("plug/agents/*.yaml\n!plug/agents/keep.yaml\n", encoding="utf-8")
-        (agents_dir / "drop.yaml").write_text(
+        plugin_root = tmp_path / "plug"
+        plugin_root.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".pocketcodeignore").write_text("plug/*.agent.yaml\n!plug/keep.agent.yaml\n", encoding="utf-8")
+        (plugin_root / "drop.agent.yaml").write_text(
             yaml.safe_dump({"name": "drop", "flow": qname}, sort_keys=False),
             encoding="utf-8",
         )
-        (agents_dir / "keep.yaml").write_text(
+        (plugin_root / "keep.agent.yaml").write_text(
             yaml.safe_dump({"name": "keep", "flow": qname}, sort_keys=False),
             encoding="utf-8",
         )
-        defn.metadata = {"plugin_root": str(plugin_root)}
+        defn.metadata = {"namespace_root": str(plugin_root)}
 
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
@@ -232,23 +227,22 @@ class TestWorkspaceYamlLoading:
 
     def test_workspace_yaml_loaded(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
+        ws_profiles = tmp_path / ".pocketcode"
         self._write_ws_profile(
             ws_profiles,
-            "custom.yaml",
+            "custom.agent.yaml",
             {"name": "custom", "flow": qname},
         )
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
-
         assert apm.get("custom") is not None
 
     def test_workspace_profiles_load_from_additional_resource_root(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        ws_profiles = tmp_path / ".pocketflow" / "agents"
+        ws_profiles = tmp_path / ".pocketflow"
         self._write_ws_profile(
             ws_profiles,
-            "flow-review.yaml",
+            "flow-review.agent.yaml",
             {"name": "flow-review", "flow": qname},
         )
 
@@ -259,12 +253,12 @@ class TestWorkspaceYamlLoading:
 
     def test_workspace_markdown_agent_profile_loads_inline_prompt(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        profiles_dir = tmp_path / ".pocketcode" / "agents"
+        profiles_dir = tmp_path / ".pocketcode"
         profiles_dir.mkdir(parents=True, exist_ok=True)
-        (profiles_dir / "review.md").write_text(
+        (profiles_dir / "review.agent.md").write_text(
             """---
 name: review
-flow: plug::agent
+flow: plug.agent
 tools:
   - tool:core.read_file
 ---
@@ -274,7 +268,7 @@ Review only the changed files.
         )
 
         apm = AgentProfileManager(tmp_path)
-        apm.load({qname.replace("::", "."): defn})
+        apm.load({qname: defn})
 
         profile = apm.get("review")
         assert profile is not None
@@ -282,14 +276,80 @@ Review only the changed files.
         assert profile.tools == ["core.read_file"]
         assert profile.inline_prompt == "Review only the changed files."
 
-    def test_workspace_markdown_agent_profile_resolves_prompt_imports(self, tmp_path):
+    def test_workspace_root_agent_convention_loads_agent_profile(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        profiles_dir = tmp_path / ".pocketcode" / "agents"
-        profiles_dir.mkdir(parents=True, exist_ok=True)
-        (profiles_dir / "review.md").write_text(
+        source_path = tmp_path / ".pocketcode" / "review.agent.md"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(
             """---
 name: review
-flow: plug::agent
+flow: plug.agent
+---
+Review only the changed files.
+""",
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        profile = apm.get("review")
+        assert profile is not None
+        assert profile.flow == "plug.agent"
+        assert profile.inline_prompt == "Review only the changed files."
+        assert profile.source_path == source_path.resolve()
+
+    def test_workspace_agents_folder_loads_markdown_agent_profile(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        source_path = tmp_path / ".pocketcode" / "agents" / "review" / "safe.agent.md"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(
+            """---
+flow: plug.agent
+---
+Review only the changed files.
+""",
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        profile = apm.get("review.safe")
+        assert profile is not None
+        assert profile.flow == "plug.agent"
+        assert profile.inline_prompt == "Review only the changed files."
+        assert profile.source_path == source_path.resolve()
+
+    def test_workspace_typed_agent_folder_loads_markdown_agent_profile(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        source_path = tmp_path / ".pocketcode" / "agent.review" / "safe.agent.md"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(
+            """---
+flow: plug.agent
+---
+Review only the changed files.
+""",
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        profile = apm.get("review.safe")
+        assert profile is not None
+        assert profile.flow == "plug.agent"
+        assert profile.inline_prompt == "Review only the changed files."
+
+    def test_workspace_markdown_agent_profile_resolves_prompt_imports(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        profiles_dir = tmp_path / ".pocketcode"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "review.agent.md").write_text(
+            """---
+name: review
+flow: plug.agent
 ---
 {{ import:prompt:review }}
 """,
@@ -299,21 +359,88 @@ flow: plug::agent
         prompts.register("workspace", "review", "Imported workspace prompt.")
 
         apm = AgentProfileManager(tmp_path, prompt_registry=prompts)
-        apm.load({qname.replace("::", "."): defn})
+        apm.load({qname: defn})
 
         profile = apm.get("review")
         assert profile is not None
         assert profile.inline_prompt == "Imported workspace prompt."
 
+
+class TestInheritedAgents:
+    def test_workspace_agent_can_extend_another_agent(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent", llm_profile="base-llm")
+        defn.tools = ["tool.read"]
+        profiles_dir = tmp_path / ".pocketcode"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "base.agent.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "base",
+                    "flow": qname,
+                    "llm_profile": "review-llm",
+                    "extra_prompts": ["prompts/base.md"],
+                    "tools": ["tool.read"],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (profiles_dir / "child.agent.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "child",
+                    "extends": "base",
+                    "extra_prompts": ["prompts/child.md"],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        child = apm.resolve("child")
+        assert child is not None
+        assert child.flow == "plug.agent"
+        assert child.base_agent == "base"
+        assert child.llm_profile == "review-llm"
+        assert child.tools == ["tool.read"]
+        assert child.extra_prompts == ["prompts/base.md", "prompts/child.md"]
+
+    def test_workspace_agent_extends_unknown_base_is_not_resolved(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent")
+        profiles_dir = tmp_path / ".pocketcode"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "child.agent.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "child",
+                    "extends": "missing",
+                    "flow": qname,
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        assert apm.get("child") is not None
+        assert apm.resolve("child") is None
+
+
+class TestWorkspaceYamlLoadingContinued(TestWorkspaceYamlLoading):
     def test_workspace_markdown_agent_profile_is_saved_as_markdown(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        profiles_dir = tmp_path / ".pocketcode" / "agents"
+        profiles_dir = tmp_path / ".pocketcode"
         profiles_dir.mkdir(parents=True, exist_ok=True)
-        source_path = profiles_dir / "review.md"
+        source_path = profiles_dir / "review.agent.md"
         source_path.write_text(
             """---
 name: review
-flow: plug::agent
+flow: plug.agent
 ---
 Initial prompt.
 """,
@@ -333,10 +460,10 @@ Initial prompt.
 
     def test_workspace_yaml_loads_profile_skills(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        ws_profiles = tmp_path / ".pocketcode" / "agents"
+        ws_profiles = tmp_path / ".pocketcode"
         self._write_ws_profile(
             ws_profiles,
-            "custom.yaml",
+            "custom.agent.yaml",
             {"name": "custom", "flow": qname, "skills": ["python-lint", "python-testing"]},
         )
         apm = AgentProfileManager(tmp_path)
@@ -348,8 +475,8 @@ Initial prompt.
 
     def test_workspace_profile_source_is_workspace(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
-        self._write_ws_profile(ws_profiles, "ws.yaml", {"name": "ws", "flow": qname})
+        ws_profiles = tmp_path / ".pocketcode"
+        self._write_ws_profile(ws_profiles, "ws.agent.yaml", {"name": "ws", "flow": qname})
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
@@ -361,16 +488,16 @@ Initial prompt.
         (tmp_path / ".pocketcode" / ".pocketcodeignore").write_text(
             "\n".join(
                 [
-                    "agents/*.yaml",
-                    "!agents/keep.yaml",
+                    "*.agent.yaml",
+                    "!keep.agent.yaml",
                 ]
             ),
             encoding="utf-8",
         )
-        ws_profiles = tmp_path / ".pocketcode" / "agents"
-        self._write_ws_profile(ws_profiles, "drop.yaml", {"name": "drop", "flow": qname})
-        self._write_ws_profile(ws_profiles, "keep.yaml", {"name": "keep", "flow": qname})
-        self._write_ws_profile(ws_profiles, "hidden.disabled.yaml", {"name": "hidden", "flow": qname})
+        ws_profiles = tmp_path / ".pocketcode"
+        self._write_ws_profile(ws_profiles, "drop.agent.yaml", {"name": "drop", "flow": qname})
+        self._write_ws_profile(ws_profiles, "keep.agent.yaml", {"name": "keep", "flow": qname})
+        self._write_ws_profile(ws_profiles, "hidden.disabled.agent.yaml", {"name": "hidden", "flow": qname})
 
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
@@ -381,10 +508,10 @@ Initial prompt.
 
     def test_invalid_typed_flow_reference_skips_workspace_profile(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        ws_profiles = tmp_path / ".pocketcode" / "agents"
+        ws_profiles = tmp_path / ".pocketcode"
         self._write_ws_profile(
             ws_profiles,
-            "bad.yaml",
+            "bad.agent.yaml",
             {"name": "bad", "flow": "tool:core.read_file"},
         )
 
@@ -395,10 +522,10 @@ Initial prompt.
 
     def test_workspace_profile_loader_normalizes_typed_refs(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        ws_profiles = tmp_path / ".pocketcode" / "agents"
+        ws_profiles = tmp_path / ".pocketcode"
         self._write_ws_profile(
             ws_profiles,
-            "typed.yaml",
+            "typed.agent.yaml",
             {
                 "name": "typed",
                 "flow": "flow:plug.agent",
@@ -418,9 +545,9 @@ Initial prompt.
 
     def test_workspace_beats_synthesised_same_name(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
+        ws_profiles = tmp_path / ".pocketcode"
         # workspace file claims the same name as the synthesised profile
-        self._write_ws_profile(ws_profiles, "collision.yaml", {"name": qname, "flow": qname, "llm_profile": "ws-llm"})
+        self._write_ws_profile(ws_profiles, "collision.agent.yaml", {"name": qname, "flow": qname, "llm_profile": "ws-llm"})
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
@@ -430,19 +557,19 @@ Initial prompt.
 
     def test_plugin_beats_workspace_same_name(self, tmp_path, caplog):
         qname, defn = _make_agent_def("plug", "agent")
-        declared = AgentProfile(name="shared", flow=qname, llm_profile="plugin-llm", source="plugin")
+        declared = AgentProfile(name="shared", flow=qname, llm_profile="namespace-llm", source="namespace")
         defn.default_agent_profile = declared
 
-        ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
-        self._write_ws_profile(ws_profiles, "ws.yaml", {"name": "shared", "flow": qname, "llm_profile": "ws-llm"})
+        ws_profiles = tmp_path / ".pocketcode"
+        self._write_ws_profile(ws_profiles, "ws.agent.yaml", {"name": "shared", "flow": qname, "llm_profile": "ws-llm"})
 
         apm = AgentProfileManager(tmp_path)
         with caplog.at_level("WARNING"):
             apm.load({qname: defn})
 
         profile = apm.get("shared")
-        assert profile.source == "plugin"
-        assert profile.llm_profile == "plugin-llm"
+        assert profile.source == "namespace"
+        assert profile.llm_profile == "namespace-llm"
 
 
 # ---------------------------------------------------------------------------
@@ -452,9 +579,9 @@ Initial prompt.
 
 class TestMalformedYaml:
     def test_malformed_yaml_skipped_with_warning(self, tmp_path, caplog):
-        ws_profiles = tmp_path / ".pocketcode" / "agent-profiles"
+        ws_profiles = tmp_path / ".pocketcode"
         ws_profiles.mkdir(parents=True, exist_ok=True)
-        bad = ws_profiles / "bad.yaml"
+        bad = ws_profiles / "bad.agent.yaml"
         bad.write_text("key: [unclosed")
 
         qname, defn = _make_agent_def("p", "a")
@@ -505,16 +632,16 @@ class TestClone:
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
         apm.clone(qname, "cloned")
-        yaml_file = tmp_path / ".pocketcode" / "agents" / "cloned.yaml"
+        yaml_file = tmp_path / ".pocketcode" / "agent.cloned" / "cloned.agent.yaml"
         assert yaml_file.exists()
 
     def test_save_writes_profile_skills(self, tmp_path):
         profile = AgentProfile(
             name="cloned",
-            flow="p::a",
+            flow="p.a",
             skills=["python-testing"],
             source="workspace",
-            source_path=tmp_path / ".pocketcode" / "agents" / "cloned.yaml",
+            source_path=tmp_path / ".pocketcode" / "cloned.agent.yaml",
         )
         apm = AgentProfileManager(tmp_path)
 
@@ -528,16 +655,16 @@ class TestClone:
             name="cloned",
             flow="agent:coder.coder",
             extra_prompts=["prompt:resource_root.pocketcode.review", "prompts/base.md"],
-            tools=["tool:filesystem.read_file", "search::web_search"],
+            tools=["tool:filesystem.read_file", "search.web_search"],
             tool_confirmation={
                 "default": "confirm",
                 "overrides": {
                     "tool:filesystem.delete_file": "deny",
-                    "search::web_search": "allow",
+                    "search.web_search": "allow",
                 },
             },
             source="workspace",
-            source_path=tmp_path / ".pocketcode" / "agents" / "cloned.yaml",
+            source_path=tmp_path / ".pocketcode" / "cloned.agent.yaml",
         )
         apm = AgentProfileManager(tmp_path)
 
@@ -598,3 +725,69 @@ class TestReload:
         assert apm.get(qname2) is not None
         # old profile should no longer exist (no workspace yaml for it)
         assert apm.get(qname1) is None
+
+
+# ---------------------------------------------------------------------------
+# TestSelfContainedMarkdownAgent
+# ---------------------------------------------------------------------------
+
+
+class TestSelfContainedMarkdownAgent:
+    def test_self_contained_markdown_agent_registers_flow(self, tmp_path):
+        profiles_dir = tmp_path / ".pocketcode"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "hybrid.agent.md").write_text(
+            """---
+name: hybrid
+vm_source: |
+  [ "Hybrid ready." answer ] "main" define
+vm_entry: main
+---
+Hybrid agent prompt.
+""",
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({})
+
+        # Agent should be registered
+        profile = apm.get("hybrid")
+        assert profile is not None
+        assert profile.name == "hybrid"
+        assert profile.flow == "agents.hybrid"
+        assert profile.inline_prompt == "Hybrid agent prompt."
+
+        # Flow should be registered in the manager's internal flow definitions
+        flow_def = apm._flow_definitions.get("agents.hybrid")
+        assert flow_def is not None
+        assert flow_def.name == "agents.hybrid"
+        assert flow_def.vm_source == '[ "Hybrid ready." answer ] "main" define'
+        assert flow_def.vm_entry == "main"
+        assert flow_def.execution_mode == "vm"
+
+    def test_self_contained_markdown_agent_with_explicit_flow_name(self, tmp_path):
+        profiles_dir = tmp_path / ".pocketcode"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "hybrid.agent.md").write_text(
+            """---
+name: hybrid
+flow: custom.flow
+vm_source: |
+  [ "Hybrid ready." answer ] "main" define
+vm_entry: main
+---
+""",
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({})
+
+        profile = apm.get("hybrid")
+        assert profile is not None
+        assert profile.flow == "custom.flow"
+
+        flow_def = apm._flow_definitions.get("custom.flow")
+        assert flow_def is not None
+        assert flow_def.vm_source == '[ "Hybrid ready." answer ] "main" define'

@@ -6,17 +6,17 @@ Use this together with `markdown_assets.md` for the canonical StackVM surface, `
 
 ## Shared Helper Conventions
 
-**For the canonical description of StackVM helper conventions and architectural split, always refer to `stackvm_cookbook.md`.**
+**For the canonical description of self-contained StackVM authoring, combinators, macros, and when to extract helper modules, always refer to `stackvm_cookbook.md`.**
 
-Most payload-driven checked-in examples now keep reusable normalization helpers in `vm/common.vm` and reserve `vm/router.vm` for orchestration logic. See `stackvm_cookbook.md` for the definitive list and description of normalization/formatting helpers and the architectural split.
+Most payload-driven checked-in examples can be authored as one self-contained Markdown VM program. Some checked-in examples extract reusable normalization helpers into `vm/common.vm`; see `stackvm_cookbook.md` for when that extraction is justified.
 
-Examples that use this helper style include `stackvm_buttons_plugin`, `stackvm_radio_plugin`, `stackvm_checklist_handoff_plugin`, `stackvm_multistage_pipeline_plugin`, the delegate-return routing/finalize examples, and the plain normalization examples.
+Examples that use this helper style include `stackvm_buttons_example`, `stackvm_radio_example`, `stackvm_checklist_handoff_example`, `stackvm_multistage_pipeline_example`, the delegate-return routing/finalize examples, and the plain normalization examples.
 
 Use this convention when the example needs a stable normalized shared-state contract across multiple runtime paths. Keep flow-specific prompting, switching, handoff, and returned-decision parsing in the router instead of pushing those behaviors down into shared helpers.
 
 ## Macro Authoring
 
-- `examples/stackvm_macro_authoring_plugin/`
+- `examples/stackvm_macro_authoring_example/`
   - Uses a helper word for the repeated YAML request payload
   - Defines user-authored macros with `defmacro` and `syntax-quote`
   - Shows `unquote` and `unquote-splice` in a runnable end-to-end flow
@@ -24,42 +24,42 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 ## Direct Answer
 
-- `examples/stackvm_review_plugin/`
+- `examples/stackvm_example/`
   - Reads a file through `core.read_file`
   - Produces a final answer directly from the tool result
   - Good starting point for tool-first answer flows
 
-- `examples/stackvm_parallel_map_plugin/`
+- `examples/stackvm_parallel_map_example/`
   - Builds a fixed list in the VM
   - Uses `parallel-map` with a user-defined helper word
   - Produces the final answer from the mapped result list
   - Good starting point for pure data fan-out patterns
 
-- `examples/stackvm_parallel_tool_map_plugin/`
+- `examples/stackvm_parallel_tool_map_example/`
   - Reads YAML through a tool
   - Extracts payload items with `dict-get?`
   - Uses `parallel-map` after the tool result is normalized into an in-memory list
   - Good starting point for tool-first fan-out patterns
 
-- `examples/stackvm_reduce_plugin/`
+- `examples/stackvm_reduce_example/`
   - Builds a fixed list in the VM
   - Uses `parallel-map` for fan-out and `reduce` for fan-in
   - Produces the final answer from a single accumulated summary string
   - Good starting point for pure map-and-reduce patterns
 
-- `examples/stackvm_reduce_tool_plugin/`
+- `examples/stackvm_reduce_tool_example/`
   - Reads YAML through a tool
   - Extracts payload items with `dict-get?`
   - Uses `parallel-map` for fan-out and `reduce` for fan-in after the tool result is normalized into an in-memory list
   - Good starting point for tool-first map-and-reduce patterns
 
-- `examples/stackvm_reduce_numeric_plugin/`
+- `examples/stackvm_reduce_numeric_example/`
   - Reads YAML through a tool
   - Normalizes numeric item values with `dict-get?` and `int>`
   - Uses `parallel-map` for fan-out and `reduce` to calculate a numeric total
   - Good starting point for numeric aggregation patterns
 
-- `examples/stackvm_tool_normalize_plugin/`
+- `examples/stackvm_tool_normalize_example/`
   - Reads YAML through a tool
   - Uses the built-in `tool-once` macro to keep the request/consume loop compact
   - Normalizes all payload item titles with `parallel-map` plus selected fields into shared state
@@ -67,33 +67,33 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 ## Direct Handoff
 
-- `examples/stackvm_handoff_plugin/`
+- `examples/stackvm_handoff_example/`
   - Minimal StackVM router
   - Hands off immediately to a PocketFlow delegate
   - Good reference for the smallest VM-to-flow handoff seam
 
 ## Handoff On Failure
 
-- `examples/stackvm_resilient_plugin/`
+- `examples/stackvm_resilient_example/`
   - Calls a tool
   - Branches on `failure?`
   - Hands off to a fallback flow on tool failure
 
 ## Config-Driven Routing
 
-- `examples/stackvm_config_router_plugin/`
+- `examples/stackvm_config_router_example/`
   - Reads workspace YAML config
   - Uses `bool>`, `int>`, `dict-get?`, and `list-get?`
   - Routes to delegates based on normalized config values
 
-- `examples/stackvm_nested_router_plugin/`
+- `examples/stackvm_nested_router_example/`
   - Reads nested mixed dict/list YAML config
   - Uses `get-in?`, `list-get?`, and `set-in?`
   - Records nested audit state before handing off
 
 ## Aggregate Then Route
 
-- `examples/stackvm_threshold_router_plugin/`
+- `examples/stackvm_threshold_router_example/`
   - Reads YAML through a tool
   - Uses `parallel-map` and `reduce` to calculate a numeric total
   - Uses `cond` to route to different delegates based on threshold bands
@@ -101,56 +101,56 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 ## Normalize Then Handoff
 
-- `examples/stackvm_normalize_handoff_plugin/`
+- `examples/stackvm_normalize_handoff_example/`
   - Reads YAML through a tool
   - Normalizes all payload item titles, enabled, and source into `shared["normalized"]`
   - Hands off based on normalized shared-state instead of raw payload structure
 
 ## Normalize Then Ask
 
-- `examples/stackvm_normalize_ask_plugin/`
+- `examples/stackvm_normalize_ask_example/`
   - Reads YAML through a tool
   - Normalizes all payload item titles plus selected values into shared state
   - Surfaces a user question derived from the normalized view
 
 ## Prompt Then Continue
 
-- `examples/stackvm_normalize_confirm_plugin/`
+- `examples/stackvm_normalize_confirm_example/`
   - Reads YAML through a tool
   - Normalizes all payload item titles plus selected values into shared state
   - Uses `prompt-user` to collect a bridged user reply and continue execution to a final answer
 
 ## Structured Interaction Then Continue
 
-- `examples/stackvm_buttons_plugin/`
+- `examples/stackvm_buttons_example/`
   - Reads YAML through a tool
   - Uses `tool-once` for the tool loop and `prompt-route` for the interaction branch
   - Normalizes all payload item titles into shared state with `parallel-map`
   - Presents a buttons request and continues to a final answer based on the selected option
 
-- `examples/stackvm_radio_plugin/`
+- `examples/stackvm_radio_example/`
   - Reads YAML through a tool
   - Uses `tool-once` for the tool loop
   - Normalizes all payload item titles into shared state with `parallel-map`
   - Uses direct `prompt-interaction` with a radio request because the selected value stays on the stack for extra formatting work before the final answer
 
-These examples share the same authoring pattern: define `item-title` plus reusable `normalize-item-titles`, `store-normalized-source`, `store-normalized-enabled` where needed, and `store-normalized-summary` helpers in `vm/common.vm`, keep the aggregated summary in shared state, and let the structured interaction operate on that stable summary instead of a single raw item.
+These examples share the same authoring pattern: define `item-title` plus reusable `normalize-item-titles`, `store-normalized-source`, `store-normalized-enabled` where needed, and `store-normalized-summary` helpers when reuse is warranted, keep the aggregated summary in shared state, and let the structured interaction operate on that stable summary instead of a single raw item.
 
 ## Prompted Delegate Return
 
-- `examples/stackvm_prompt_return_plugin/`
+- `examples/stackvm_prompt_return_example/`
   - Uses a StackVM caller to normalize all payload item titles with `parallel-map` and hand off with `return_to_caller`
   - Uses a StackVM delegate to collect a structured button choice through `prompt-interaction`
   - Uses `tool-once` for the caller tool loop and `finalize-from` for caller-side finalization after the delegate returns
 
-- `examples/stackvm_delegate_return_plugin/`
+- `examples/stackvm_delegate_return_example/`
   - Uses a StackVM caller to normalize all payload item titles with `parallel-map` and hand off with `return_to_caller`
   - Uses a StackVM delegate to collect a structured button choice through `prompt-interaction`
   - Uses `delegate-return` to pass `last_delegated_result.answer` straight back through the caller
 
 ## Checklist Delegate Return
 
-- `examples/stackvm_checklist_return_plugin/`
+- `examples/stackvm_checklist_return_example/`
   - Uses a StackVM caller to normalize all payload item titles with `parallel-map` and hand off with `return_to_caller`
   - Uses a StackVM delegate to collect a checklist selection through `prompt-interaction`
   - Demonstrates the non-scalar `last_user_value` path flowing through `last_delegated_result`
@@ -159,13 +159,13 @@ These examples share the same authoring pattern: define `item-title` plus reusab
 
 ## Structured Delegate Return Then Route
 
-- `examples/stackvm_structured_return_routing_plugin/`
+- `examples/stackvm_structured_return_routing_example/`
   - Uses a StackVM caller to normalize all payload item titles with `parallel-map` and hand off with `return_to_caller`
   - Uses a StackVM delegate to collect a structured radio choice and return a YAML mapping string to the caller
   - Uses `tool-once` for the caller tool loop
   - Parses `last_delegated_result.answer` with `yaml>` in the caller and routes to a final downstream delegate from the returned decision
 
-- `examples/stackvm_nested_structured_return_routing_plugin/`
+- `examples/stackvm_nested_structured_return_routing_example/`
   - Uses a StackVM caller to normalize all payload item titles with `parallel-map` and hand off with `return_to_caller`
   - Uses a StackVM delegate to return a nested YAML mapping string to the caller
   - Uses `tool-once` for the caller tool loop
@@ -173,13 +173,13 @@ These examples share the same authoring pattern: define `item-title` plus reusab
 
 ## Structured Delegate Return Then Finalize
 
-- `examples/stackvm_structured_return_finalize_plugin/`
+- `examples/stackvm_structured_return_finalize_example/`
   - Uses a StackVM caller to normalize all payload item titles with `parallel-map` and hand off with `return_to_caller`
   - Uses a StackVM delegate to collect a structured radio choice and return a YAML mapping string to the caller
   - Uses `tool-once` for the caller tool loop
   - Parses `last_delegated_result.answer` with `yaml>` in the caller and builds the final answer directly from the returned fields through `finalize-from`
 
-- `examples/stackvm_nested_structured_return_plugin/`
+- `examples/stackvm_nested_structured_return_example/`
   - Uses a StackVM caller to normalize all payload item titles with `parallel-map` and hand off with `return_to_caller`
   - Uses a StackVM delegate to return a nested YAML mapping string to the caller
   - Uses `tool-once` for the caller tool loop and `finalize-from` for caller-side answer composition
@@ -187,17 +187,17 @@ These examples share the same authoring pattern: define `item-title` plus reusab
 
 ## Checklist Then Handoff
 
-- `examples/stackvm_checklist_handoff_plugin/`
+- `examples/stackvm_checklist_handoff_example/`
   - Reads YAML through a tool
   - Normalizes all payload item titles into shared state with `parallel-map`
   - Collects checklist actions through `prompt-interaction`
   - Uses a reusable `format-selected-actions` helper to store the joined action text once before handing off to different delegates
 
-Together with `stackvm_buttons_plugin` and `stackvm_radio_plugin`, these checklist examples are the current checked-in references for the recurring “normalize many items, then interact or route from the shared summary” pattern.
+Together with `stackvm_buttons_example` and `stackvm_radio_example`, these checklist examples are the current checked-in references for the recurring “normalize many items, then interact or route from the shared summary” pattern.
 
 ## Multi-Stage Pipeline
 
-- `examples/stackvm_multistage_pipeline_plugin/`
+- `examples/stackvm_multistage_pipeline_example/`
   - Reads YAML through a tool and normalizes all payload item titles into shared state in the caller
   - Collects checklist actions in the caller, formats them once with `format-selected-actions`, then hands off with `return_to_caller`
   - Uses a VM delegate to ask a second structured question before returning to the caller
@@ -207,27 +207,27 @@ Together with `stackvm_buttons_plugin` and `stackvm_radio_plugin`, these checkli
 
 ## Choosing A Starting Point
 
-- Start from `stackvm_handoff_plugin` when the VM only decides where work should go next.
-- Start from `stackvm_parallel_map_plugin` when the VM should fan out over an in-memory list with a pure quotation and collect the results back into the same flow.
-- Start from `stackvm_parallel_tool_map_plugin` when the VM should load a list through a tool first and only then fan out over the normalized in-memory data.
-- Start from `stackvm_reduce_plugin` when the VM should fan out over a list and then fold the mapped values back into one final summary or accumulator.
-- Start from `stackvm_reduce_tool_plugin` when the VM should load a list through a tool first, then fold the mapped values back into one final summary or accumulator.
-- Start from `stackvm_reduce_numeric_plugin` when the VM should load numeric values through a tool and fold them into a total or other numeric aggregate.
-- Start from `stackvm_threshold_router_plugin` when the VM should route to a downstream delegate based on a numeric aggregate derived with `parallel-map` and `reduce`.
-- Start from `stackvm_tool_normalize_plugin` when the VM should reshape tool data, including all payload item titles, before final output, and you want the canonical `tool-once` pattern.
-- Start from `stackvm_normalize_handoff_plugin` when delegates should consume a stable shared-state contract instead of raw tool payloads.
-- Start from `stackvm_normalize_ask_plugin` when the VM should turn normalized state, including multi-item title summaries, into a user-facing question.
-- Start from `stackvm_normalize_confirm_plugin` when the VM should collect a bridged text reply and keep executing in the same turn after multi-item normalization.
-- Start from `stackvm_buttons_plugin` when the VM should present structured choices and keep executing from the selected option value through `prompt-route`.
-- Start from `stackvm_radio_plugin` when the VM should enforce a single structured choice but keep executing from that selected value without immediately switching on exact-match cases.
-- Start from `stackvm_prompt_return_plugin` when a VM delegate should collect user input and return a decision to its caller instead of finalizing the overall run directly, and the caller should use `finalize-from`.
-- Start from `stackvm_delegate_return_plugin` when a VM delegate should return the final answer text and the caller should pass that answer through via `delegate-return`.
-- Start from `stackvm_checklist_return_plugin` when a VM delegate should collect multiple selections and return that decision to its caller while the caller uses `finalize-from`.
-- Start from `stackvm_structured_return_routing_plugin` when a VM delegate should return a structured YAML decision and the caller should choose the final downstream route from that returned value while keeping the caller on the canonical `tool-once` pattern.
-- Start from `stackvm_nested_structured_return_routing_plugin` when a VM delegate should return nested YAML and the caller should choose the final downstream route from nested returned fields while keeping the caller on the canonical `tool-once` pattern.
-- Start from `stackvm_structured_return_finalize_plugin` when a VM delegate should return a structured YAML decision and the caller should turn that returned value directly into the final answer through `finalize-from`.
-- Start from `stackvm_nested_structured_return_plugin` when a VM delegate should return nested YAML and the caller should read optional nested fields with `get-in?` before finalizing after multi-item normalization through `finalize-from`.
-- Start from `stackvm_checklist_handoff_plugin` when checklist input should determine which downstream delegate handles the request.
-- Start from `stackvm_multistage_pipeline_plugin` when one VM stage should collect the first decision, delegate a second decision, and then finalize back in the original caller after multi-item normalization through `finalize-from`.
-- Start from `stackvm_nested_router_plugin` when the incoming data is deeply nested and partially optional.
-- Start from `stackvm_macro_authoring_plugin` when you need a checked-in reference for user-authored macros layered on top of helper words and built-in macros.
+- Start from `stackvm_handoff_example` when the VM only decides where work should go next.
+- Start from `stackvm_parallel_map_example` when the VM should fan out over an in-memory list with a pure quotation and collect the results back into the same flow.
+- Start from `stackvm_parallel_tool_map_example` when the VM should load a list through a tool first and only then fan out over the normalized in-memory data.
+- Start from `stackvm_reduce_example` when the VM should fan out over a list and then fold the mapped values back into one final summary or accumulator.
+- Start from `stackvm_reduce_tool_example` when the VM should load a list through a tool first, then fold the mapped values back into one final summary or accumulator.
+- Start from `stackvm_reduce_numeric_example` when the VM should load numeric values through a tool and fold them into a total or other numeric aggregate.
+- Start from `stackvm_threshold_router_example` when the VM should route to a downstream delegate based on a numeric aggregate derived with `parallel-map` and `reduce`.
+- Start from `stackvm_tool_normalize_example` when the VM should reshape tool data, including all payload item titles, before final output, and you want the canonical `tool-once` pattern.
+- Start from `stackvm_normalize_handoff_example` when delegates should consume a stable shared-state contract instead of raw tool payloads.
+- Start from `stackvm_normalize_ask_example` when the VM should turn normalized state, including multi-item title summaries, into a user-facing question.
+- Start from `stackvm_normalize_confirm_example` when the VM should collect a bridged text reply and keep executing in the same turn after multi-item normalization.
+- Start from `stackvm_buttons_example` when the VM should present structured choices and keep executing from the selected option value through `prompt-route`.
+- Start from `stackvm_radio_example` when the VM should enforce a single structured choice but keep executing from that selected value without immediately switching on exact-match cases.
+- Start from `stackvm_prompt_return_example` when a VM delegate should collect user input and return a decision to its caller instead of finalizing the overall run directly, and the caller should use `finalize-from`.
+- Start from `stackvm_delegate_return_example` when a VM delegate should return the final answer text and the caller should pass that answer through via `delegate-return`.
+- Start from `stackvm_checklist_return_example` when a VM delegate should collect multiple selections and return that decision to its caller while the caller uses `finalize-from`.
+- Start from `stackvm_structured_return_routing_example` when a VM delegate should return a structured YAML decision and the caller should choose the final downstream route from that returned value while keeping the caller on the canonical `tool-once` pattern.
+- Start from `stackvm_nested_structured_return_routing_example` when a VM delegate should return nested YAML and the caller should choose the final downstream route from nested returned fields while keeping the caller on the canonical `tool-once` pattern.
+- Start from `stackvm_structured_return_finalize_example` when a VM delegate should return a structured YAML decision and the caller should turn that returned value directly into the final answer through `finalize-from`.
+- Start from `stackvm_nested_structured_return_example` when a VM delegate should return nested YAML and the caller should read optional nested fields with `get-in?` before finalizing after multi-item normalization through `finalize-from`.
+- Start from `stackvm_checklist_handoff_example` when checklist input should determine which downstream delegate handles the request.
+- Start from `stackvm_multistage_pipeline_example` when one VM stage should collect the first decision, delegate a second decision, and then finalize back in the original caller after multi-item normalization through `finalize-from`.
+- Start from `stackvm_nested_router_example` when the incoming data is deeply nested and partially optional.
+- Start from `stackvm_macro_authoring_example` when you need a checked-in reference for user-authored macros layered on top of helper words and built-in macros.

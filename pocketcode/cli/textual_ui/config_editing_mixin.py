@@ -134,7 +134,6 @@ class TextualAppConfigEditingMixin:
 
     def _edit_category_options(self) -> tuple[PickerOption, ...]:
         active_profile = self._engine.active_agent_profile
-        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         llm_profile = self._current_llm_profile_name()
         flow_asset_count = len(self._engine.list_markdown_assets("flow")) if hasattr(self._engine, "list_markdown_assets") else 0
         tool_asset_count = len(self._engine.list_markdown_assets("tool")) if hasattr(self._engine, "list_markdown_assets") else 0
@@ -144,12 +143,6 @@ class TextualAppConfigEditingMixin:
                 f"Agent Config: {active_profile.name if active_profile else 'none'}",
                 description="Edit active agent llm, prompts, and default confirmation",
                 search_text="agent config llm prompts confirmation",
-            ),
-            PickerOption(
-                "mode",
-                f"Mode Config: {active_mode.name if active_mode else 'none'}",
-                description="Edit the active mode markdown",
-                search_text="mode config markdown",
             ),
             PickerOption(
                 "flow_asset",
@@ -185,7 +178,6 @@ class TextualAppConfigEditingMixin:
 
     def _clone_category_options(self) -> tuple[PickerOption, ...]:
         active_profile = self._engine.active_agent_profile
-        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         llm_profile = self._current_llm_profile_name()
         flow_asset_count = len(self._engine.list_markdown_assets("flow")) if hasattr(self._engine, "list_markdown_assets") else 0
         tool_asset_count = len(self._engine.list_markdown_assets("tool")) if hasattr(self._engine, "list_markdown_assets") else 0
@@ -195,12 +187,6 @@ class TextualAppConfigEditingMixin:
                 f"Agent Config: {active_profile.name if active_profile else 'none'}",
                 description="Clone the active agent profile into the workspace",
                 search_text="clone agent profile workspace",
-            ),
-            PickerOption(
-                "mode",
-                f"Mode Config: {active_mode.name if active_mode else 'none'}",
-                description="Clone the active mode",
-                search_text="clone mode markdown",
             ),
             PickerOption(
                 "flow_asset",
@@ -273,7 +259,6 @@ class TextualAppConfigEditingMixin:
     def _handle_edit_asset_selection(self, selected_value: str) -> None:
         openers = {
             "agent": self._open_agent_editor,
-            "mode": self._open_mode_editor,
             "flow_asset": self._open_markdown_flow_asset_editor,
             "tool_asset": self._open_markdown_tool_asset_editor,
             "llm": self._open_llm_profile_editor,
@@ -290,8 +275,6 @@ class TextualAppConfigEditingMixin:
         placeholder = "new-name"
         if selected_value == "agent":
             placeholder = "my-agent-safe"
-        elif selected_value == "mode":
-            placeholder = "review-copy"
         elif selected_value == "flow_asset":
             self._open_markdown_asset_clone_picker("flow")
             return
@@ -373,26 +356,6 @@ class TextualAppConfigEditingMixin:
             tool_confirmation_overrides=overrides,
         )
         self._write_info(f"Saved workspace agent '{profile_name}'.")
-
-    def _open_mode_editor(self) -> None:
-        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-        if active_mode is None:
-            self._write_error("No active mode selected.")
-            return
-        if not hasattr(self._engine, "get_mode_text"):
-            self._write_error("This runtime does not support editing modes.")
-            return
-        initial_text = self._engine.get_mode_text(active_mode.name)
-        self._open_text_editor(
-            title=f"Edit Mode: {active_mode.name}",
-            help_text="Edit the mode markdown with YAML front matter. Ctrl+S saves.",
-            initial_text=initial_text,
-            on_submit=lambda text: self._apply_mode_edit(active_mode.name, text),
-        )
-
-    def _apply_mode_edit(self, mode_name: str, text: str) -> None:
-        target_path = self._update_mode_effect(mode_name, text)
-        self._write_info(f"Saved mode '{mode_name}' to {target_path}.")
 
     def _workspace_markdown_asset_options(self, asset_kind: str) -> tuple[PickerOption, ...]:
         if not hasattr(self._engine, "list_markdown_assets"):

@@ -1,8 +1,0 @@
-schema_version: 1
-name: stackvm_multistage_pipeline_example
-description: Normalize tool data, collect checklist actions, delegate a second prompt, and finalize back in the caller
-flows:
-  normalize:
-    markdown: flows/normalize.md
-  confirm_delegate:
-    markdown: flows/confirm_delegate.md

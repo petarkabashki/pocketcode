@@ -10,23 +10,26 @@ class CompositeAgent:
     """A named configuration bundle that governs how a flow is invoked.
 
     Every flow has at least one agent: either explicitly declared in
-    plugin metadata, loaded from a plugin-local ``agents/*.yaml`` file,
+    flow metadata, loaded from a flat workspace ``*.agent.yaml`` file,
     or synthesised from the flow's top-level fields by the composite agent
     registry.
 
     Fields
     ------
     name : str
-        Unique identifier (e.g. ``"core::react"`` or ``"react-safe"``).
+        Unique identifier (e.g. ``"core.react"`` or ``"react-safe"``).
     flow : str
-        Qualified flow reference this agent targets (e.g. ``"core::react"``).
+        Qualified flow reference this agent targets (e.g. ``"core.react"``).
+    base_agent : str | None
+        Optional parent agent/profile name to inherit from. ``None`` means this
+        agent resolves directly against its target flow.
     description : str
         Human-readable description. Default ``""``.
     llm_profile : str | None
         LLM configuration profile name. ``None`` means inherit from lower tiers.
     inline_prompt : str
         Inline system prompt text appended before any ``extra_prompts`` content.
-        Used by Markdown-authored modes and other ephemeral overlays.
+        Used by agent profiles and other ephemeral runtime overlays.
     extra_prompts : List[str]
         Ordered list of file paths whose contents are appended to the system
         prompt each turn. Default ``[]``.
@@ -39,14 +42,15 @@ class CompositeAgent:
         ``{"default": str | None, "overrides": Dict[str, str]}``.
         Absent keys mean "no opinion at this tier". Default ``{}``.
     source : str
-        Provenance: ``"synthesised"``, ``"plugin"``, or ``"workspace"``.
+        Provenance: ``"synthesised"``, ``"namespace"``, or ``"workspace"``.
     source_path : Path | None
-        Absolute path to the YAML file for workspace profiles. ``None`` for
-        synthesised and plugin profiles.
+        Absolute path to the flat Markdown or YAML profile file. ``None`` for
+        synthesised and namespace-backed profiles.
     """
 
     name: str
     flow: str
+    base_agent: Optional[str] = None
     description: str = ""
     llm_profile: Optional[str] = None
     inline_prompt: str = ""

@@ -1,27 +1,35 @@
-# Flows And Agent Profiles
+# Flows And Agents
 
-This document describes the current relationship between executable flows and agent profiles.
+This document describes the current relationship between executable flows and inheritable agents.
 
 For the canonical Markdown file formats for flows and profiles, see `markdown_assets.md`.
 
-## One Executable Model, Multiple Overlays
+## One Executable Model, Multiple Agent Layers
 
-PocketCoder executes flows. Agent profiles do not replace flows; they configure how a selected flow runs.
+PocketCoder executes flows. Agents do not replace flows; they configure how a selected flow runs.
 
 The current stack is:
 
 1. flow definition
-2. agent profile
-3. optional active mode
-4. optional enabled skills
-5. session overrides from the CLI or Textual UI
+2. active agent
+3. optional enabled skills
+4. session overrides from the CLI or Textual UI
 
-## Flow Authoring With PocketFlow
+## Flow Authoring
 
-The canonical authored flow path is:
+PocketCoder supports two canonical executable flow authoring paths:
+
+1. StackVM flow authored in self-contained Markdown
+2. PocketFlow factory authored in Python
+
+StackVM should be the default choice for new orchestration-heavy flows. PocketFlow remains the escape hatch for flows that genuinely need Python-native objects, custom node classes, or logic that would be awkward to express in VM words.
+
+### PocketFlow Factories
+
+The canonical PocketFlow-authored path is:
 
 1. implement a PocketFlow factory in Python
-2. register it in `plugin.yaml` under `flows:`
+2. reference it from a self-contained Markdown flow
 
 Example:
 
@@ -45,23 +53,36 @@ def create_flow() -> Flow:
     return Flow(start=ThinkNode())
 ```
 
-Manifest registration:
+Markdown registration:
 
 ```yaml
-flows:
-  analyst:
-    module: flows/analyst.py
-    entry_fn: create_flow
-    description: Analyze the current workspace.
+name: analyst
+module: analyst.py
+entry_fn: create_flow
+description: Analyze the current workspace.
 ```
 
-Markdown can also author executable flows directly. In that case the Markdown file contributes the flow fields, and PocketCoder currently supports three execution backends from that one authoring surface:
+Markdown can also author executable flows directly. In that case the Markdown file contributes the flow fields, and PocketCoder currently supports two execution backends from that one authoring surface:
 
 - Python factory flow via `module` plus `entry_fn`
-- generated graph flow when the file omits `module` and `entry_fn` but includes a supported Mermaid or DOT graph plus a `nodes:` mapping
 - StackVM flow when the file contributes fenced `vm` or `stackvm` blocks, or explicit `vm_*` source fields
 
-The generated-graph path is intended for lightweight orchestration and routing. The StackVM path restores a broader executable flow surface for multi-step orchestration while still running inside the same shared-store and handoff contract. Neither path replaces handwritten Python factories when you need custom logic tightly coupled to Python objects or richer PocketFlow node classes.
+Graph-authored Markdown flows are no longer supported by the runtime loader; migrate those definitions to StackVM. The StackVM path is the preferred executable Markdown surface for multi-step orchestration while still running inside the same shared-store and handoff contract. It does not replace handwritten Python factories when you need custom logic tightly coupled to Python objects or richer PocketFlow node classes.
+
+For new work, prefer a single Markdown file that contains:
+
+- front matter for tool refs, prompt refs, handoff config, and optional `tool_files`
+- Markdown body text for the system prompt
+- fenced `vm` blocks for the executable program
+
+`tool_files` entries are resolved relative to that Markdown file, loaded as Python tool modules, and registered into the same namespace before the flow is finalized. The preferred convention for those helper modules is `*.tool.py`. When explicit `tool_files` and prompt-file fields are omitted, PocketCoder also auto-loads sibling `<name>.tool.py` and `<name>.prompt.md` files beside the Markdown program.
+
+Configured workspace discovery paths in `runtime.workspace_paths` add two canonical Markdown flow paths:
+
+1. use a plain namespace folder such as `.github/`, then add `*.md`, `*.tool.py`, and `*.prompt.md` files inside it
+2. use a flat namespace-pack root such as `.pocketcode/`, then add files like `coder.coder.md`, `coder.git.tool.py`, and `coder.system.prompt.md`
+
+In both cases PocketCoder registers each executable Markdown file as a flow under `<namespace>.<name>`.
 
 ## What A Flow Definition Can Do
 
@@ -74,15 +95,15 @@ A flow definition can supply:
 - handoff targets and policies
 - pre, step, and post handlers
 - base prompt text and prompt source files
-- an inline default agent profile
+- an inline default agent
 
 The flow is the authoritative base layer for execution.
 
-## Agent Profiles
+## Agents
 
-An agent profile is a named `CompositeAgent` that targets one flow.
+An agent is a named `CompositeAgent` that targets one flow.
 
-Profiles can change:
+Agents can change:
 
 - `llm_profile`
 - `inline_prompt`
@@ -91,37 +112,62 @@ Profiles can change:
 - `tools`
 - `tool_confirmation`
 
-Profiles do not define executable graph logic. They select and constrain behavior for an existing flow.
+Agents do not define executable graph logic unless they are self-contained Markdown hybrids. In the common case they select and constrain behavior for an existing flow.
 
-## Agent Profile Sources
+## Agent Sources
 
-Current profile sources are:
+Current authored-agent sources are:
 
 1. inline `default_agent` inside a flow definition
-2. plugin-local `agents/*.yaml` and `agents/*.md`
-3. workspace `.pocketcode/agents/*.yaml` and `.pocketcode/agents/*.md`
-4. synthesised fallback profile created from the flow definition
+2. workspace agent profiles in discovered resource roots, including legacy flat files and grouped `agent.<group>/` collections
+3. synthesised fallback agent created from the flow definition
 
 Effective precedence is:
 
-1. plugin-defined profiles
-2. workspace profiles
+1. manifest-defined agents
+2. workspace agents
 3. synthesised defaults
+
+## Inheritance
+
+Authored agents can inherit from other agents with `extends`.
+
+Current behavior:
+
+- authored agents stay sparse and do not automatically copy flow defaults into their stored fields
+- `flow` may be omitted when `extends` is present
+- omitted `llm_profile`, `skills`, and `tools` inherit from the parent agent
+- parent and child `inline_prompt` / `extra_prompts` are appended in that order
+- `tool_confirmation` merges with child values winning
+- synthesised default agents still carry the flow's base `llm_profile` and `tools`
+
+This gives the runtime a two-part model:
+
+1. executable flow
+2. inheritable agent overlay chain
+
+### Self-Contained Hybrid Agents
+
+Markdown agents can also define their own flow logic directly in the same file. When the system detects flow fields (like `vm_source` or `module`) in an agent `.md` file, it automatically registers an embedded flow and points the agent to it.
+
+This pattern is ideal for simple, portable agents where personality and control logic are tightly coupled.
+
+Do not confuse those profile files with configured namespace assets. In plain namespace folders and flat namespace-pack roots, plain executable `.md` files are treated as runtime flows, not as profile overlays.
 
 ## Synthesised Defaults
 
-Every loaded flow gets a synthesised default profile if no higher-precedence profile replaces that name.
+Every loaded flow gets a synthesised default agent if no higher-precedence agent replaces that name.
 
-That synthesised profile:
+That synthesised agent:
 
 - uses the flow's qualified name as its own name
 - targets the same flow
 - inherits the flow's `llm_profile`
 - inherits the flow's tool list
 
-## Workspace Agent Profile Schema
+## Workspace Agent Schema
 
-Current workspace profile schema:
+Current workspace agent schema:
 
 ```yaml
 name: my-review-profile
@@ -141,44 +187,43 @@ tool_confirmation:
     core.execute_command: deny
 ```
 
+Current inheriting schema:
+
+```yaml
+name: my-review-profile-safe
+extends: my-review-profile
+tools:
+  - core.read_file
+tool_confirmation:
+  default: confirm
+```
+
 Notes:
 
-- `flow` is required.
+- `flow` is required unless `extends` is present.
 - `skills` omitted means fall back to the global Textual skill defaults for that session.
-- `tools` omitted means inherit the flow tool surface.
+- `tools` omitted means inherit the parent agent tools when `extends` is used; otherwise they inherit the flow tool surface through the synthesised default chain.
 - `tools: []` means allow no base tools.
-- workspace and plugin-local profiles may also be authored as Markdown, where front matter carries the structured fields and the body becomes `inline_prompt`.
-
-## Modes Resolve Into Profiles
-
-Modes are not a separate execution system. A mode is resolved into an ephemeral agent profile.
-
-Mode resolution in the engine works like this:
-
-1. resolve a base profile from `mode.agent`, `mode.flow`, the active profile, or the current flow
-2. merge mode `llm_profile`, prompts, tools, and confirmation policy
-3. activate the resulting ephemeral profile against the target flow
-
-Mode inline prompt text is appended after the base profile inline prompt.
+- workspace agents may also be authored as Markdown, where front matter carries the structured fields and the body becomes `inline_prompt`.
 
 ## Skills Extend The Active Profile
 
-Skills do not replace the active profile either. They extend it by adding:
+Skills do not replace the active agent either. They extend it by adding:
 
 - inline prompt guidance
 - extra prompt files
 - references to existing tools
 - skill-provided tool modules
 
-Skill prompt text is appended after the active profile prompt content.
+Skill prompt text is appended after the active agent prompt content.
 
 ## Effective Prompt Composition
 
 For a given flow turn, the effective prompt is:
 
 1. flow system prompt
-2. active profile inline prompt
-3. active profile extra prompt files
+2. active agent inline prompt
+3. active agent extra prompt files
 4. enabled skill inline prompts
 5. enabled skill extra prompt files
 
@@ -187,7 +232,7 @@ For a given flow turn, the effective prompt is:
 For a given flow turn, the effective tool surface is:
 
 1. flow tools
-2. filtered by active profile allowlist when present
+2. filtered by active agent allowlist when present
 3. extended by enabled skill references to existing tools
 4. extended by enabled skill-provided tools
 
@@ -219,9 +264,9 @@ Current handoff behavior supports:
 
 When documenting or implementing new behavior, keep these distinctions explicit:
 
-- flows are executable
-- agent profiles are named overlays for flows
-- modes are ephemeral overlays resolved into profiles
+- self-contained Markdown VM programs are the preferred way to author executable flows
+- flows are the internal executable runtime model
+- agents are named overlays for flows and may inherit from one another
 - skills are additive session extensions
 
 That separation is the current canonical model in the codebase.

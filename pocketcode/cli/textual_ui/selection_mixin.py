@@ -3,7 +3,7 @@ from __future__ import annotations
 # pyright: reportAttributeAccessIssue=false
 
 from .editor_screens import SystemSettingsScreen
-from .shared import INHERIT_POLICY, NO_LLM, NO_MODE, PickerOption, TEXTUAL_VIEWS, THEME_OPTIONS, WORKSPACE_VIEWS
+from .shared import INHERIT_POLICY, NO_LLM, PickerOption, TEXTUAL_VIEWS, THEME_OPTIONS, WORKSPACE_VIEWS
 
 
 class TextualAppSelectionMixin:
@@ -52,19 +52,6 @@ class TextualAppSelectionMixin:
             on_select=self._apply_profile_selection,
             help_text="Choose the active agent profile.",
             empty_message="No agent profiles are available.",
-        )
-
-    def _open_mode_picker(self) -> None:
-        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-        options = [PickerOption(NO_MODE, "(clear)", "Disable the active mode")]
-        options.extend(PickerOption(name, name) for name in self._engine.list_modes())
-        self._show_picker(
-            title="Select Active Mode",
-            options=tuple(options),
-            current_value=active_mode.name if active_mode is not None else NO_MODE,
-            on_select=self._apply_mode_selection,
-            help_text="Choose the active runtime mode. Clear falls back to the selected agent profile.",
-            empty_message="No modes are available.",
         )
 
     def _open_llm_picker(self) -> None:
@@ -120,16 +107,6 @@ class TextualAppSelectionMixin:
             return
         self._set_active_profile_effect(selected_value)
         self._write_info(f"Activated agent profile: {selected_value}")
-
-    def _apply_mode_selection(self, selected_value: str) -> None:
-        target_mode = None if selected_value == NO_MODE else selected_value
-        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-        if active_mode is not None and target_mode == active_mode.name:
-            return
-        if active_mode is None and target_mode is None:
-            return
-        self._set_active_mode_effect(target_mode)
-        self._write_info(f"Mode: {target_mode or 'none'}")
 
     def _apply_llm_selection(self, selected_value: str) -> None:
         target_llm = None if selected_value == NO_LLM else selected_value

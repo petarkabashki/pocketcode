@@ -1,9 +1,0 @@
-schema_version: 1
-name: stackvm_handoff_example
-description: Example StackVM handoff plugin
-flows:
-  router:
-    markdown: flows/router.md
-  delegate:
-    module: flows/delegate.py
-    entry_fn: create_flow

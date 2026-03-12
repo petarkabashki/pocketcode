@@ -12,7 +12,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 
 if TYPE_CHECKING:
-    from pocketcode.core.plugin_manager import PluginManager
+    from pocketcode.core.workspace_catalog import WorkspaceCatalog
     from pocketcode.core.namespace_registry import RegistryHolder
 
 logger = logging.getLogger(__name__)
@@ -263,11 +263,11 @@ class FileWatcher:
 
 class PluginHotReloadHandler(FileSystemEventHandler):
     """
-    Watches plugin directories for file changes and triggers a PluginManager
+    Watches discovered resource-root and namespace directories for file changes and triggers a WorkspaceCatalog
     rebuild + atomic registry swap via ``RegistryHolder.swap()``.
 
     Rebuild sequence (from research.md Topic 2):
-      (a) BUILD   — create new PluginManager + call .load() outside the lock
+      (a) BUILD   — create new WorkspaceCatalog + call .load() outside the lock
       (b) SWAP    — holder.swap(new_pm) — single GIL-atomic store
       (c) DISCARD — old_pm falls out of scope; GC handles cleanup
 
@@ -309,7 +309,7 @@ class PluginHotReloadHandler(FileSystemEventHandler):
             timer.start()
 
     def _trigger_rebuild(self) -> None:
-        """Build a new PluginManager snapshot and atomically swap the holder."""
+        """Build a new WorkspaceCatalog snapshot and atomically swap the holder."""
         if self._rebuild_in_progress.is_set():
             logger.debug("PluginHotReloadHandler: rebuild already in progress; skipping.")
             return
@@ -317,10 +317,10 @@ class PluginHotReloadHandler(FileSystemEventHandler):
         self._rebuild_in_progress.set()
         try:
             # Import lazily to avoid circular imports at module level
-            from pocketcode.core.plugin_manager import PluginManager  # noqa: PLC0415
+            from pocketcode.core.workspace_catalog import WorkspaceCatalog  # noqa: PLC0415
 
             logger.info("PluginHotReloadHandler: rebuilding plugin registry…")
-            new_pm = PluginManager(config=self._config, workspace_root=self._workspace_root)
+            new_pm = WorkspaceCatalog(config=self._config, workspace_root=self._workspace_root)
             new_pm.load()
             self._holder.swap(new_pm)
             logger.info("PluginHotReloadHandler: registry swapped successfully.")
@@ -377,12 +377,27 @@ class PluginWatcher:
         self._stop_event = threading.Event()
 
     def _default_plugin_dirs(self) -> list[Path]:
-        """Resolve built-in plugin root if no explicit dirs given."""
-        from pocketcode.core.plugin_manager import PluginManager  # noqa: PLC0415
-        built_in = Path(PluginManager.__module__.rsplit(".", 1)[0].replace(".", "/"))
-        # More robustly: use the known relative path
-        built_in = self._workspace_root / "pocketcode" / "plugins"
-        return [built_in] if built_in.exists() else []
+        """Resolve discovered package/workspace resource roots plus configured namespace roots."""
+        from pocketcode.core.resource_roots import discover_resource_roots  # noqa: PLC0415
+        from pocketcode.core.workspace_namespaces import discover_workspace_namespaces  # noqa: PLC0415
+
+        discovered: list[Path] = []
+        seen: set[Path] = set()
+
+        for resource_root in discover_resource_roots(self._workspace_root):
+            if resource_root.path in seen or not resource_root.path.exists():
+                continue
+            discovered.append(resource_root.path)
+            seen.add(resource_root.path)
+
+        for namespace in discover_workspace_namespaces(self._config, self._workspace_root):
+            resolved = namespace.path.resolve()
+            if resolved in seen or not resolved.exists():
+                continue
+            discovered.append(resolved)
+            seen.add(resolved)
+
+        return discovered
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():

@@ -1,0 +1,96 @@
+{
+  "session_id": "2242db1841c2480db8ab9872939949e6",
+  "title": "Session 2026-03-12 22:31 UTC",
+  "created_at": "2026-03-12T22:31:16.401392+00:00",
+  "updated_at": "2026-03-12T22:31:33.277296+00:00",
+  "workspace_root": "/media/mu6mula/Data1/AI-Stuff/PocketCoder",
+  "active_agent": "core.react",
+  "active_profile": "my-react",
+  "enabled_skills": [
+    "pocketcode-plugin-authoring",
+    "pocketcode-profiles-prompts",
+    "pocketcode-tools-runtime",
+    "pocketcode-workspace-assets",
+    "pocketcode-workspace-builder"
+  ],
+  "global_llm_profile": "gemini-3-flash-preview",
+  "session_global_skills_override": [],
+  "session_profile_overrides": {},
+  "session_confirmation_overrides": {
+    "default_policy": null,
+    "tool_policies": {},
+    "agent_policies": {}
+  },
+  "debugger_breakpoints": [],
+  "transcript": [
+    {
+      "entry_id": "a935b07eff7d4b75b836548231eb0b1b",
+      "timestamp": "2026-03-12T22:31:33.276777+00:00",
+      "role": "user",
+      "content": "make a funny joke about my wife",
+      "run_id": "ef407eaaf88b414a97e2eb56124ddd97",
+      "metadata": {
+        "agent": "core.react"
+      }
+    },
+    {
+      "entry_id": "29f39587e348461f947d5637157a1724",
+      "timestamp": "2026-03-12T22:31:33.277280+00:00",
+      "role": "assistant",
+      "content": "My wife told me to stop impersonating a flamingo. I had to put my foot down.",
+      "run_id": "ef407eaaf88b414a97e2eb56124ddd97",
+      "metadata": {
+        "summary": {
+          "agent_path": [
+            "core.react"
+          ],
+          "current_agent": "core.react",
+          "active_skills": [
+            "pocketcode-plugin-authoring",
+            "pocketcode-profiles-prompts",
+            "pocketcode-tools-runtime",
+            "pocketcode-workspace-assets",
+            "pocketcode-workspace-builder"
+          ],
+          "current_llm_profile": null,
+          "current_llm_model": null,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_cost_usd": 0.0,
+          "vm_validation_warnings": [],
+          "vm_validation_warning_count": 0,
+          "context_stats": {
+            "files": 0,
+            "folders": 0,
+            "urls": 0,
+            "snippets": 0,
+            "snippet_chars": 0
+          },
+          "runtime_event_count": 3,
+          "step_count": 1,
+          "steps": [
+            {
+              "index": 1,
+              "kind": "agent_turn",
+              "label": "Agent turn: core.react",
+              "status": "completed",
+              "parent_step_index": null,
+              "duration_ms": 3406.944,
+              "summary": "Transition: final_answer",
+              "details": {
+                "agent": "core.react",
+                "execution_mode": "llm",
+                "outcome": {
+                  "transition": "final_answer"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

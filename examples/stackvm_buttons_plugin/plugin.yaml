@@ -1,6 +1,0 @@
-schema_version: 1
-name: stackvm_buttons_example
-description: Normalize tool data, present buttons, and continue within StackVM
-flows:
-  normalize:
-    markdown: flows/normalize.md

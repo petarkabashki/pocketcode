@@ -29,7 +29,7 @@ Primary sources:
 `agent_profile_manager.py` loads agents in this order:
 1. plugin-declared default agent
 2. plugin-local `agents/*.yaml`
-3. workspace `.pocketcode/agents/*.yaml`
+3. workspace `.pocketcode/*.agent.yaml`
 4. synthesized default profile from the flow definition
 
 Collision precedence is:

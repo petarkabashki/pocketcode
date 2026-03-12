@@ -8,10 +8,10 @@ Covers all cases specified in T029:
   - resolve()                : unqualified, 1 owner → WARNING
   - resolve()                : unqualified, 2 owners → RegistryError
   - resolve()                : context_plugin local-first
-  - unregister_plugin()      : removes all entries
+  - unregister_namespace()      : removes all entries
   - snapshot()               : deep copy isolation
   - list_all()               : sorted qualified names
-  - list_by_plugin()         : plugin-scoped dict
+  - list_by_namespace()         : namespace-scoped dict
   - plugins()                : sorted plugin list
   - __contains__             : membership check
   - items()                  : (qname, impl) iterator
@@ -243,7 +243,7 @@ class TestResolveContextPlugin:
 
 
 # ---------------------------------------------------------------------------
-# unregister_plugin()
+# unregister_namespace()
 # ---------------------------------------------------------------------------
 
 class TestUnregisterPlugin:
@@ -253,7 +253,7 @@ class TestUnregisterPlugin:
         reg.register("core", "b", _make_tool("b"))
         reg.register("other", "c", _make_tool("c"))
 
-        reg.unregister_plugin("core")
+        reg.unregister_namespace("core")
 
         assert "core.a" not in reg
         assert "core.b" not in reg
@@ -263,7 +263,7 @@ class TestUnregisterPlugin:
     def test_bare_name_cleaned_up(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("core", "tool", _make_tool())
-        reg.unregister_plugin("core")
+        reg.unregister_namespace("core")
 
         with pytest.raises(RegistryError):
             reg.resolve("tool")
@@ -273,7 +273,7 @@ class TestUnregisterPlugin:
         t = _make_tool()
         reg.register("a", "tool", _make_tool())
         reg.register("b", "tool", t)
-        reg.unregister_plugin("a")
+        reg.unregister_namespace("a")
 
         with caplog.at_level(logging.WARNING, logger="pocketcode.core.namespace_registry"):
             result = reg.resolve("tool")
@@ -290,13 +290,13 @@ class TestContains:
 
     def test_unregister_nonexistent_is_noop(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
-        reg.unregister_plugin("nonexistent")  # must not raise
+        reg.unregister_namespace("nonexistent")  # must not raise
 
     def test_unregister_clears_plugins_list(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("core", "tool", _make_tool())
-        reg.unregister_plugin("core")
-        assert "core" not in reg.plugins()
+        reg.unregister_namespace("core")
+        assert "core" not in reg.namespaces()
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +317,7 @@ class TestSnapshot:
         reg.register("core", "tool", _make_tool())
 
         snap = reg.snapshot()
-        reg.unregister_plugin("core")  # modify original
+        reg.unregister_namespace("core")  # modify original
 
         assert "core.tool" in snap   # snapshot unaffected
         assert "core.tool" not in reg
@@ -327,13 +327,13 @@ class TestSnapshot:
         reg.register("core", "tool", _make_tool())
 
         snap = reg.snapshot()
-        snap.unregister_plugin("core")  # modify snapshot
+        snap.unregister_namespace("core")  # modify snapshot
 
         assert "core.tool" in reg      # original unaffected
 
 
 # ---------------------------------------------------------------------------
-# list_all(), list_by_plugin(), plugins(), __contains__(), items()
+# list_all(), list_by_namespace(), plugins(), __contains__(), items()
 # ---------------------------------------------------------------------------
 
 class TestEnumerationAPI:
@@ -348,18 +348,18 @@ class TestEnumerationAPI:
         reg = self._populated()
         assert reg.list_all() == ["a.x", "a.y", "b.z"]
 
-    def test_list_by_plugin_correct_entries(self):
+    def test_list_by_namespace_correct_entries(self):
         reg = self._populated()
-        by_a = reg.list_by_plugin("a")
+        by_a = reg.list_by_namespace("a")
         assert set(by_a.keys()) == {"x", "y"}
 
-    def test_list_by_plugin_empty_for_missing(self):
+    def test_list_by_namespace_empty_for_missing(self):
         reg = self._populated()
-        assert reg.list_by_plugin("nonexistent") == {}
+        assert reg.list_by_namespace("nonexistent") == {}
 
     def test_plugins_sorted(self):
         reg = self._populated()
-        assert reg.plugins() == ["a", "b"]
+        assert reg.namespaces() == ["a", "b"]
 
     def test_contains_qualified(self):
         reg = self._populated()

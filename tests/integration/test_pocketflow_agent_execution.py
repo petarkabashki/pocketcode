@@ -4,7 +4,7 @@ from typing import Any, Dict
 from pocketflow import Node, Flow
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.runtime_models import AgentDefinition
-from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.workspace_catalog import WorkspaceCatalog
 from pocketcode.core.namespace_registry import NamespaceRegistry
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.tool_runtime import ToolRuntime
@@ -24,12 +24,12 @@ class SimpleNode(Node):
 
 def test_pocketflow_agent_execution():
     # Setup
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     tool_runtime = MagicMock(spec=ToolRuntime)
     
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={}
@@ -47,7 +47,6 @@ def test_pocketflow_agent_execution():
     )
     
     plugin_manager.agents = {"test-flow-agent": agent_def}
-    plugin_manager.plugins = {}
     
     shared_store = {
         "active_agent": "test-flow-agent",
@@ -105,12 +104,12 @@ def test_sc004_handoff_roundtrip():
     SC-004: Verify coder::coder → architect::architect → coder::coder round-trip
     completes without error using fully-qualified plugin::agent handoff references.
     """
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     tool_runtime = MagicMock(spec=ToolRuntime)
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -136,7 +135,6 @@ def test_sc004_handoff_roundtrip():
     agents.register("architect", "architect", architect_agent)
 
     plugin_manager.agents = agents
-    plugin_manager.plugins = {}
 
     shared_store: Dict[str, Any] = {
         "active_agent": "coder.coder",
@@ -159,7 +157,7 @@ def test_sc004_handoff_roundtrip():
 
 
 def test_stackvm_agent_execution():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -167,7 +165,7 @@ def test_stackvm_agent_execution():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -181,7 +179,6 @@ def test_stackvm_agent_execution():
     )
 
     plugin_manager.agents = {"vm-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-agent",
@@ -195,7 +192,7 @@ def test_stackvm_agent_execution():
 
 
 def test_stackvm_agent_execution_with_user_defined_macro():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -203,7 +200,7 @@ def test_stackvm_agent_execution_with_user_defined_macro():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -217,7 +214,6 @@ def test_stackvm_agent_execution_with_user_defined_macro():
     )
 
     plugin_manager.agents = {"vm-macro-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-macro-agent",
@@ -231,7 +227,7 @@ def test_stackvm_agent_execution_with_user_defined_macro():
 
 
 def test_stackvm_agent_execution_with_syntax_quote_macro():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -239,7 +235,7 @@ def test_stackvm_agent_execution_with_syntax_quote_macro():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -256,7 +252,6 @@ def test_stackvm_agent_execution_with_syntax_quote_macro():
     )
 
     plugin_manager.agents = {"vm-syntax-macro-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-syntax-macro-agent",
@@ -278,7 +273,7 @@ def test_stackvm_agent_execution_with_syntax_quote_macro():
 
 
 def test_stackvm_agent_execution_with_builtin_when_macro():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -286,7 +281,7 @@ def test_stackvm_agent_execution_with_builtin_when_macro():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -300,7 +295,6 @@ def test_stackvm_agent_execution_with_builtin_when_macro():
     )
 
     plugin_manager.agents = {"vm-builtin-macro-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-builtin-macro-agent",
@@ -320,7 +314,7 @@ def test_stackvm_agent_execution_with_builtin_when_macro():
 
 
 def test_stackvm_agent_execution_with_builtin_tool_once_macro():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -331,7 +325,7 @@ def test_stackvm_agent_execution_with_builtin_tool_once_macro():
     plugin_manager.resolve_tools_for_agent.return_value = ["workspace.echo"]
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -348,7 +342,6 @@ def test_stackvm_agent_execution_with_builtin_tool_once_macro():
     )
 
     plugin_manager.agents = {"vm-tool-once-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-tool-once-agent",
@@ -369,7 +362,7 @@ def test_stackvm_agent_execution_with_builtin_tool_once_macro():
 
 
 def test_stackvm_agent_execution_with_builtin_delegate_return_macro_handoffs_when_missing():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -377,7 +370,7 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_handoffs_whe
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -400,7 +393,6 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_handoffs_whe
         "vm-delegate-return-agent": caller_agent,
         "delegate.agent": delegate_agent,
     }
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-delegate-return-agent",
@@ -421,7 +413,7 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_handoffs_whe
 
 
 def test_stackvm_agent_execution_with_builtin_delegate_return_macro_answers_when_result_exists():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -429,7 +421,7 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_answers_when
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -443,7 +435,6 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_answers_when
     )
 
     plugin_manager.agents = {"vm-delegate-return-answer-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-delegate-return-answer-agent",
@@ -464,7 +455,7 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_answers_when
 
 
 def test_stackvm_agent_execution_with_builtin_finalize_from_macro():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -472,7 +463,7 @@ def test_stackvm_agent_execution_with_builtin_finalize_from_macro():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -486,7 +477,6 @@ def test_stackvm_agent_execution_with_builtin_finalize_from_macro():
     )
 
     plugin_manager.agents = {"vm-finalize-from-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-finalize-from-agent",
@@ -506,7 +496,7 @@ def test_stackvm_agent_execution_with_builtin_finalize_from_macro():
 
 
 def test_stackvm_agent_execution_with_builtin_prompt_route_macro():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -514,7 +504,7 @@ def test_stackvm_agent_execution_with_builtin_prompt_route_macro():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -533,7 +523,6 @@ def test_stackvm_agent_execution_with_builtin_prompt_route_macro():
     )
 
     plugin_manager.agents = {"vm-prompt-route-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-prompt-route-agent",
@@ -560,7 +549,7 @@ def test_stackvm_agent_execution_with_builtin_prompt_route_macro():
 
 
 def test_stackvm_agent_llm_call_records_usage_and_events():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     llm_router.generate.return_value = "llm reply"
@@ -576,7 +565,7 @@ def test_stackvm_agent_llm_call_records_usage_and_events():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -590,7 +579,6 @@ def test_stackvm_agent_llm_call_records_usage_and_events():
     )
 
     plugin_manager.agents = {"vm-llm-agent": agent_def}
-    plugin_manager.plugins = {}
     events: list[tuple[str, dict[str, Any]]] = []
 
     shared_store = {
@@ -626,7 +614,7 @@ def test_stackvm_agent_llm_call_records_usage_and_events():
 
 
 def test_stackvm_agent_tool_roundtrip():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -637,7 +625,7 @@ def test_stackvm_agent_tool_roundtrip():
     plugin_manager.resolve_tools_for_agent.return_value = ["workspace.echo"]
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -652,7 +640,6 @@ def test_stackvm_agent_tool_roundtrip():
     )
 
     plugin_manager.agents = {"vm-tool-agent": agent_def}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-tool-agent",
@@ -678,7 +665,7 @@ def test_stackvm_agent_tool_roundtrip():
 
 
 def test_stackvm_agent_execution_inside_async_loop():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -686,7 +673,7 @@ def test_stackvm_agent_execution_inside_async_loop():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -700,7 +687,6 @@ def test_stackvm_agent_execution_inside_async_loop():
     )
 
     plugin_manager.agents = {"vm-agent": agent_def}
-    plugin_manager.plugins = {}
 
     async def _run() -> dict[str, Any]:
         shared_store = {
@@ -717,7 +703,7 @@ def test_stackvm_agent_execution_inside_async_loop():
 
 
 def test_stackvm_agent_handoff_roundtrip():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -725,7 +711,7 @@ def test_stackvm_agent_handoff_roundtrip():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -749,7 +735,6 @@ def test_stackvm_agent_handoff_roundtrip():
         "vm-router": vm_agent,
         "delegate.agent": delegate_agent,
     }
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-router",
@@ -763,7 +748,7 @@ def test_stackvm_agent_handoff_roundtrip():
 
 
 def test_stackvm_agent_ask_user_transition():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -771,7 +756,7 @@ def test_stackvm_agent_ask_user_transition():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -785,7 +770,6 @@ def test_stackvm_agent_ask_user_transition():
     )
 
     plugin_manager.agents = {"vm-ask-agent": vm_agent}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-ask-agent",
@@ -799,7 +783,7 @@ def test_stackvm_agent_ask_user_transition():
 
 
 def test_stackvm_agent_prompt_user_continues_when_interaction_handler_is_present():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -807,7 +791,7 @@ def test_stackvm_agent_prompt_user_continues_when_interaction_handler_is_present
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -821,7 +805,6 @@ def test_stackvm_agent_prompt_user_continues_when_interaction_handler_is_present
     )
 
     plugin_manager.agents = {"vm-prompt-agent": vm_agent}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-prompt-agent",
@@ -841,7 +824,7 @@ def test_stackvm_agent_prompt_user_continues_when_interaction_handler_is_present
 
 
 def test_stackvm_agent_prompt_interaction_continues_with_button_value():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -849,7 +832,7 @@ def test_stackvm_agent_prompt_interaction_continues_with_button_value():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -863,7 +846,6 @@ def test_stackvm_agent_prompt_interaction_continues_with_button_value():
     )
 
     plugin_manager.agents = {"vm-interaction-agent": vm_agent}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-interaction-agent",
@@ -886,7 +868,7 @@ def test_stackvm_agent_prompt_interaction_continues_with_button_value():
 
 
 def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt_route_macro():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -894,7 +876,7 @@ def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -912,7 +894,6 @@ def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt
     )
 
     plugin_manager.agents = {"vm-legacy-prompt-route-agent": vm_agent}
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-legacy-prompt-route-agent",
@@ -942,7 +923,7 @@ def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt
 
 
 def test_stackvm_agent_prompted_delegate_handoff_roundtrip():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -950,7 +931,7 @@ def test_stackvm_agent_prompted_delegate_handoff_roundtrip():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -988,7 +969,6 @@ def test_stackvm_agent_prompted_delegate_handoff_roundtrip():
     agents.register("prompt", "caller", caller_agent)
     agents.register("prompt", "delegate", delegate_agent)
     plugin_manager.agents = agents
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "prompt.caller",
@@ -1010,7 +990,7 @@ def test_stackvm_agent_prompted_delegate_handoff_roundtrip():
 
 
 def test_stackvm_agent_checklist_delegate_handoff_roundtrip():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -1018,7 +998,7 @@ def test_stackvm_agent_checklist_delegate_handoff_roundtrip():
     plugin_manager.resolve_tools_for_agent.return_value = []
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -1054,7 +1034,6 @@ def test_stackvm_agent_checklist_delegate_handoff_roundtrip():
     agents.register("prompt", "caller", caller_agent)
     agents.register("prompt", "checklist_delegate", delegate_agent)
     plugin_manager.agents = agents
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "prompt.caller",
@@ -1080,7 +1059,7 @@ def test_stackvm_agent_checklist_delegate_handoff_roundtrip():
 
 
 def test_stackvm_agent_failure_branch_handoff():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
@@ -1089,7 +1068,7 @@ def test_stackvm_agent_failure_branch_handoff():
     plugin_manager.resolve_tools_for_agent.return_value = ["core.read_file"]
 
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={},
@@ -1113,7 +1092,6 @@ def test_stackvm_agent_failure_branch_handoff():
         "vm-resilient": vm_agent,
         "fallback.agent": fallback_agent,
     }
-    plugin_manager.plugins = {}
 
     shared_store = {
         "active_agent": "vm-resilient",

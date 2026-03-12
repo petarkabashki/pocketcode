@@ -7,6 +7,7 @@ from pocketcode.core.engine import PocketCodeEngine
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES_ROOT = REPO_ROOT / "examples"
+EXAMPLE_NAMESPACE_ROOTS = [path for path in sorted(EXAMPLES_ROOT.iterdir()) if path.is_dir()]
 
 
 def write_fixture(workspace_root: Path, filename: str, lines: list[str]) -> None:
@@ -24,26 +25,13 @@ def write_temp_stackvm_plugin(
     flow_body_lines: Sequence[str],
     vm_lines: Sequence[str],
 ) -> tuple[Path, str]:
-    plugin_root = workspace_root / plugin_dir_name
-    flows_dir = plugin_root / "flows"
+    plugin_root = workspace_root / plugin_name
     vm_dir = plugin_root / "vm"
-    flows_dir.mkdir(parents=True)
+    plugin_root.mkdir(parents=True)
     vm_dir.mkdir(parents=True)
 
     write_fixture(
         plugin_root,
-        "plugin.yaml",
-        [
-            "schema_version: 1",
-            f"name: {plugin_name}",
-            f"description: {plugin_description}",
-            "flows:",
-            f"  {flow_name}:",
-            f"    markdown: flows/{flow_name}.md",
-        ],
-    )
-    write_fixture(
-        flows_dir,
         f"{flow_name}.md",
         [
             "---",
@@ -65,17 +53,28 @@ def make_example_engine(
     workspace_root: Path,
     default_agent: str,
     *,
-    plugin_paths: Iterable[str | Path] | None = None,
+    workspace_paths: Iterable[str | Path] | None = None,
 ) -> PocketCodeEngine:
-    resolved_plugin_paths = [str(EXAMPLES_ROOT)]
-    if plugin_paths is not None:
-        resolved_plugin_paths = [str(Path(path)) for path in plugin_paths]
-        resolved_plugin_paths.append(str(EXAMPLES_ROOT))
+    resolved_workspace_paths = [str(path) for path in EXAMPLE_NAMESPACE_ROOTS]
+    if workspace_paths is not None:
+        resolved_workspace_paths = []
+        for raw_path in workspace_paths:
+            candidate = Path(raw_path)
+            namespace_markers = ("*.md", "*.prompt.md", "*.tool.py")
+            has_namespace_assets = candidate.is_dir() and any(
+                next(candidate.glob(pattern), None) is not None
+                for pattern in namespace_markers
+            )
+            if candidate.is_dir() and not has_namespace_assets:
+                resolved_workspace_paths.extend(str(path) for path in sorted(candidate.iterdir()) if path.is_dir())
+                continue
+            resolved_workspace_paths.append(str(candidate))
+        resolved_workspace_paths.extend(str(path) for path in EXAMPLE_NAMESPACE_ROOTS)
 
     config = {
         "llm": {"providers": {}, "profiles": {}},
         "runtime": {
-            "plugin_paths": resolved_plugin_paths,
+            "workspace_paths": resolved_workspace_paths,
             "default_agent": default_agent,
             "auto_confirm_tools": True,
             "require_tool_confirmation": False,

@@ -175,7 +175,7 @@ def test_real_engine_start_request_can_continue_after_stackvm_button_interaction
 
     result = handle.wait(timeout=1.0)
     assert result == "Delegating Alpha, Beta, untitled from fixture"
-    router_source = (EXAMPLES_ROOT / "stackvm_buttons_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    router_source = (EXAMPLES_ROOT / "stackvm_buttons_example" / "vm" / "router.vm").read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["prompt-route", "tool-once"]
 
 
@@ -219,7 +219,7 @@ def test_real_engine_start_request_can_return_from_prompted_stackvm_delegate(tmp
 
     assert result == "Caller received delegate decision: delegate approved Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_prompt_return_example.normalize"
-    router_source = (EXAMPLES_ROOT / "stackvm_prompt_return_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    router_source = (EXAMPLES_ROOT / "stackvm_prompt_return_example" / "vm" / "router.vm").read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
@@ -268,7 +268,7 @@ def test_real_engine_start_request_can_pass_through_stackvm_delegate_return(tmp_
 
     assert result == "delegate approved Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_delegate_return_example.normalize"
-    router_source = (EXAMPLES_ROOT / "stackvm_delegate_return_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    router_source = (EXAMPLES_ROOT / "stackvm_delegate_return_example" / "vm" / "router.vm").read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["delegate-return", "tool-once"]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
@@ -320,7 +320,7 @@ def test_real_engine_start_request_can_return_from_checklist_stackvm_delegate(tm
     events.extend(handle.drain_events())
 
     assert result == "Caller received delegate tools: delegate picked git, search for Alpha, Beta, untitled from fixture"
-    router_source = (EXAMPLES_ROOT / "stackvm_checklist_return_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    router_source = (EXAMPLES_ROOT / "stackvm_checklist_return_example" / "vm" / "router.vm").read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
@@ -367,7 +367,7 @@ def test_real_engine_start_request_can_continue_after_stackvm_radio_interaction(
 
     result = handle.wait(timeout=1.0)
     assert result == "Selected mode delegate for Alpha, Beta, untitled from fixture"
-    router_source = (EXAMPLES_ROOT / "stackvm_radio_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    router_source = (EXAMPLES_ROOT / "stackvm_radio_example" / "vm" / "router.vm").read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
@@ -519,7 +519,7 @@ def test_real_engine_start_request_can_run_stackvm_multistage_pipeline(tmp_path)
     assert result == "pipeline complete: Alpha, Beta, untitled from fixture | actions=delegate, review | delegate=delegate plan review-first"
     assert engine.last_run_summary["current_agent"] == "stackvm_multistage_pipeline_example.normalize"
     router_source = (
-        EXAMPLES_ROOT / "stackvm_multistage_pipeline_plugin" / "vm" / "router.vm"
+        EXAMPLES_ROOT / "stackvm_multistage_pipeline_example" / "vm" / "router.vm"
     ).read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["finalize-from", "tool-once", "finalize-from"]
     event_types = [event["type"] for event in events]

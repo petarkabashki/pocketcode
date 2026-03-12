@@ -97,7 +97,7 @@ class TestPromptReferenceResolution:
             agents=NamespaceRegistry(),
         )
         runtime = AgentRuntime(
-            plugin_manager=plugins,
+            catalog=plugins,
             llm_router=MagicMock(),
             tool_runtime=MagicMock(),
             runtime_config={},

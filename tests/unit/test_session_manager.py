@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from pocketcode.core.session_manager import SessionManager
@@ -18,7 +19,19 @@ class TestSessionManagerScaffold:
         assert loaded.session_id == record.session_id
         assert loaded.active_agent == "core::agent"
         assert loaded.debugger_breakpoints == ["until tool core.write_file"]
-        assert manager.storage_dir == tmp_path / ".pocketcode" / "state" / "sessions"
+        assert manager.storage_dir == tmp_path / ".pocketstate" / "sessions"
+
+    def test_session_storage_dir_can_be_configured(self, tmp_path: Path):
+        manager = SessionManager(
+            tmp_path,
+            config={"runtime": {"storage": {"session_state_dir": ".custom-state"}}},
+        )
+
+        record = manager.create_session(title="Configured")
+        session_file = manager.storage_dir / f"{record.session_id}.json"
+
+        assert manager.storage_dir == tmp_path / ".custom-state" / "sessions"
+        assert json.loads(session_file.read_text(encoding="utf-8"))["title"] == "Configured"
 
     def test_append_list_delete_and_clear_sessions(self, tmp_path: Path):
         manager = SessionManager(tmp_path)

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
 
 from pocketcode.core.engine import PocketCodeEngine
-from pocketcode.core.markdown_profiles import ModeDefinition, SkillDefinition
+from pocketcode.core.markdown_profiles import SkillDefinition
 from pocketcode.core.namespace_registry import NamespaceRegistry
 from pocketcode.core.runtime_models import AgentProfile
 
@@ -49,17 +50,6 @@ class _EditableProfileManagerStub(_ProfileManagerStub):
 
     def reload(self, agent_definitions: dict):
         self.reload_count += 1
-
-
-class _ModeManagerStub:
-    def __init__(self, modes: dict[str, ModeDefinition]):
-        self._modes = modes
-
-    def get(self, name: str):
-        return self._modes.get(name)
-
-    def list(self):
-        return sorted(self._modes.values(), key=lambda mode: mode.name)
 
 
 class _SkillManagerStub:
@@ -120,7 +110,6 @@ class TestEngineAgentProfiles:
                 )
             }
         )
-        engine._mode_manager = _ModeManagerStub({})
         engine._skill_manager = _SkillManagerStub({})
 
         engine._validate_loaded_reference_surfaces()
@@ -131,42 +120,6 @@ class TestEngineAgentProfiles:
         assert profile.tools == ["core.read_file"]
         assert profile.extra_prompts == ["prompt:resource_root.pocketcode.keep"]
 
-    def test_validate_loaded_modes_drops_unknown_targets_and_canonicalizes_known_refs(self):
-        engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        agents = NamespaceRegistry()
-        agents.register("coder", "coder", type("Defn", (), {"metadata": {"plugin": "core"}, "default_agent_profile": None})())
-        tools = NamespaceRegistry()
-        tools.register("core", "read_file", lambda **kw: {"ok": True})
-        prompts = NamespaceRegistry()
-        prompts.register("resource_root.pocketcode", "keep", "Keep prompt.")
-        engine._plugins = type("Plugins", (), {"agents": agents, "tools": tools, "prompts": prompts})()
-        engine._agent_profile_manager = _ProfileManagerStub(
-            {
-                "coder.safe": AgentProfile(name="coder.safe", flow="coder::coder"),
-            }
-        )
-        engine._mode_manager = _ModeManagerStub(
-            {
-                "review": ModeDefinition(
-                    name="review",
-                    flow="flow:coder.coder",
-                    tools=["read_file", "tool:missing.read_file"],
-                    extra_prompts=["prompt:resource_root.pocketcode.keep", "prompt:missing.keep"],
-                ),
-                "broken": ModeDefinition(name="broken", flow="flow:missing.agent"),
-            }
-        )
-        engine._skill_manager = _SkillManagerStub({})
-
-        engine._validate_loaded_reference_surfaces()
-
-        review = engine._mode_manager.get("review")
-        assert review is not None
-        assert review.flow == "coder.coder"
-        assert review.tools == ["core.read_file"]
-        assert review.extra_prompts == ["prompt:resource_root.pocketcode.keep"]
-        assert engine._mode_manager.get("broken") is None
-
     def test_validate_loaded_skills_prunes_global_invalid_refs_and_keeps_contextual_unqualified_refs(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         agents = NamespaceRegistry()
@@ -176,7 +129,6 @@ class TestEngineAgentProfiles:
         prompts.register("resource_root.pocketcode", "keep", "Keep prompt.")
         engine._plugins = type("Plugins", (), {"agents": agents, "tools": tools, "prompts": prompts})()
         engine._agent_profile_manager = _ProfileManagerStub({})
-        engine._mode_manager = _ModeManagerStub({})
         engine._skill_manager = _SkillManagerStub(
             {
                 "python-testing": SkillDefinition(
@@ -239,8 +191,6 @@ class TestEngineAgentProfiles:
         engine._activate_default_profile_for = lambda agent_name: setattr(engine, "current_agent", agent_name)
         engine.current_agent = None
         engine.active_agent_profile = None
-        engine.active_mode = None
-
         engine.set_agent("flow:coder.coder")
 
         assert engine.current_agent == "coder.coder"
@@ -261,13 +211,13 @@ class TestEngineAgentProfiles:
         assert engine.list_agent_profiles("flow:coder.coder") == ["coder.safe"]
 
     def test_clone_markdown_tool_asset_rewrites_name_and_handler_path(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text(
-            "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\nbody\n",
+            "---\nname: sample_tool\nhandler: ./sample_tool.tool.py:SampleTool\n---\nbody\n",
             encoding="utf-8",
         )
-        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path = tmp_path / ".pocketcode" / "sample_tool.tool.py"
         handler_path.write_text("class SampleTool: pass\n", encoding="utf-8")
 
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -282,21 +232,21 @@ class TestEngineAgentProfiles:
 
         cloned_markdown = cloned["path"].read_text(encoding="utf-8")
         cloned_handler = cloned["companion_path"].read_text(encoding="utf-8")
-        assert cloned["path"].name == "sample_tool_copy.md"
-        assert cloned["companion_path"].name == "sample_tool_copy.py"
+        assert cloned["path"].name == "sample_tool_copy.tool.md"
+        assert cloned["companion_path"].name == "sample_tool_copy.tool.py"
         assert "name: sample_tool_copy" in cloned_markdown
-        assert "handler: ./sample_tool_copy.py:SampleTool" in cloned_markdown
+        assert "handler: ./sample_tool_copy.tool.py:SampleTool" in cloned_markdown
         assert cloned_handler == "class SampleTool: pass\n"
         assert engine.reload_called is True
 
     def test_clone_markdown_tool_asset_cleans_up_when_cloned_handler_object_is_missing(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text(
-            "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\nbody\n",
+            "---\nname: sample_tool\nhandler: ./sample_tool.tool.py:SampleTool\n---\nbody\n",
             encoding="utf-8",
         )
-        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path = tmp_path / ".pocketcode" / "sample_tool.tool.py"
         handler_path.write_text("class DifferentTool: pass\n", encoding="utf-8")
 
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -314,12 +264,12 @@ class TestEngineAgentProfiles:
         else:
             raise AssertionError("Expected ValueError for missing cloned tool handler object.")
 
-        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.md").exists()
-        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.py").exists()
+        assert not (tmp_path / ".pocketcode" / "sample_tool_copy.tool.md").exists()
+        assert not (tmp_path / ".pocketcode" / "sample_tool_copy.tool.py").exists()
         assert engine.reload_called is False
 
     def test_clone_markdown_tool_asset_rejects_invalid_import_path_handler(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text(
             "---\nname: sample_tool\nhandler: missing.module.SampleTool\n---\nbody\n",
@@ -341,18 +291,18 @@ class TestEngineAgentProfiles:
         else:
             raise AssertionError("Expected ValueError for invalid import-path handler during clone.")
 
-        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.md").exists()
-        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.py").exists()
+        assert not (tmp_path / ".pocketcode" / "sample_tool_copy.tool.md").exists()
+        assert not (tmp_path / ".pocketcode" / "sample_tool_copy.tool.py").exists()
         assert engine.reload_called is False
 
     def test_clone_markdown_tool_asset_rejects_missing_prompt_include_and_cleans_up(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text(
-            "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\n{{ include:missing-prompt.md }}\n",
+            "---\nname: sample_tool\nhandler: ./sample_tool.tool.py:SampleTool\n---\n{{ include:missing-prompt.md }}\n",
             encoding="utf-8",
         )
-        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path = tmp_path / ".pocketcode" / "sample_tool.tool.py"
         handler_path.write_text("class SampleTool: pass\n", encoding="utf-8")
 
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -375,12 +325,12 @@ class TestEngineAgentProfiles:
         else:
             raise AssertionError("Expected FileNotFoundError for missing included prompt file during clone.")
 
-        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.md").exists()
-        assert not (tmp_path / ".pocketcode" / "tools" / "sample_tool_copy.py").exists()
+        assert not (tmp_path / ".pocketcode" / "sample_tool_copy.tool.md").exists()
+        assert not (tmp_path / ".pocketcode" / "sample_tool_copy.tool.py").exists()
         assert engine.reload_called is False
 
     def test_update_markdown_asset_rejects_mismatched_front_matter_name(self, tmp_path):
-        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
 
@@ -406,8 +356,8 @@ class TestEngineAgentProfiles:
         else:
             raise AssertionError("Expected ValueError for mismatched front matter name.")
 
-    def test_update_markdown_flow_asset_rejects_invalid_graph_transition(self, tmp_path):
-        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+    def test_update_markdown_flow_asset_accepts_legacy_graph_metadata_without_validation(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
 
@@ -422,21 +372,20 @@ class TestEngineAgentProfiles:
         engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
         engine.reload = lambda: None
 
-        try:
-            engine.update_markdown_asset(
-                "flow",
-                "sample_flow",
-                markdown_text=(
-                    "---\nname: sample_flow\nnodes:\n  start:\n    kind: noop\n    transition: missing\n  done:\n    kind: output\n    message: Done\n---\n```mermaid\ngraph TD\n  start -->|ok| done\n```\n"
-                ),
-            )
-        except ValueError as exc:
-            assert "references transition 'missing'" in str(exc)
-        else:
-            raise AssertionError("Expected ValueError for invalid graph transition.")
+        engine.update_markdown_asset(
+            "flow",
+            "sample_flow",
+            markdown_text=(
+                "---\nname: sample_flow\nnodes:\n  start:\n    kind: noop\n    transition: missing\n  done:\n    kind: output\n    message: Done\n---\n```mermaid\ngraph TD\n  start -->|ok| done\n```\n"
+            ),
+        )
+
+        saved_text = flow_path.read_text(encoding="utf-8")
+        assert "transition: missing" in saved_text
+        assert "graph TD" in saved_text
 
     def test_update_markdown_flow_asset_rejects_missing_prompt_include(self, tmp_path):
-        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
 
@@ -468,7 +417,7 @@ class TestEngineAgentProfiles:
             raise AssertionError("Expected FileNotFoundError for missing included prompt file.")
 
     def test_update_markdown_flow_asset_rejects_missing_tool_reference(self, tmp_path):
-        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
 
@@ -495,7 +444,7 @@ class TestEngineAgentProfiles:
             raise AssertionError("Expected ValueError for missing flow tool reference.")
 
     def test_update_markdown_flow_asset_rejects_missing_handoff_target(self, tmp_path):
-        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+        flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
 
@@ -549,7 +498,7 @@ class TestEngineAgentProfiles:
             raise AssertionError("Expected failure for missing prompt bundle reference.")
 
     def test_update_markdown_agent_asset_rejects_missing_prompt_include(self, tmp_path):
-        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path = tmp_path / ".pocketcode" / "review.agent.md"
         agent_path.parent.mkdir(parents=True, exist_ok=True)
         agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
 
@@ -582,7 +531,7 @@ class TestEngineAgentProfiles:
             raise AssertionError("Expected FileNotFoundError for missing included prompt file in agent asset.")
 
     def test_update_markdown_agent_asset_rejects_missing_target_flow(self, tmp_path):
-        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path = tmp_path / ".pocketcode" / "review.agent.md"
         agent_path.parent.mkdir(parents=True, exist_ok=True)
         agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
 
@@ -606,12 +555,12 @@ class TestEngineAgentProfiles:
                 markdown_text="---\nname: review\nflow: plug.agent\n---\nbody\n",
             )
         except ValueError as exc:
-            assert "review.md: flow could not be resolved" in str(exc)
+            assert "review.agent.md: flow could not be resolved" in str(exc)
         else:
             raise AssertionError("Expected ValueError for missing target flow.")
 
     def test_update_markdown_agent_asset_rejects_missing_tool_reference(self, tmp_path):
-        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path = tmp_path / ".pocketcode" / "review.agent.md"
         agent_path.parent.mkdir(parents=True, exist_ok=True)
         agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
 
@@ -637,12 +586,12 @@ class TestEngineAgentProfiles:
                 markdown_text="---\nname: review\nflow: plug.agent\ntools:\n  - workspace.missing_tool\n---\nbody\n",
             )
         except ValueError as exc:
-            assert "review.md: tools[0] could not be resolved" in str(exc)
+            assert "review.agent.md: tools[0] could not be resolved" in str(exc)
         else:
             raise AssertionError("Expected ValueError for missing tool reference.")
 
     def test_update_markdown_agent_asset_rejects_missing_prompt_resource(self, tmp_path):
-        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path = tmp_path / ".pocketcode" / "review.agent.md"
         agent_path.parent.mkdir(parents=True, exist_ok=True)
         agent_path.write_text("---\nname: review\nflow: plug.agent\n---\nbody\n", encoding="utf-8")
 
@@ -670,12 +619,12 @@ class TestEngineAgentProfiles:
                 ),
             )
         except ValueError as exc:
-            assert "review.md: extra_prompts[0] could not be resolved" in str(exc)
+            assert "review.agent.md: extra_prompts[0] could not be resolved" in str(exc)
         else:
             raise AssertionError("Expected ValueError for missing prompt resource.")
 
-    def test_clone_markdown_flow_asset_rejects_invalid_graph_and_cleans_up(self, tmp_path):
-        flow_path = tmp_path / ".pocketcode" / "flows" / "sample_flow.md"
+    def test_clone_markdown_flow_asset_preserves_legacy_graph_metadata(self, tmp_path):
+        flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text(
             "---\nname: sample_flow\nnodes:\n  start:\n    kind: noop\n    transition: missing\n  done:\n    kind: output\n    message: Done\n---\n```mermaid\ngraph TD\n  start -->|ok| done\n```\n",
@@ -694,18 +643,18 @@ class TestEngineAgentProfiles:
         engine.reload_called = False
         engine.reload = lambda: setattr(engine, "reload_called", True)
 
-        try:
-            engine.clone_markdown_asset("flow", "sample_flow", "sample_flow_copy")
-        except ValueError as exc:
-            assert "references transition 'missing'" in str(exc)
-        else:
-            raise AssertionError("Expected ValueError for invalid graph transition during clone.")
+        cloned = engine.clone_markdown_asset("flow", "sample_flow", "sample_flow_copy")
 
-        assert not (tmp_path / ".pocketcode" / "flows" / "sample_flow_copy.md").exists()
-        assert engine.reload_called is False
+        cloned_path = tmp_path / ".pocketcode" / "sample_flow_copy.md"
+        assert cloned["path"] == cloned_path
+        assert cloned_path.exists()
+        cloned_text = cloned_path.read_text(encoding="utf-8")
+        assert "transition: missing" in cloned_text
+        assert "graph TD" in cloned_text
+        assert engine.reload_called is True
 
     def test_clone_markdown_agent_asset_rejects_missing_prompt_include_and_cleans_up(self, tmp_path):
-        agent_path = tmp_path / ".pocketcode" / "agents" / "review.md"
+        agent_path = tmp_path / ".pocketcode" / "review.agent.md"
         agent_path.parent.mkdir(parents=True, exist_ok=True)
         agent_path.write_text(
             "---\nname: review\nflow: plug.agent\n---\n{{ include:missing-prompt.md }}\n",
@@ -737,11 +686,11 @@ class TestEngineAgentProfiles:
         else:
             raise AssertionError("Expected FileNotFoundError for missing included prompt file during agent clone.")
 
-        assert not (tmp_path / ".pocketcode" / "agents" / "review_copy.md").exists()
+        assert not (tmp_path / ".pocketcode" / "agent.review_copy" / "review_copy.agent.md").exists()
         assert engine.reload_called is False
 
     def test_update_markdown_tool_asset_rejects_missing_handler_file(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
 
@@ -757,7 +706,7 @@ class TestEngineAgentProfiles:
                 "tool",
                 "sample_tool",
                 markdown_text=(
-                    "---\nname: sample_tool\nhandler: ./missing_tool.py:SampleTool\n---\nbody\n"
+                    "---\nname: sample_tool\nhandler: ./missing_tool.tool.py:SampleTool\n---\nbody\n"
                 ),
             )
         except ValueError as exc:
@@ -766,10 +715,10 @@ class TestEngineAgentProfiles:
             raise AssertionError("Expected ValueError for missing tool handler file.")
 
     def test_update_markdown_tool_asset_rejects_missing_handler_object(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
-        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path = tmp_path / ".pocketcode" / "sample_tool.tool.py"
         handler_path.write_text("class DifferentTool: pass\n", encoding="utf-8")
 
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -784,7 +733,7 @@ class TestEngineAgentProfiles:
                 "tool",
                 "sample_tool",
                 markdown_text=(
-                    "---\nname: sample_tool\nhandler: ./sample_tool.py:SampleTool\n---\nbody\n"
+                    "---\nname: sample_tool\nhandler: ./sample_tool.tool.py:SampleTool\n---\nbody\n"
                 ),
             )
         except ValueError as exc:
@@ -793,7 +742,7 @@ class TestEngineAgentProfiles:
             raise AssertionError("Expected ValueError for missing tool handler object.")
 
     def test_update_markdown_tool_asset_rejects_invalid_import_path_handler(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
 
@@ -818,10 +767,10 @@ class TestEngineAgentProfiles:
             raise AssertionError("Expected ValueError for invalid import-path handler.")
 
     def test_delete_markdown_tool_asset_removes_markdown_and_keeps_handler(self, tmp_path):
-        tool_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.md"
+        tool_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
         tool_path.parent.mkdir(parents=True, exist_ok=True)
         tool_path.write_text("---\nname: sample_tool\n---\nbody\n", encoding="utf-8")
-        handler_path = tmp_path / ".pocketcode" / "tools" / "sample_tool.py"
+        handler_path = tmp_path / ".pocketcode" / "sample_tool.tool.py"
         handler_path.write_text("class SampleTool: pass\n", encoding="utf-8")
 
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -864,7 +813,6 @@ class TestEngineAgentProfiles:
             flow="coder::coder",
             llm_profile="smart",
         )
-        engine.active_mode = None
         engine.enabled_skills = []
         engine._runtime_config = {"agent_runtime_workflow": "internal-flow"}
         engine.global_llm_override = "fast"
@@ -877,7 +825,6 @@ class TestEngineAgentProfiles:
         engine._copy_session_confirmation_overrides = lambda: {}
         engine.list_flows = lambda: ["coder::coder"]
         engine.list_available_agents = lambda: ["coder.safe"]
-        engine.list_modes = lambda: []
         engine.list_skills = lambda: []
         engine.list_llm_profiles = lambda: ["default", "fast", "smart"]
 
@@ -1250,57 +1197,6 @@ class TestEngineAgentProfiles:
 
         assert engine.agent_llm_overrides == {"coder.coder": "fast"}
 
-    def test_set_mode_builds_ephemeral_agent_profile_from_markdown_mode(self):
-        engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        base_profile = AgentProfile(
-            name="coder::coder",
-            flow="coder::coder",
-            description="Base profile",
-            llm_profile="fast",
-            extra_prompts=["prompts/base.md"],
-            tools=["core.read_file"],
-            tool_confirmation={"default": "confirm"},
-        )
-        engine._agent_profile_manager = _ProfileManagerStub({"coder::coder": base_profile})
-        engine._mode_manager = _ModeManagerStub(
-            {
-                "review": ModeDefinition(
-                    name="review",
-                    description="Review mode",
-                    flow="coder::coder",
-                    llm_profile="smart",
-                    inline_prompt="Review code carefully.",
-                    extra_prompts=["prompts/review.md"],
-                )
-            }
-        )
-        engine._plugins = _PluginsWithQualifiedTools()
-        engine._skill_manager = _SkillManagerStub({})
-        engine._llm_router = type(
-            "Router",
-            (),
-            {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
-        )()
-        engine._normalize_confirmation_policy = PocketCodeEngine._normalize_confirmation_policy.__get__(
-            engine,
-            PocketCodeEngine,
-        )
-        engine.active_agent_profile = base_profile
-        engine.current_agent = "coder::coder"
-        engine.active_mode = None
-
-        engine.set_mode("review")
-
-        assert engine.active_mode.name == "review"
-        assert engine.current_agent == "coder::coder"
-        assert engine.active_agent_profile is not None
-        assert engine.active_agent_profile.name == "review"
-        assert engine.active_agent_profile.agent == "coder::coder"
-        assert engine.active_agent_profile.llm_profile == "smart"
-        assert engine.active_agent_profile.inline_prompt == "Review code carefully."
-        assert engine.active_agent_profile.extra_prompts == ["prompts/base.md", "prompts/review.md"]
-        assert engine.active_agent_profile.tool_confirmation == {"default": "confirm"}
-
     def test_enable_skill_registers_provided_tools_and_resolves_existing_tool_refs(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._plugins = _PluginsWithQualifiedTools()
@@ -1456,9 +1352,21 @@ class TestEngineAgentProfiles:
 
         engine.set_last_used_entry_history([" first ", "", "second", "third"])
 
-        saved = yaml.safe_load((tmp_path / "pocketcode.yml").read_text(encoding="utf-8"))
-        assert saved["runtime"]["textual"]["last_used"]["entry_history"] == ["first", "second", "third"]
+        history_file = tmp_path / ".pockethist" / "textual_entry_history.json"
+        assert json.loads(history_file.read_text(encoding="utf-8")) == ["first", "second", "third"]
         assert engine.get_textual_entry_history() == ["first", "second", "third"]
+
+    def test_set_last_used_entry_history_uses_configured_history_dir(self, tmp_path):
+        engine = PocketCodeEngine.__new__(PocketCodeEngine)
+        engine._workspace_root = tmp_path
+        engine._config = {"runtime": {"storage": {"entry_history_dir": ".custom-hist"}}}
+        engine._runtime_config = engine._config["runtime"]
+
+        engine.set_last_used_entry_history(["updated value"])
+
+        assert json.loads((tmp_path / ".custom-hist" / "textual_entry_history.json").read_text(encoding="utf-8")) == [
+            "updated value"
+        ]
 
     def test_configured_enabled_skills_uses_default_skills_without_session_override(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -1626,7 +1534,6 @@ class TestEngineAgentProfiles:
         engine._runtime_config = engine._config["runtime"]
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
         engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
-        engine._mode_manager = _ModeManagerStub({})
         engine._skill_manager = _SkillManagerStub({"python-testing": SkillDefinition(name="python-testing")})
         engine._llm_router = type(
             "Router",
@@ -1636,7 +1543,6 @@ class TestEngineAgentProfiles:
         engine._refresh_runtime_components = lambda: None
         engine.current_agent = "coder::coder"
         engine.active_agent_profile = profile
-        engine.active_mode = None
         engine.global_llm_override = "smart"
         engine.enabled_skills = ["python-testing"]
         engine.auto_confirm_tools = True
@@ -1672,7 +1578,6 @@ class TestEngineAgentProfiles:
         engine._runtime_config = engine._config["runtime"]
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
         engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
-        engine._mode_manager = _ModeManagerStub({})
         engine._skill_manager = _SkillManagerStub({"python-testing": SkillDefinition(name="python-testing")})
         engine._llm_router = type(
             "Router",
@@ -1682,7 +1587,6 @@ class TestEngineAgentProfiles:
         engine._refresh_runtime_components = lambda: None
         engine.current_agent = "coder::coder"
         engine.active_agent_profile = profile
-        engine.active_mode = None
         engine.global_llm_override = "smart"
         engine.enabled_skills = ["python-testing"]
         engine.auto_confirm_tools = True

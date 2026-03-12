@@ -1254,23 +1254,19 @@ class _TextualEngineStub:
     def __init__(self) -> None:
         self.current_agent = "a"
         self.active_agent_profile = self._profile("a", "a")
-        self.active_mode = None
         self.global_llm_override = None
         self.auto_confirm_tools = False
         self.session_confirmation_overrides: dict[str, str | None] = {}
         self.set_agent_calls: list[str | None] = []
         self.set_active_agent_profile_calls: list[str] = []
         self.set_last_used_active_profile_calls: list[str | None] = []
-        self.set_last_used_mode_calls: list[str | None] = []
         self.set_last_used_global_llm_profile_calls: list[str | None] = []
         self.set_last_used_session_confirmation_default_calls: list[str | None] = []
         self.set_last_used_auto_confirm_tools_calls: list[bool] = []
         self.clone_agent_profile_calls: list[tuple[str, str]] = []
         self.clone_llm_profile_calls: list[tuple[str, str]] = []
-        self.clone_mode_calls: list[tuple[str, str]] = []
         self.update_agent_profile_calls: list[dict[str, object]] = []
         self.update_llm_profile_calls: list[dict[str, object]] = []
-        self.update_mode_calls: list[dict[str, object]] = []
         self.clone_markdown_asset_calls: list[tuple[str, str, str]] = []
         self.update_markdown_asset_calls: list[dict[str, object]] = []
         self.delete_markdown_asset_calls: list[tuple[str, str]] = []
@@ -1315,13 +1311,9 @@ class _TextualEngineStub:
                 "is_resumable": True,
             },
         ]
-        self._modes = {
-            "review": SimpleNamespace(name="review", source_path=Path("/tmp/review.md")),
-            "focus": SimpleNamespace(name="focus", source_path=Path("/tmp/focus.md")),
-        }
         self._selection_presets = {
             "review-session": {
-                "active_mode": "review",
+                "active_profile": "a-safe",
                 "global_llm_profile": "smart",
             }
         }
@@ -1368,17 +1360,6 @@ class _TextualEngineStub:
 
     def list_llm_profiles(self):
         return ["fast", "smart"]
-
-    def list_modes(self):
-        return list(self._modes)
-
-    def get_mode(self, name=None):
-        if name is None:
-            return self.active_mode
-        return self._modes.get(name)
-
-    def set_mode(self, name):
-        self.active_mode = self._modes.get(name) if name is not None else None
 
     def list_skills(self):
         return ["python-lint", "python-testing", "azure-prepare"]
@@ -1440,7 +1421,6 @@ class _TextualEngineStub:
         self.set_active_agent_profile_calls.append(name)
         self.active_agent_profile = self._profiles.get(name, self._profile(name, self.current_agent))
         self.current_agent = self.active_agent_profile.agent
-        self.active_mode = None
         self.active_skills = list(
             self.profile_skill_overrides.get(name, self.active_agent_profile.skills or [])
         )
@@ -1451,11 +1431,6 @@ class _TextualEngineStub:
             self.active_agent_profile = None
             return Path("/tmp/pocketcode.yml")
         self.set_active_agent_profile(name)
-        return Path("/tmp/pocketcode.yml")
-
-    def set_last_used_mode(self, name):
-        self.set_last_used_mode_calls.append(name)
-        self.set_mode(name)
         return Path("/tmp/pocketcode.yml")
 
     def set_last_used_global_llm_profile(self, value):
@@ -1502,11 +1477,6 @@ class _TextualEngineStub:
                 "parameters": {"temperature": 0.2},
             },
         }
-
-    def clone_mode(self, src_name, new_name):
-        self.clone_mode_calls.append((src_name, new_name))
-        self._modes[new_name] = SimpleNamespace(name=new_name, source_path=Path(f"/tmp/{new_name}.md"))
-        return Path(f"/tmp/{new_name}.md")
 
     def list_markdown_assets(self, asset_kind):
         return sorted(self._markdown_assets.get(asset_kind, {}))
@@ -1586,10 +1556,6 @@ class _TextualEngineStub:
                 "profile_config": profile_config,
             }
         )
-
-    def update_mode(self, name, *, markdown_text):
-        self.update_mode_calls.append({"name": name, "markdown_text": markdown_text})
-        return Path(f"/tmp/{name}.md")
 
     def get_system_settings(self):
         return {
@@ -1677,9 +1643,9 @@ class _TextualEngineStub:
     def apply_textual_selection_preset(self, name):
         self.applied_selection_presets.append(name)
         preset = self._selection_presets.get(name, {})
-        mode_name = preset.get("active_mode")
-        if mode_name:
-            self.set_mode(mode_name)
+        profile_name = preset.get("active_profile")
+        if profile_name:
+            self.set_active_agent_profile(profile_name)
         return Path("/tmp/pocketcode.yml")
 
     def delete_textual_selection_preset(self, name):
@@ -1755,15 +1721,11 @@ class _TextualEngineStub:
     def get_agent_prompt_sources(self, agent_name=None):
         return []
 
-    def get_mode_text(self, name):
-        return f"---\nname: {name}\n---\nPrompt\n"
-
     def status(self):
         return {
             "available_llm_profiles": self.list_llm_profiles(),
             "available_flows": self.list_agents(),
             "available_agents": self.list_agent_profiles(),
-            "available_modes": self.list_modes(),
             "available_skills": self.list_skills(),
             "session_tool_confirmation_overrides": self.session_confirmation_overrides,
             "flow": self.current_agent,
@@ -1889,12 +1851,6 @@ class _TextualEngineStub:
             self.global_llm_override = None
         return Path(f"/tmp/{name}.yaml")
 
-    def delete_mode(self, name):
-        self._modes.pop(name, None)
-        if self.active_mode is not None and self.active_mode.name == name:
-            self.active_mode = None
-        return Path(f"/tmp/{name}.md")
-
 
 class TestTextualSelectStability:
     def test_header_uses_static_agent_and_llm_labels(self):
@@ -1918,7 +1874,7 @@ class TestTextualSelectStability:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                await pilot.press("f6", "down", "down", "enter")
+                await pilot.press("f6", "down", "enter")
                 await pilot.pause(0.05)
 
                 assert isinstance(app.screen, AssetPickerScreen)
@@ -2496,38 +2452,6 @@ class TestProfileCloneAndSave:
 
         asyncio.run(exercise())
 
-    def test_control_center_can_select_mode(self):
-        async def exercise() -> None:
-            engine = _TextualEngineStub()
-            app = PocketCodeTextualApp(
-                engine,
-                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
-            )
-
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                await pilot.press("f6")
-                await pilot.pause(0.05)
-
-                assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("mode")
-                await pilot.pause(0.05)
-
-                assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("select")
-                await pilot.pause(0.05)
-
-                assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("review")
-                await pilot.pause(0.05)
-
-                assert engine.set_last_used_mode_calls == ["review"]
-                assert engine.active_mode is not None
-                assert engine.active_mode.name == "review"
-
-        asyncio.run(exercise())
-
     def test_control_center_can_save_selection_preset(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
@@ -2558,10 +2482,9 @@ class TestProfileCloneAndSave:
 
         asyncio.run(exercise())
 
-    def test_control_center_can_delete_current_mode(self):
+    def test_edit_picker_no_longer_offers_mode_config(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
-            engine.set_mode("review")
             app = PocketCodeTextualApp(
                 engine,
                 {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
@@ -2569,23 +2492,29 @@ class TestProfileCloneAndSave:
 
             async with app.run_test() as pilot:
                 await pilot.pause()
-
-                await pilot.press("f6")
+                await pilot.press("f3")
                 await pilot.pause(0.05)
 
                 assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("mode")
+                assert "mode" not in {option.value for option in app.screen._options}
+
+        asyncio.run(exercise())
+
+    def test_clone_picker_no_longer_offers_mode_config(self):
+        async def exercise() -> None:
+            engine = _TextualEngineStub()
+            app = PocketCodeTextualApp(
+                engine,
+                {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("f4")
                 await pilot.pause(0.05)
 
                 assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("delete")
-                await pilot.pause(0.05)
-
-                assert isinstance(app.screen, AssetPickerScreen)
-                app.screen.dismiss("delete")
-                await pilot.pause(0.05)
-
-                assert "review" not in engine._modes
+                assert "mode" not in {option.value for option in app.screen._options}
 
         asyncio.run(exercise())
 

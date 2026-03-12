@@ -1,3 +1,0 @@
-name: core::react
-flow: core::react
-description: Built-in composite agent for the default ReAct flow.

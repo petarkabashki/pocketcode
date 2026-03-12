@@ -30,7 +30,7 @@ PocketCoder executes:
 ## Skill and workspace tool loading
 
 `markdown_profiles.py` loads skill-owned tools from `tools/*.py`.
-Workspace tools are loaded separately from `.pocketcode/tools/` by the plugin/runtime stack.
+Workspace tools are loaded separately from `.pocketcode/*.tool.py or .pocketcode/*.tool.md` by the plugin/runtime stack.
 
 ## Editing rules
 

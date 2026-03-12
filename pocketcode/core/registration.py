@@ -82,13 +82,13 @@ def register_components(config: Dict[str, Any]) -> Dict[str, Dict[str, Union[str
 
     Returns:
         A dictionary containing registered tool classes.
-        Example: {'modes': {}, 'tools': {'read_file': ReadFileToolClass}}
+        Example: {'tools': {'read_file': ReadFileToolClass}}
     """
     if not isinstance(config, dict):
         logger.error("Invalid configuration passed to register_components. Expected a dictionary.")
-        return {"modes": {}, "tools": {}}
+        return {"tools": {}}
 
-    registered: Dict[str, Dict[str, Union[str, Type]]] = {"modes": {}, "tools": {}}
+    registered: Dict[str, Dict[str, Union[str, Type]]] = {"tools": {}}
 
     _load_and_register('tools', config, registered['tools'], base_class=BaseTool)
 

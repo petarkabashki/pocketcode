@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
 from pocketcode.core.tool_runtime import ToolRuntime
-from pocketcode.plugins.core.tools.filesystem import ReadFileTool
-from pocketcode.plugins.core.tools.user_input import AskUserInputTool
+from pocketcode.core_tools.filesystem import ReadFileTool
+from pocketcode.core_tools.user_input import AskUserInputTool
 
 
 def _build_runtime(tools=None, **kwargs) -> ToolRuntime:
@@ -72,7 +72,7 @@ class TestScopedToolConfirmation:
             tool_name="core.read_file",
             arguments={"path": "notes.txt"},
             shared_store={},
-            agent_name="core::agent",
+            agent_name="core.agent",
         )
 
         assert approved is True
@@ -88,7 +88,7 @@ class TestScopedToolConfirmation:
             tool_name="core.read_file",
             shared_store=shared_store,
             approval_scope="session",
-            agent_name="core::agent",
+            agent_name="core.agent",
         )
 
         assert shared_store["session_tool_confirmation"]["tool_policies"] == {"core.read_file": "allow"}
@@ -103,7 +103,7 @@ class TestScopedToolConfirmation:
             tool_name="core.read_file",
             shared_store=shared_store,
             approval_scope="once",
-            agent_name="core::agent",
+            agent_name="core.agent",
         )
 
         assert shared_store["session_tool_confirmation"]["tool_policies"] == {}

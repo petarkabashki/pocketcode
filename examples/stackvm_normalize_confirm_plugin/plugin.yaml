@@ -1,6 +1,0 @@
-schema_version: 1
-name: stackvm_normalize_confirm_example
-description: Normalize tool data, prompt the user, and continue within StackVM
-flows:
-  normalize:
-    markdown: flows/normalize.md

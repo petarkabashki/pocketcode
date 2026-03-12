@@ -467,6 +467,7 @@ class TextualAppBase(App[None]):
                 yield Static(id="view-title")
                 with ContentSwitcher(initial="view-chat", id="view-switcher"):
                     with Vertical(id="view-chat", classes="view"):
+                        yield RichLog(id="output", auto_scroll=False, wrap=True, markup=False)
                         with Vertical(id="inline-prompt-chat", classes="inline-prompt-controls hidden"):
                             yield Static("Input Required", id="inline-prompt-title-chat", classes="inline-prompt-title")
                             yield Static("", id="inline-prompt-prompt-chat", classes="inline-prompt-prompt")
@@ -477,7 +478,6 @@ class TextualAppBase(App[None]):
                             yield Static("", id="inline-prompt-summary-chat", classes="inline-prompt-summary")
                             with Horizontal(id="inline-prompt-actions-chat", classes="inline-prompt-actions button-row"):
                                 yield Button("Submit", id="inline-prompt-submit-chat", variant="primary")
-                        yield RichLog(id="output", auto_scroll=False, wrap=True, markup=False)
                     with VerticalScroll(id="view-control", classes="view view-scroll"):
                         yield Static("Runtime controls apply immediately.", classes="hint")
                         yield Static("Workspace View", classes="field-label")
@@ -554,6 +554,7 @@ class TextualAppBase(App[None]):
                             with Horizontal(id="debugger-inline-actions", classes="button-row"):
                                 yield Button("Add Breakpoint", id="debugger-inline-apply-button", variant="primary")
                                 yield Button("Cancel", id="debugger-inline-cancel-button")
+                        yield RichLog(id="run-preview", auto_scroll=False, wrap=True, markup=False)
                         with Vertical(id="inline-prompt-run", classes="inline-prompt-controls hidden"):
                             yield Static("Input Required", id="inline-prompt-title-run", classes="inline-prompt-title")
                             yield Static("", id="inline-prompt-prompt-run", classes="inline-prompt-prompt")
@@ -564,7 +565,6 @@ class TextualAppBase(App[None]):
                             yield Static("", id="inline-prompt-summary-run", classes="inline-prompt-summary")
                             with Horizontal(id="inline-prompt-actions-run", classes="inline-prompt-actions button-row"):
                                 yield Button("Submit", id="inline-prompt-submit-run", variant="primary")
-                        yield RichLog(id="run-preview", auto_scroll=False, wrap=True, markup=False)
                 yield Input(
                     id="main-input",
                     placeholder=DEFAULT_MAIN_INPUT_PLACEHOLDER,
@@ -588,7 +588,7 @@ class TextualAppBase(App[None]):
                 yield SelectionList(id="inspector-tools")
                 yield Static("Prompt Sources", classes="section-title")
                 yield RichLog(id="inspector-prompts", auto_scroll=False, wrap=True, markup=False)
-            yield Static(id="footer-hint")
+        yield Static(id="footer-hint")
         yield Footer()
 
     def on_mount(self) -> None:

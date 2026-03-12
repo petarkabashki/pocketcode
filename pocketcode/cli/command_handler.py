@@ -28,8 +28,6 @@ BASE_COMMAND_SUGGESTIONS = [
     "/flows",
     "/flow",
     "/prompts",
-    "/modes",
-    "/mode",
     "/skills",
     "/skill",
     "/agents",
@@ -87,10 +85,6 @@ BASE_COMMAND_SUGGESTIONS = [
     "/asset delete tool",
     "/asset list",
     "/asset show",
-    "/mode list",
-    "/mode show",
-    "/mode switch",
-    "/mode clear",
     "/skill list",
     "/skill show",
     "/skill enable",
@@ -168,8 +162,6 @@ def _skill_group_name(skill_name: str) -> str:
     cleaned = str(skill_name).strip()
     if not cleaned:
         return "other"
-    if "::" in cleaned:
-        return cleaned.split("::", 1)[0]
     if "-" in cleaned:
         return cleaned.split("-", 1)[0]
     if "." in cleaned:
@@ -268,7 +260,6 @@ def list_command_suggestions(engine: PocketCodeEngine, interface_name: str | Non
             suggestions
             + flow_names
             + agent_names
-            + (engine.list_modes() if hasattr(engine, "list_modes") else [])
             + (engine.list_skills() if hasattr(engine, "list_skills") else [])
             + engine.list_llm_profiles()
         )
@@ -308,7 +299,7 @@ def handle_command(
 
     if command in {"/reload"}:
         engine.reload()
-        print("Reloaded plugins, agents, tools, and LLM profile mappings.")
+        print("Reloaded resource roots, namespaces, agents, tools, skills, and LLM profile mappings.")
         return None
 
     if command == "/debug":
@@ -329,7 +320,6 @@ def handle_command(
         print(f"  Internal flow: {status.get('runtime_flow') or 'internal-flow'}")
         print(f"  Selected flow: {status.get('flow') or 'auto'}")
         print(f"  Agent: {status.get('agent') or 'none'}")
-        print(f"  Mode: {status.get('mode') or 'none'}")
         print(f"  Skills: {status.get('skills') or []}")
         print(f"  Global LLM override: {status['global_llm_override']}")
         print(f"  Agent LLM overrides: {status['agent_llm_overrides']}")
@@ -366,7 +356,7 @@ def handle_command(
             _print_run_steps(run_summary, verbose=verbose)
         return None
 
-    if command in {"/flows", "/agents", "/prompts", "/modes", "/skills", "/llms", "/tools", "/list"}:
+    if command in {"/flows", "/agents", "/prompts", "/skills", "/llms", "/tools", "/list"}:
         return _handle_list_command(command=command, args=args, engine=engine)
 
     if command in {
@@ -400,9 +390,6 @@ def handle_command(
 
     if command == "/asset":
         return _handle_asset_command(args, engine)
-
-    if command == "/mode":
-        return _handle_mode_command(args, engine)
 
     if command == "/skill":
         return _handle_skill_command(args, engine)
@@ -496,8 +483,6 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         scope = "prompts"
     elif command == "/agents":
         scope = "agents"
-    elif command == "/modes":
-        scope = "modes"
     elif command == "/skills":
         scope = "skills"
     elif command == "/llms":
@@ -506,7 +491,7 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         scope = "tools"
     else:
         if not args:
-            print("Usage: /list <flows|prompts|modes|skills|agents|llms|tools> [flow]")
+            print("Usage: /list <flows|prompts|skills|agents|llms|tools> [flow]")
             return None
         scope = args[0].lower()
         args = args[1:]
@@ -529,17 +514,6 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
             marker = "*" if agent == active_name else " "
             print(f"  {marker} {agent}")
         if not agents:
-            print("  (none)")
-        return None
-
-    if scope == "modes":
-        modes = engine.list_modes() if hasattr(engine, "list_modes") else []
-        active_mode = engine.get_mode() if hasattr(engine, "get_mode") else None
-        print("Available modes:")
-        for mode in modes:
-            marker = "*" if active_mode and active_mode.name == mode else " "
-            print(f"  {marker} {mode}")
-        if not modes:
             print("  (none)")
         return None
 
@@ -586,7 +560,7 @@ def _handle_list_command(command: str, args: list[str], engine: PocketCodeEngine
         return None
 
     print(f"Unknown list scope: {scope}")
-    print("Usage: /list <flows|prompts|agents|llms|tools> [flow]")
+    print("Usage: /list <flows|prompts|skills|agents|llms|tools> [flow]")
     return None
 
 
@@ -850,74 +824,6 @@ def _handle_stop_command(active_run: Any) -> Optional[str]:
     return None
 
 
-def _handle_mode_command(
-    args: list[str],
-    engine: PocketCodeEngine,
-) -> Optional[str]:
-    if not args:
-        print_mode_help()
-        return None
-
-    subcommand = args[0].lower()
-    sub_args = args[1:]
-
-    if subcommand == "help":
-        print_mode_help()
-        return None
-
-    if subcommand == "list":
-        modes = engine.list_modes() if hasattr(engine, "list_modes") else []
-        active_mode = engine.get_mode() if hasattr(engine, "get_mode") else None
-        print("Available modes:")
-        for name in modes:
-            marker = "*" if active_mode and active_mode.name == name else " "
-            print(f"  {marker} {name}")
-        if not modes:
-            print("  (none)")
-        return None
-
-    if subcommand == "show":
-        mode = None
-        if sub_args and hasattr(engine, "get_mode"):
-            mode = engine.get_mode(sub_args[0])
-        elif hasattr(engine, "get_mode"):
-            mode = engine.get_mode()
-        if mode is None:
-            print("No mode is currently active." if not sub_args else f"Mode not found: {sub_args[0]}")
-            return None
-        print(f"Mode: {mode.name}")
-        print(f"  Desc     : {mode.description or '-'}")
-        print(f"  Flow     : {mode.flow or '(inherit)'}")
-        print(f"  Agent    : {mode.agent or '(inherit)'}")
-        print(f"  LLM      : {mode.llm_profile or '(inherit)'}")
-        print(f"  Tools    : {mode.tools if mode.tools_specified else '(inherit)'}")
-        print(f"  Extra    : {mode.extra_prompts or []}")
-        print(f"  Confirm  : {mode.tool_confirmation or {}}")
-        if getattr(mode, "source_path", None):
-            print(f"  Path     : {mode.source_path}")
-        return None
-
-    if subcommand == "switch":
-        if not sub_args:
-            print("Usage: /mode switch <mode_name>")
-            return None
-        try:
-            engine.set_mode(sub_args[0])
-            print(f"Mode activated: {sub_args[0]}")
-        except ValueError as exc:
-            print(f"Error: {exc}")
-        return None
-
-    if subcommand in {"clear", "reset", "off"}:
-        engine.set_mode(None)
-        print("Mode cleared.")
-        return None
-
-    print(f"Unknown /mode subcommand: {subcommand}")
-    print_mode_help()
-    return None
-
-
 def _handle_skill_command(
     args: list[str],
     engine: PocketCodeEngine,
@@ -986,14 +892,13 @@ def print_help(interface_name: str | None = None) -> None:
 Pocketcode Commands:
   /help                          Show this help message.
   /list <scope> [opts]           List entities by scope.
-                                 Scopes: flows|prompts|modes|skills|agents|llms|tools [flow for tools]
+                                 Scopes: flows|prompts|skills|agents|llms|tools [flow for tools]
   /set <target> <args...>        Set runtime selection/override.
                                  Targets: flow|llm|llm-flow|llm-handoff
   /flow <flow_name|auto>         Select the active flow.
                                  Optional: --agent <agent_name>
   /debug <request text>          Run one request under the interactive debugger.
   /prompts                       List registered prompts.
-  /mode <cmd> [opts]             Manage runtime modes. Run '/mode help'.
   /skill <cmd> [opts]            Manage runtime skills. Run '/skill help'.
   /reload                        Reload plugins and runtime catalogs.
   /stop, /cancel                 Request cancellation of the active run.
@@ -1009,7 +914,6 @@ Pocketcode Commands:
 Compatibility aliases:
   /flows     -> /list flows
   /prompts   -> /list prompts
-  /modes     -> /list modes
   /skills    -> /list skills
   /agents    -> /list agents
   /llms      -> /list llms
@@ -1045,9 +949,9 @@ Textual UI shortcuts:
   Tab                           Complete current prompt input.
   F2                            Open previous main-input entries and load one back into the prompt.
   F5                            Open the global view selector (Chat, Control, Run).
-  F3                            Open the popup edit selector (agent, mode, LLM, tools, tool policies).
-  F4                            Open the popup clone selector (agent, mode, LLM).
-  F6                            Open the Control Center (agent, mode, LLM, skills, tools, policies, presets, confirm, system settings).
+  F3                            Open the popup edit selector (agent, LLM, tools, tool policies, flow assets, tool assets).
+  F4                            Open the popup clone selector (agent, LLM, flow assets, tool assets).
+  F6                            Open the Control Center (agent, LLM, skills, tools, policies, presets, confirm, system settings).
   Ctrl+P / Ctrl+N               Cycle backward or forward through previous main-input entries.
   F10                           Toggle the right inspector panel.
   Ctrl+Shift+A                  Copy full response console output.
@@ -1433,6 +1337,46 @@ def _handle_agent_command(
             print(f"Error: {exc}")
         return None
 
+    if subcommand == "new":
+        if len(sub_args) < 2 or sub_args[0] != "self-md":
+            print("Usage: /agent new self-md <name>")
+            return None
+        name = sub_args[1]
+        try:
+            # We use engine.create_markdown_asset with a special template for self-contained
+            # But create_markdown_asset uses a generic scaffold.
+            # We can use a custom scaffold if we add a method to engine or handle it here.
+            # For now, let's use the scaffold from the template file if it exists.
+            resource_root = engine._workspace_root / ".pocketcode" / "agents"
+            template_path = resource_root / "template-self.md"
+            
+            if not template_path.exists():
+                # Fallback scaffold
+                scaffold = (
+                    "---\n"
+                    f"name: {name}\n"
+                    "description: Self-contained agent.\n"
+                    "execution_mode: vm\n"
+                    "vm_entry: main\n"
+                    "---\n\n"
+                    "Describe the agent's role here.\n\n"
+                    "```vm\n"
+                    f"[ \"Self-contained agent {name} ready.\" answer ] \"main\" define\n"
+                    "```\n"
+                )
+            else:
+                scaffold = template_path.read_text(encoding="utf-8").replace("{{name}}", name)
+            
+            # Use engine.create_markdown_asset to create the file and reload
+            created = engine.create_markdown_asset("agent", name)
+            asset_path = Path(created["path"])
+            asset_path.write_text(scaffold, encoding="utf-8")
+            engine.reload()
+            print(f"Created self-contained agent '{name}' at {asset_path}.")
+        except Exception as exc:
+            print(f"Error: {exc}")
+        return None
+
     if subcommand == "edit":
         return _handle_agent_edit_command(sub_args, engine)
 
@@ -1815,6 +1759,7 @@ def print_agent_help() -> None:
   /agent list                                 List all named agents (excludes synthesised flow defaults).
   /agent show [agent_name]                    Show details of an agent (default: active).
   /agent switch <agent_name>                  Activate an agent.
+  /agent new self-md <name>                   Create a new self-contained markdown agent.
   /agent clone <source> <new_name>            Clone an agent to a new workspace agent.
     /agent edit llm <agent> <profile|inherit>   Set or clear the agent LLM override.
     /agent edit prompts <agent> <paths...>      Replace extra prompt paths.
@@ -1853,22 +1798,11 @@ def print_asset_help() -> None:
 
 Notes:
     Asset names may contain letters, numbers, dot, underscore, and hyphen.
-    Assets are created in the primary workspace resource root and trigger a reload.
+    Assets are created in the primary workspace resource root using flat conventions
+    such as <name>.md, <name>.tool.md, <name>.tool.py, and <name>.agent.md, then trigger a reload.
     Delete leaves any sibling tool handler file in place unless a future explicit option removes it.
 """
         print(text)
-
-
-def print_mode_help() -> None:
-    text = """
-/mode Commands:
-  /mode list                                 List all available modes.
-  /mode show [mode_name]                     Show details of a mode (default: active).
-  /mode switch <mode_name>                   Activate a mode.
-  /mode clear                                Clear the active mode.
-  /mode help                                 Show this help message.
-"""
-    print(text)
 
 
 def print_skill_help() -> None:

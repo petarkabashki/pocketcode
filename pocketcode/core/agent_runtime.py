@@ -13,9 +13,10 @@ from typing import Any, Callable, Dict, List
 
 import yaml
 
+from pocketcode.core.catalog_metadata import namespace_name_from_metadata, namespace_root_from_metadata
 from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
 from pocketcode.core.llm_router import LlmRouter
-from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.workspace_catalog import WorkspaceCatalog
 from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
 from pocketcode.core.run_handle import RunCancelledError
 from pocketcode.core.agent_stack_vm import AgentStackVM, StackVmExecutionResult, StackVmHostContext
@@ -42,12 +43,12 @@ class AgentRuntime:
     def __init__(
         self,
         *,
-        plugin_manager: PluginManager,
+        catalog: WorkspaceCatalog,
         llm_router: LlmRouter,
         tool_runtime: ToolRuntime,
         runtime_config: Dict[str, Any],
     ):
-        self._plugins = plugin_manager
+        self._plugins = catalog
         self._llm_router = llm_router
         self._tool_runtime = tool_runtime
         self._runtime_config = runtime_config
@@ -174,13 +175,7 @@ class AgentRuntime:
             execution_mode=agent_definition.execution_mode,
         )
 
-        # Inject PluginContext if available for this agent
-        plugin_name = agent_definition.metadata.get("plugin_name")
-        if plugin_name and plugin_name in self._plugins.plugins:
-            from pocketcode.core.interfaces import PluginContext
-            plugin = self._plugins.plugins[plugin_name]
-            shared_store["_plugin"] = PluginContext(plugin, self._tool_runtime)
-
+        # Inject namespace context if available for this agent
         transition: str | None = None
         transition, pre_halt = self._run_handler_references(
             list(agent_definition.pre_handlers),
@@ -359,7 +354,7 @@ class AgentRuntime:
             metadata = dict(agent_definition.metadata or {})
             search_roots: list[Path] = []
             markdown_path = metadata.get("markdown_path")
-            plugin_root = metadata.get("plugin_root")
+            plugin_root = metadata.get("namespace_root")
             resource_root = metadata.get("resource_root")
             if markdown_path:
                 search_roots.append(Path(str(markdown_path)).resolve().parent)
@@ -489,8 +484,8 @@ class AgentRuntime:
 
         handler = self._resolve_python_handler(
             handler_reference=handler_ref,
-            plugin_root=Path(str(agent_definition.metadata.get("plugin_root", ""))).resolve()
-            if agent_definition.metadata.get("plugin_root")
+            plugin_root=Path(str(agent_definition.metadata.get("namespace_root", ""))).resolve()
+            if agent_definition.metadata.get("namespace_root")
             else None,
         )
         outcome = self._invoke_handler(
@@ -622,7 +617,7 @@ class AgentRuntime:
         }
 
         system_prompt = self._build_agent_system_prompt(agent_name=agent_name)
-        # T017: append active mode/agent prompt overlays and enabled skill prompts.
+        # T017: append active profile and enabled skill prompt overlays.
         _ep_content = self._resolve_overlay_prompt_content(
             active_profile=active_profile,
             shared_store=shared_store,
@@ -1078,7 +1073,7 @@ class AgentRuntime:
     ) -> tuple[str | None, bool]:
         current_transition = transition
         halt = False
-        plugin_root_value = agent_definition.metadata.get("plugin_root")
+        plugin_root_value = agent_definition.metadata.get("namespace_root")
         plugin_root = Path(str(plugin_root_value)).resolve() if plugin_root_value else None
 
         for handler_reference in handler_references:
@@ -1140,7 +1135,7 @@ class AgentRuntime:
             if not candidate_file.is_absolute():
                 if plugin_root is None:
                     raise FileNotFoundError(
-                        f"Cannot resolve relative handler path without plugin_root: {handler_reference}"
+                        f"Cannot resolve relative handler path without namespace_root: {handler_reference}"
                     )
                 candidate_file = (plugin_root / path_part).resolve()
 
@@ -1250,7 +1245,7 @@ class AgentRuntime:
 
         Resolves each path:
         1. Relative to ``profile.source_path.parent`` (workspace YAML file dir).
-        2. Relative to the active plugin root, when available.
+        2. Relative to the active namespace, when available.
         3. Relative to ``<workspace_root>/``, ``<workspace_root>/.pocketcode/``,
            and ``<workspace_root>/.pocketcode/prompts/``.
 
@@ -1373,10 +1368,7 @@ class AgentRuntime:
         agent_definition = self._plugins.agents.get(agent_name)
         if agent_definition is None:
             return None
-        plugin_root = (agent_definition.metadata or {}).get("plugin_root")
-        if not plugin_root:
-            return None
-        return Path(str(plugin_root)).resolve()
+        return namespace_root_from_metadata(getattr(agent_definition, "metadata", {}) or {})
 
     def _resolve_profile_plugin_name(self, profile: Any) -> str | None:
         agent_name = getattr(profile, "agent", None)
@@ -1385,5 +1377,7 @@ class AgentRuntime:
         agent_definition = self._plugins.agents.get(agent_name)
         if agent_definition is None:
             return None
-        plugin_name = (agent_definition.metadata or {}).get("plugin")
-        return str(plugin_name).strip() if plugin_name else None
+        return namespace_name_from_metadata(
+            getattr(agent_definition, "metadata", {}) or {},
+            fallback_qualified_name=agent_name,
+        )

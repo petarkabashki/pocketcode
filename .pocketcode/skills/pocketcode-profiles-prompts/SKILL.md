@@ -12,7 +12,7 @@ Read first:
 
 Use it when the task touches:
 - `agents/*.yaml`
-- `.pocketcode/agents/*.yaml`
+- `.pocketcode/*.agent.yaml`
 - `.pocketcode/modes/*.md`
 - `.pocketcode/skills/*/SKILL.md`
 - prompt files and `{{ include:... }}` chains

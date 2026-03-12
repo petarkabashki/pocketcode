@@ -9,7 +9,7 @@ It covers:
 - request execution and live event streaming
 - Textual UI layout, controls, persistence, and implementation boundaries
 
-For load order and runtime precedence, see `architecture.md`. For Markdown asset file formats and validation behavior, see `markdown_assets.md`. For agent, mode, and skill semantics, see `agent_system.md` and `modes_and_skills.md`.
+For load order and runtime precedence, see `architecture.md`. For Markdown asset file formats and validation behavior, see `markdown_assets.md`. For agent and skill semantics, see `agent_system.md` and `modes_and_skills.md`.
 
 ## Scope
 
@@ -106,8 +106,8 @@ Behavior:
 - render commits now flow through a single helper in `pocketcode/cli/textual_ui/rendering_mixin.py`, which can optionally refresh input suggestions, hydrate reducer-backed engine snapshots, and then apply the rebuilt `TextualUIState`; that layer also supports batched commits plus engine-mutation transactions so multi-step updates can merge into one reducer-and-render pass
 - slash-command execution and run-event consumption update runtime UI state before the renderer reapplies derived widget values
 - Textual side effects are now funneled through dedicated helpers for command execution, request startup, pending-input resolution, and active-run draining so widget event handlers remain thin orchestration code
-- picker-driven mutations such as profile, mode, and LLM selection, system-settings persistence, selection presets, clone/delete flows, and saved-session operations are also routed through dedicated selection-effect helpers instead of calling engine mutation APIs inline from UI handlers
-- edit-screen flows now route workspace-agent saves, LLM-profile updates, mode updates, clone-before-edit flows, and tool-policy/tool-allowlist default persistence through dedicated config-effect helpers instead of mixing those engine writes into the YAML-editing UI code
+- picker-driven mutations such as profile and LLM selection, system-settings persistence, selection presets, clone/delete flows, and saved-session operations are also routed through dedicated selection-effect helpers instead of calling engine mutation APIs inline from UI handlers
+- edit-screen flows now route workspace-agent saves, LLM-profile updates, clone-before-edit flows, and tool-policy/tool-allowlist default persistence through dedicated config-effect helpers instead of mixing those engine writes into the YAML-editing UI code
 - Textual edit and control-center flows now also support workspace markdown flow and tool assets through the shared engine asset API used by the basic CLI
 - workspace markdown flow edits and clones proactively validate executable Mermaid and DOT graph definitions before runtime reload
 - workspace markdown flow and tool edits and clones also resolve Markdown `include` and `import` directives before reload, so broken prompt-file references fail during authoring instead of during a later runtime load
@@ -164,7 +164,6 @@ The shared command layer exposes these primary command groups:
 - `/agent`
 - `/asset`
 - `/stackvm`
-- `/mode`
 - `/skill`
 - `/context`
 - `/confirm`
@@ -181,7 +180,6 @@ Plural convenience commands map to `/list` scopes:
 
 - `/flows`
 - `/agents`
-- `/modes`
 - `/skills`
 - `/llms`
 - `/tools`
@@ -209,7 +207,6 @@ Short aliases are normalized as follows:
 
 - `flows`
 - `prompts`
-- `modes`
 - `skills`
 - `agents`
 - `llms`
@@ -227,7 +224,6 @@ Behavior by scope:
 
 - `flows`: lists registered flow names and marks the active flow
 - `agents`: lists named agent profiles excluding synthesised defaults and marks the active profile
-- `modes`: lists known modes and marks the active mode
 - `skills`: prints skills grouped by top-level prefix and marks enabled entries
 - `prompts`: lists registered prompt assets
 - `llms`: lists available LLM profiles and marks the global override
@@ -258,9 +254,9 @@ Behavior:
 - `edit` replaces a workspace-backed Markdown asset from an external Markdown file
 - `delete` removes a workspace-backed Markdown asset after explicit `--yes` confirmation
 - scaffolds workspace Markdown assets in the primary resource root, typically `.pocketcode/`
-- `agent` creates a Markdown agent profile under `agents/`
-- `flow` creates a Markdown flow scaffold under `flows/` with a minimal executable Mermaid graph and `nodes:` mapping
-- `tool` creates both a Markdown tool definition and a sibling Python handler module under `tools/`
+- `agent` creates a Markdown agent profile under `<resource_root>/agent.<group>/...`; for example, `review.safe` writes to `<resource_root>/agent.review/safe.agent.md`
+- `flow` creates a Markdown VM flow scaffold at `<resource_root>/<name>.md`
+- `tool` creates both a Markdown tool definition at `<resource_root>/<name>.tool.md` and a sibling Python handler module at `<resource_root>/<name>.tool.py`
 - cloning a tool also copies a sibling relative Python handler module when the Markdown `handler:` points at a local file
 - editing validates that front matter `name:` still matches the target asset name before saving
 - editing and cloning tool assets also validate that the `handler:` reference resolves before reload
@@ -301,9 +297,9 @@ Behavior:
 
 - `list` prints registered StackVM-backed flows plus standalone workspace scripts under `<primary_resource_root>/vm/`
 - `create flow` writes a Markdown flow scaffold with `execution_mode: vm`, a default `vm_entry`, and an inline fenced `vm` block
-- `create flow ... --agent <name>` also writes a workspace Markdown agent profile bound to that StackVM flow
+- `create flow ... --agent <name>` also writes a workspace Markdown agent profile bound to that StackVM flow using the grouped `agent.<group>/...` convention
 - `create script` writes a standalone `.vm` source file under `<primary_resource_root>/vm/`
-- `create agent` writes a workspace Markdown agent profile that targets an existing StackVM flow
+- `create agent` writes a workspace Markdown agent profile that targets an existing StackVM flow using the grouped `agent.<group>/...` convention
 - `inspect` compiles the target, prints token count, source contributors, validation warnings, and the expanded executable StackVM source
 - `run` executes the requested target once through the normal agent runtime loop and prints the final output plus any recorded warning count
 - `debug` is the same execution path as `run`, but also enables per-step VM tracing and prints the recorded stack snapshots after each literal push, quotation push, or word execution
@@ -404,7 +400,7 @@ Behavior:
 - `/agent list` excludes synthesised defaults
 - `/agent show` defaults to the active profile when no name is provided
 - `/agent switch` activates an existing named profile
-- `/agent clone` creates a workspace-backed copy, which is the prerequisite for editing plugin or synthesised profiles
+- `/agent clone` creates a workspace-backed copy, which is the prerequisite for editing namespace-backed or synthesised profiles
 - `/agent edit llm` updates only the profile-level LLM override
 - `/agent edit prompts` replaces the full extra prompt path list
 - `/agent tools` replaces the tool allowlist
@@ -413,28 +409,10 @@ Behavior:
 Editing constraints:
 
 - only workspace-backed agent profiles are editable
-- plugin-backed and synthesised profiles must be cloned first
+- namespace-backed and synthesised profiles must be cloned first
 - tool names are validated against the profile's underlying flow before being written
 
 ## Mode Commands
-
-Current subcommands are:
-
-```text
-/mode list
-/mode show [mode_name]
-/mode switch <mode_name>
-/mode clear
-/mode help
-```
-
-Behavior:
-
-- modes are Markdown-authored runtime overlays
-- activating a mode resolves an ephemeral profile layered over the active runtime state
-- clearing a mode returns to the selected or default agent-profile path
-
-`/mode show` prints the resolved mode fields including flow, agent, LLM, tools, prompts, confirmation settings, and source path.
 
 ## Skill Commands
 
@@ -521,22 +499,22 @@ Current subcommands are:
 
 Behavior:
 
-- saved sessions are workspace-local and backed by JSON files under `.pocketcode/state/sessions/`
+- saved sessions are workspace-local and backed by JSON files under `<runtime.storage.session_state_dir>/sessions/` (default: `.pocketstate/sessions/`)
 - `/session show` prints the requested saved session, or the active one when no id is supplied
 - `/session show` includes the saved debugger breakpoint count and the persisted breakpoint labels for that session
 - `/session list` prints saved sessions with id, title, last-updated timestamp, active marker, and persisted debugger breakpoint count
 - `/session new` creates a fresh active session without deleting earlier history
-- `/session resume` restores the saved agent, mode, enabled skills, global LLM override, and session-scoped confirmation overrides
+- `/session resume` restores the saved agent, profile, enabled skills, global LLM override, and session-scoped confirmation overrides
 - `/session delete` requires `--yes`, refuses to delete the active session, and removes only the targeted saved session
 - `/session clear-all` requires `--yes`, preserves the active session, and reports how many prior saved sessions were removed
 - `/session clear-breakpoints` requires `--yes` and removes only the persisted debugger breakpoints from the targeted saved session
 
 ## Runtime Control Commands
 
-- `/reload` rebuilds plugins, agents, tools, skills, and LLM profile mappings
+- `/reload` rebuilds discovered resource roots, namespace registries, agents, tools, skills, and LLM profile mappings
 - `/debug <request text>` is available in interactive CLI surfaces with debugger support and runs one request under an interactive step debugger
 - `/stop` and `/cancel` request cooperative cancellation on the active run if one exists
-- `/status` prints runtime flow, selected flow, active agent, active mode, skills, LLM overrides, default LLM, confirmation state, last-run runtime event and step counts, and any last-run StackVM validation warning codes recorded in `last_run_summary.vm_validation_warnings`
+- `/status` prints runtime flow, selected flow, active agent, skills, LLM overrides, default LLM, confirmation state, last-run runtime event and step counts, and any last-run StackVM validation warning codes recorded in `last_run_summary.vm_validation_warnings`
 - `/status` also shows the count of session-persisted debugger breakpoints that will be restored onto the next debug run
 - `/status steps`, `/status --steps`, `/status timeline`, or `/status --timeline` also print the recorded last-run step trace without the nested per-step detail payloads
 - `/status verbose` or `/status --verbose` prints the same step trace plus the full warning messages, exact StackVM warning spans, and the recorded per-step detail payloads
@@ -650,7 +628,7 @@ Execution model:
 5. The user issues debugger commands such as `next`, `continue`, `status`, `steps`, or `quit`.
 6. Persistent breakpoints, when configured, can interrupt ordinary `continue` execution and are reported back on the paused event as the matched breakpoint id and label.
 
-Generated Markdown graph flows now also emit `node_started` and `node_completed` runtime events through the shared request event stream and keep `active_node_id` / `active_node_kind` up to date in the shared store. The interactive debugger uses `node_completed` as the node-level pause boundary for `until node ...`, and paused snapshots now show the active node directly.
+VM-backed runs emit the same structured runtime-step event stream used by the rest of the engine. The interactive debugger pauses on those runtime-step boundaries and shows the current active agent plus the latest runtime snapshot from shared store state.
 
 Textual-specific behavior:
 
@@ -685,9 +663,9 @@ Current module layout:
 - `pocketcode/cli/textual_ui/ui_state_mixin.py`: `TextualUIState` assembly from reducer state, selector outputs, and picker models
 - `pocketcode/cli/textual_ui/widget_sync_mixin.py`: cached widget updates, view switching, and `TextualUIState` application
 - `pocketcode/cli/textual_ui/rendering_mixin.py`: runtime output flow and run-event updates
-- `pocketcode/cli/textual_ui/selection_mixin.py`: profile, mode, LLM, confirmation, and system-settings selection flows
+- `pocketcode/cli/textual_ui/selection_mixin.py`: profile, LLM, confirmation, and system-settings selection flows
 - `pocketcode/cli/textual_ui/control_center_mixin.py`: F6 control-center category and action routing
-- `pocketcode/cli/textual_ui/config_editing_mixin.py`: agent, mode, LLM, and tool-policy editing helpers
+- `pocketcode/cli/textual_ui/config_editing_mixin.py`: agent, LLM, tool-policy, and workspace asset editing helpers
 - `pocketcode/cli/textual_ui/asset_management_mixin.py`: clone, delete, preset, skill, and tool-selection flows
 - `pocketcode/cli/textual_ui/interaction_mixin.py`: input handling, UI event handlers, and user actions
 - `pocketcode/cli/textual_ui/picker_screens.py` and `pocketcode/cli/textual_ui/editor_screens.py`: modal screen classes
@@ -862,7 +840,7 @@ The main input field handles three cases:
 - when the text starts with `/`, it is executed as a slash command
 - otherwise it starts a normal engine request with `bridge_user_input=True`
 
-The Textual shell also keeps a persisted history of accepted main-input entries under `runtime.textual.last_used.entry_history`. That history powers both the `F2` picker and the `Ctrl+P`/`Ctrl+N` recall path.
+The Textual shell keeps a persisted history of accepted main-input entries in `<runtime.storage.entry_history_dir>/textual_entry_history.json` by default. That history powers both the `F2` picker and the `Ctrl+P`/`Ctrl+N` recall path.
 
 `runtime.textual.control_presentation` controls whether these higher-friction Textual controls render `inline` or as `modal` popups. In `modal` mode, pending `interaction_requested` and `user_input_requested` events open popup input screens and the debugger breakpoint-add flow uses popup pickers. In `inline` mode, pending runtime prompts render as on-screen controls above the chat log and run log, then collapse into a submitted summary after the input is accepted; single-choice prompts use the same list-style option surface as checklist prompts instead of a dropdown; debugger breakpoint controls also stay on-screen in the Run view.
 
@@ -888,14 +866,13 @@ The Textual UI contains modal screens and picker flows for higher-level editing 
 Current capabilities implemented across `pocketcode/cli/textual_ui/` include:
 
 - selecting the active agent profile
-- selecting a mode
 - selecting a global LLM override
 - selecting a workspace view
 - toggling skills, including grouped skill toggles
 - editing allowed tools for a profile, including selectable groups and subgroups
 - editing per-tool confirmation policy
-- cloning the current agent, mode, or LLM profile
-- deleting workspace-backed agent, mode, or LLM assets
+- cloning the current agent or LLM profile plus workspace flow and tool assets
+- deleting workspace-backed agent or LLM assets plus workspace flow and tool assets
 - saving, loading, and deleting selection presets
 - editing and saving system settings
 - recalling previous main-input entries from a picker or keyboard history
@@ -915,17 +892,16 @@ Persisted settings currently include:
 - `default_skills`
 - `selection_presets`
 - `last_used.active_profile`
-- `last_used.active_mode`
 - `last_used.global_llm_profile`
 - `last_used.session_confirmation_default`
 - `last_used.auto_confirm_tools`
-- `last_used.entry_history`
 
 Important behavior:
 
 - empty `last_used` sections are removed from config
 - preset snapshots are normalized before save and when loaded back
 - session files hold live skill selections, tool selections, and session confirmation overrides for the active session
+- Textual entry history is stored separately from `pocketcode.yml`
 - registry-backed tool refs inside preset snapshots and saved session confirmation maps are persisted in canonical dotted form
 - deleting a workspace asset also cleans invalid references from selection presets and last-used state
 
@@ -945,7 +921,7 @@ Current values returned are:
 
 On startup, `workspace_view` restores the saved layout preset but does not override the initial `chat` surface. Interactive workspace-view changes inside Textual still switch to the preset's paired view.
 
-When the Textual system-settings editor opens, it normalizes legacy `plugin::resource` agent ids from config to the registry's canonical `plugin.resource` form so older saved defaults continue to load without crashing the agent select widget.
+When the Textual system-settings editor opens, it normalizes saved agent ids to canonical dotted namespace form before populating the selector widgets.
 
 The same normalization also happens inside `PocketCodeEngine` when system settings are read, applied, and saved, so `runtime.default_agent` cannot drift back to an incompatible form after startup.
 

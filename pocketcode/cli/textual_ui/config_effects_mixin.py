@@ -38,13 +38,6 @@ class TextualAppConfigEffectsMixin:
         )
         self._refresh_suggestions()
 
-    def _update_mode_effect(self, mode_name: str, text: str):
-        if not hasattr(self._engine, "update_mode"):
-            raise ValueError("This runtime does not support editing modes.")
-        target_path = self._engine.update_mode(mode_name, markdown_text=text)
-        self._refresh_suggestions()
-        return target_path
-
     def _update_llm_profile_effect(self, profile_name: str, profile_config: dict[str, object]) -> None:
         if not hasattr(self._engine, "update_llm_profile"):
             raise ValueError("This runtime does not support editing LLM profiles.")

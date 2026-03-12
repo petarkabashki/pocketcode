@@ -8,12 +8,6 @@ class TextualAppSelectionEffectsMixin:
         else:
             self._engine.set_active_agent_profile(profile_name)
 
-    def _set_active_mode_effect(self, mode_name: str | None) -> None:
-        if hasattr(self._engine, "set_last_used_mode"):
-            self._engine.set_last_used_mode(mode_name)
-        else:
-            self._engine.set_mode(mode_name)
-
     def _set_global_llm_override_effect(self, profile_name: str | None) -> None:
         if hasattr(self._engine, "set_last_used_global_llm_profile"):
             self._engine.set_last_used_global_llm_profile(profile_name)
@@ -71,17 +65,6 @@ class TextualAppSelectionEffectsMixin:
             self._refresh_suggestions()
             return cloned
 
-        if asset_name == "mode":
-            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-            if active_mode is None:
-                raise ValueError("No active mode to clone.")
-            if not hasattr(self._engine, "clone_mode"):
-                raise ValueError("This runtime does not support cloning modes.")
-            target_path = self._engine.clone_mode(active_mode.name, new_name)
-            self._set_active_mode_effect(new_name)
-            self._refresh_suggestions()
-            return target_path
-
         raise ValueError(f"Unsupported clone target: {asset_name}")
 
     def _clone_markdown_asset_effect(self, asset_kind: str, source_name: str, new_name: str):
@@ -111,16 +94,6 @@ class TextualAppSelectionEffectsMixin:
             target_path = self._engine.delete_llm_profile(profile_name)
             self._refresh_suggestions()
             return profile_name, target_path
-
-        if asset_name == "mode":
-            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-            if active_mode is None:
-                raise ValueError("No active mode selected.")
-            if not hasattr(self._engine, "delete_mode"):
-                raise ValueError("This runtime does not support deleting modes.")
-            target_path = self._engine.delete_mode(active_mode.name)
-            self._refresh_suggestions()
-            return active_mode.name, target_path
 
         raise ValueError(f"Unsupported delete target: {asset_name}")
 

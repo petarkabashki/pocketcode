@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from pocketcode.plugins.core.tools import filesystem as core_filesystem
-from pocketcode.plugins.core.tools import file_ops as core_file_ops
-from pocketcode.core.workspace_module_loader import load_workspace_plugin_module
+from pocketcode.core_tools import filesystem as core_filesystem
+from pocketcode.core_tools import file_ops as core_file_ops
+from pocketcode.core.workspace_module_loader import load_workspace_module
 
 
-architect_filesystem = load_workspace_plugin_module(
-    ".pocketcode", "plugins", "architect", "tools", "filesystem.py"
+architect_filesystem = load_workspace_module(
+    ".pocketcode", "architect.filesystem.tool.py"
 )
-coder_filesystem = load_workspace_plugin_module(
-    ".pocketcode", "plugins", "coder", "tools", "filesystem.py"
+coder_filesystem = load_workspace_module(
+    ".pocketcode", "coder.filesystem.tool.py"
 )
-workspace_file_ops = load_workspace_plugin_module(
-    ".pocketcode", "tools", "file_ops.py"
+workspace_file_ops = load_workspace_module(
+    ".pocketcode", "file_ops.tool.py"
 )
 
 

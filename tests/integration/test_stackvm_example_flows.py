@@ -171,7 +171,7 @@ def test_real_engine_runs_checked_in_stackvm_tool_normalize_example(tmp_path):
 
     assert result == "Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_tool_normalize_example.normalize"
-    router_source = (EXAMPLES_ROOT / "stackvm_tool_normalize_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    router_source = (EXAMPLES_ROOT / "stackvm_tool_normalize_example" / "vm" / "router.vm").read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
@@ -211,7 +211,7 @@ def test_real_engine_runs_checked_in_stackvm_macro_authoring_example(tmp_path):
 
     assert result == "Macro says: from macro example"
     assert engine.last_run_summary["current_agent"] == "stackvm_macro_authoring_example.normalize"
-    router_source = (EXAMPLES_ROOT / "stackvm_macro_authoring_plugin" / "vm" / "router.vm").read_text(encoding="utf-8")
+    router_source = (EXAMPLES_ROOT / "stackvm_macro_authoring_example" / "vm" / "router.vm").read_text(encoding="utf-8")
     assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "answer-from", "read-file-once"]
 
 
@@ -369,7 +369,7 @@ def test_real_engine_rejects_transition_words_inside_parallel_map(tmp_path):
     engine = make_example_engine(
         tmp_path,
         flow_ref,
-        plugin_paths=[plugin_root.parent],
+        workspace_paths=[plugin_root.parent],
     )
 
     result = engine.process_request("run invalid map", {})
@@ -403,7 +403,7 @@ def test_real_engine_rejects_transition_words_inside_reduce(tmp_path):
     engine = make_example_engine(
         tmp_path,
         flow_ref,
-        plugin_paths=[plugin_root.parent],
+        workspace_paths=[plugin_root.parent],
     )
 
     result = engine.process_request("run invalid reduce", {})

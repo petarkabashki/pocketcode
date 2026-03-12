@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
-from pocketcode.core.resource_roots import primary_resource_root
+from pocketcode.core.runtime_storage import session_storage_dir
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,6 @@ class SavedSession:
     workspace_root: str
     active_agent: str | None = None
     active_profile: str | None = None
-    active_mode: str | None = None
     enabled_skills: list[str] = field(default_factory=list)
     global_llm_profile: str | None = None
     session_global_skills_override: list[str] = field(default_factory=list)
@@ -79,7 +78,6 @@ class SavedSession:
             "workspace_root": self.workspace_root,
             "active_agent": self.active_agent,
             "active_profile": self.active_profile,
-            "active_mode": self.active_mode,
             "enabled_skills": list(self.enabled_skills),
             "global_llm_profile": self.global_llm_profile,
             "session_global_skills_override": list(self.session_global_skills_override),
@@ -105,7 +103,6 @@ class SavedSession:
             workspace_root=str(raw.get("workspace_root") or ""),
             active_agent=str(raw.get("active_agent")) if raw.get("active_agent") else None,
             active_profile=str(raw.get("active_profile")) if raw.get("active_profile") else None,
-            active_mode=str(raw.get("active_mode")) if raw.get("active_mode") else None,
             enabled_skills=[str(item) for item in raw.get("enabled_skills") or []],
             global_llm_profile=(
                 str(raw.get("global_llm_profile"))
@@ -141,9 +138,9 @@ class SessionSummary:
 
 
 class SessionManager:
-    def __init__(self, workspace_root: str | Path):
+    def __init__(self, workspace_root: str | Path, config: dict[str, Any] | None = None):
         self._workspace_root = Path(workspace_root).resolve()
-        self._storage_dir = primary_resource_root(self._workspace_root).path / "state" / "sessions"
+        self._storage_dir = session_storage_dir(self._workspace_root, config)
 
     @property
     def storage_dir(self) -> Path:
@@ -160,7 +157,6 @@ class SessionManager:
             workspace_root=str(self._workspace_root),
             active_agent=payload.get("active_agent"),
             active_profile=payload.get("active_profile"),
-            active_mode=payload.get("active_mode"),
             enabled_skills=[str(item) for item in payload.get("enabled_skills") or []],
             global_llm_profile=payload.get("global_llm_profile"),
             session_global_skills_override=[str(item) for item in payload.get("session_global_skills_override") or []],

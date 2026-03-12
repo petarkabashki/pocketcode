@@ -4,7 +4,7 @@ from typing import Any, Dict
 from pocketflow import Node, Flow
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.runtime_models import AgentDefinition
-from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.workspace_catalog import WorkspaceCatalog
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.tool_runtime import ToolRuntime
 from unittest.mock import MagicMock
@@ -26,12 +26,12 @@ class PathBNode(Node):
         return "final_answer"
 
 def test_pocketflow_conditional_branching():
-    plugin_manager = MagicMock(spec=PluginManager)
+    plugin_manager = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     tool_runtime = MagicMock(spec=ToolRuntime)
     
     runtime = AgentRuntime(
-        plugin_manager=plugin_manager,
+        catalog=plugin_manager,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={}
@@ -53,7 +53,6 @@ def test_pocketflow_conditional_branching():
         metadata={}
     )
     plugin_manager.agents = {"test-branch-agent": agent_def}
-    plugin_manager.plugins = {}
     
     # Test Path A
     shared_a = {"active_agent": "test-branch-agent", "requested_path": "path_a"}

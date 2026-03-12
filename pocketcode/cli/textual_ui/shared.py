@@ -6,7 +6,6 @@ from typing import Any, Dict
 import yaml
 
 NO_LLM = "__none__"
-NO_MODE = "__none_mode__"
 UNSET_OPTION = "__unset__"
 INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
@@ -170,8 +169,6 @@ def _tool_group_name(tool_name: str) -> str:
     cleaned = str(tool_name).strip()
     if not cleaned:
         return "other"
-    if "::" in cleaned:
-        return cleaned.split("::", 1)[0]
     if "." in cleaned:
         return cleaned.split(".", 1)[0]
     return "other"
@@ -301,7 +298,7 @@ def _build_profile_editor_hint(active_profile: Any) -> str:
         return "Select an agent to edit agent settings."
     if active_profile.source == "workspace":
         return f"Editing workspace agent '{active_profile.name}'. Save persists tools, skills, prompts, and LLM."
-    return f"Agent '{active_profile.name}' is plugin/synthesised. Clone it to a workspace agent to edit."
+    return f"Agent '{active_profile.name}' is built-in or synthesised. Clone it to a workspace agent to edit."
 
 
 def _dump_yaml_text(payload: Dict[str, Any]) -> str:

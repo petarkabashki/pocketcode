@@ -1,12 +1,4 @@
-"""CompositeAgentManager — loads, indexes, and persists composite agent objects.
-
-Load order (highest precedence first within same name):
-    1. Plugin-provided agent YAML (``agents/*.yaml``) or inline ``default_agent``
-    2. Workspace-local file (``.pocketcode/agents/<name>.yaml``)
-    3. Synthesised default (built from FlowDefinition top-level fields)
-
-A WARNING is logged on any name collision, identifying both conflicting sources.
-"""
+"""CompositeAgentManager — loads, indexes, and persists composite agent objects."""
 from __future__ import annotations
 
 import logging
@@ -16,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from pocketcode.core.discovery_rules import DiscoveryFilter
+from pocketcode.core.catalog_metadata import namespace_name_from_metadata, namespace_root_from_metadata
 from pocketcode.core.markdown_assets import (
     compile_markdown_agent_definition,
     load_markdown_asset_document,
@@ -44,12 +37,11 @@ class CompositeAgentManager:
     def __init__(self, workspace_root: Path, *, prompt_registry: Any | None = None) -> None:
         self._workspace_root = Path(workspace_root).resolve()
         self._prompt_registry = prompt_registry
-        self._plugin_context_by_root: Dict[Path, str] = {}
+        self._namespace_context_by_root: Dict[Path, str] = {}
         self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
         self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
-        self._workspace_agents_dir: Path = self._primary_resource_root.path / "agents"
-        self._legacy_workspace_agents_dir: Path = self._primary_resource_root.path / "agent-profiles"
         self._agents: Dict[str, Any] = {}
+        self._resolved_agents: Dict[str, Any] = {}
         self._flow_definitions: Dict[str, Any] = {}
         self._resource_root_filters = self._build_resource_root_filters()
         self._global_plugin_filter = DiscoveryFilter.from_root(
@@ -65,12 +57,11 @@ class CompositeAgentManager:
             str(name): definition
             for name, definition in flow_definitions.items()
         }
-        self._plugin_context_by_root = self._build_plugin_context_by_root(flow_definitions)
+        self._namespace_context_by_root = self._build_namespace_context_by_root(flow_definitions)
         self._agents = {}
+        self._resolved_agents = {}
         self._resource_roots = discover_resource_roots(self._workspace_root)
         self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
-        self._workspace_agents_dir = self._primary_resource_root.path / "agents"
-        self._legacy_workspace_agents_dir = self._primary_resource_root.path / "agent-profiles"
         self._resource_root_filters = self._build_resource_root_filters()
         self._global_plugin_filter = DiscoveryFilter.from_root(
             self._workspace_root,
@@ -104,9 +95,13 @@ class CompositeAgentManager:
 
         self._load_plugin_files()
         self._load_workspace_files()
+        self._resolved_agents = self._resolve_all_agents()
 
     def get(self, name: str) -> Optional[Any]:
         return self._agents.get(name)
+
+    def resolve(self, name: str) -> Optional[Any]:
+        return self._resolved_agents.get(name)
 
     def list(self) -> List[Any]:
         return sorted(self._agents.values(), key=lambda agent: agent.name)
@@ -122,9 +117,10 @@ class CompositeAgentManager:
                 f"Available: {[p.name for p in self.list()]}"
             )
 
-        target_path = self._workspace_agents_dir / f"{new_name}.yaml"
-        if src.source_path is not None and Path(src.source_path).suffix.lower() == ".md":
-            target_path = self._workspace_agents_dir / f"{new_name}.md"
+        suffix = ".agent.yaml"
+        if src.source_path is not None and Path(src.source_path).name.endswith(".agent.md"):
+            suffix = ".agent.md"
+        target_path = self._workspace_agent_path(new_name, suffix=suffix)
         if target_path.exists():
             raise ValueError(
                 f"Cannot clone: target file '{target_path}' already exists. "
@@ -147,8 +143,8 @@ class CompositeAgentManager:
                 f"Agent '{agent.name}' has no source_path; cannot save. "
                 "Use clone() to promote an agent to a workspace file."
             )
-        self._workspace_agents_dir.mkdir(parents=True, exist_ok=True)
         target_path = Path(agent.source_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         if target_path.suffix.lower() == ".md":
             agent.source_path.write_text(
                 serialize_markdown_agent_definition(agent),
@@ -184,7 +180,7 @@ class CompositeAgentManager:
     def _register(self, agent: Any, collision_source: str) -> None:
         existing = self._agents.get(agent.name)
         if existing is not None:
-            precedence = {"plugin": 3, "synthesised": 1, "workspace": 2}
+            precedence = {"namespace": 3, "synthesised": 1, "workspace": 2}
             incoming_rank = precedence.get(agent.source, 0)
             existing_rank = precedence.get(existing.source, 0)
 
@@ -203,38 +199,33 @@ class CompositeAgentManager:
         self._agents[agent.name] = agent
 
     def _load_plugin_files(self) -> None:
-        plugin_roots: set[Path] = set()
-        for defn in self._flow_definitions.values():
-            metadata = getattr(defn, "metadata", {}) or {}
-            plugin_root = metadata.get("plugin_root")
-            if isinstance(plugin_root, str) and plugin_root.strip():
-                plugin_roots.add(Path(plugin_root).resolve())
+        plugin_roots: dict[Path, str | None] = {}
+        for definition in self._flow_definitions.values():
+            metadata = getattr(definition, "metadata", {}) or {}
+            plugin_root_value = metadata.get("namespace_root")
+            if not plugin_root_value:
+                continue
+            plugin_root = Path(str(plugin_root_value)).resolve()
+            if not plugin_root.is_dir():
+                continue
+            plugin_roots.setdefault(plugin_root, self._plugin_context_for_root(plugin_root))
 
         for plugin_root in sorted(plugin_roots):
-            agents_dir = plugin_root / "agents"
-            if not agents_dir.is_dir():
-                continue
-            for yaml_file in sorted(list(agents_dir.glob("*.yaml")) + list(agents_dir.glob("*.md"))):
-                if self._plugin_agent_file_is_ignored(plugin_root, yaml_file):
+            for agent_file in [
+                *sorted(plugin_root.glob("*.agent.yaml")),
+                *sorted(plugin_root.glob("*.agent.md")),
+            ]:
+                if self._plugin_agent_file_is_ignored(plugin_root, agent_file):
                     continue
-                self._load_agent_file(yaml_file, source="plugin", plugin_root=plugin_root)
+                self._load_agent_file(agent_file, source="namespace", plugin_root=plugin_root)
 
     def _load_workspace_files(self) -> None:
         for resource_root in self._resource_roots:
             resource_filter = self._resource_root_filter(resource_root)
-            yaml_files: List[Path] = []
-            legacy_dir = resource_root.path / "agent-profiles"
-            agents_dir = resource_root.path / "agents"
-            if legacy_dir.exists():
-                yaml_files.extend(sorted(legacy_dir.glob("*.yaml")))
-            if agents_dir.exists():
-                yaml_files.extend(sorted(agents_dir.glob("*.yaml")))
-                yaml_files.extend(sorted(agents_dir.glob("*.md")))
-
-            for yaml_file in yaml_files:
+            for yaml_file, default_name in self._iter_workspace_agent_files(resource_root):
                 if resource_filter.ignores(yaml_file, is_dir=False):
                     continue
-                self._load_agent_file(yaml_file, source="workspace")
+                self._load_agent_file(yaml_file, source="workspace", default_name=default_name)
 
     def _plugin_agent_file_is_ignored(self, plugin_root: Path, yaml_file: Path) -> bool:
         resolved_plugin_root = plugin_root.resolve()
@@ -251,6 +242,11 @@ class CompositeAgentManager:
             is_dir=False,
         )
 
+    @staticmethod
+    def _is_agent_profile_file(path: Path) -> bool:
+        name = path.name.lower()
+        return not name.endswith(".prompt.md")
+
     def _build_resource_root_filters(self) -> Dict[Path, DiscoveryFilter]:
         return {
             resource_root.path.resolve(): DiscoveryFilter.from_root(
@@ -263,40 +259,123 @@ class CompositeAgentManager:
     def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
         return self._resource_root_filters[resource_root.path.resolve()]
 
+    def _iter_workspace_agent_files(self, resource_root: ResourceRoot) -> list[tuple[Path, str | None]]:
+        files: list[tuple[Path, str | None]] = []
+        seen: set[Path] = set()
+
+        for path in sorted(path for path in resource_root.path.glob("*.agent.yaml") if self._is_agent_profile_file(path)):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append((path, None))
+
+        for path in sorted(resource_root.path.glob("*.agent.md")):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append((path, None))
+
+        agent_roots: list[tuple[Path, str | None]] = []
+        agents_root = resource_root.path / "agents"
+        if agents_root.is_dir():
+            agent_roots.append((agents_root, None))
+        for path in sorted(candidate for candidate in resource_root.path.iterdir() if candidate.is_dir()):
+            if path.name.startswith("agent."):
+                agent_roots.append((path, path.name[len("agent."):].strip() or None))
+
+        for agent_root, prefix in agent_roots:
+            for path in sorted(candidate for candidate in agent_root.rglob("*.agent.yaml") if candidate.is_file()):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                asset_name = self._workspace_asset_name(agent_root, path, suffix=".agent.yaml")
+                files.append((path, self._prefix_asset_name(prefix, asset_name)))
+            for path in sorted(candidate for candidate in agent_root.rglob("*.agent.md") if candidate.is_file()):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                asset_name = self._workspace_asset_name(agent_root, path, suffix=".agent.md")
+                files.append((path, self._prefix_asset_name(prefix, asset_name)))
+
+        return files
+
+    def _workspace_asset_name(self, root: Path, asset_path: Path, *, suffix: str) -> str:
+        relative = asset_path.resolve().relative_to(root.resolve())
+        parts = list(relative.parts)
+        if not parts:
+            return ""
+        filename = parts[-1]
+        if not filename.endswith(suffix):
+            return ""
+        parts[-1] = filename[: -len(suffix)]
+        return ".".join(part for part in parts if part)
+
+    def _prefix_asset_name(self, prefix: str | None, asset_name: str) -> str:
+        if not prefix:
+            return asset_name
+        if not asset_name:
+            return prefix
+        return f"{prefix}.{asset_name}"
+
+    def _workspace_agent_path(self, agent_name: str, *, suffix: str) -> Path:
+        normalized_name = str(agent_name or "").strip()
+        if not normalized_name:
+            raise ValueError("Agent name must not be empty.")
+        if suffix not in {".agent.md", ".agent.yaml"}:
+            raise ValueError(f"Unsupported agent profile suffix: {suffix}")
+
+        parts = [part for part in normalized_name.split(".") if part]
+        if not parts:
+            raise ValueError("Agent name must not be empty.")
+
+        group = parts[0]
+        relative_parts = parts[1:] or [group]
+        target_dir = self._primary_resource_root.path / f"agent.{group}"
+        if len(relative_parts) > 1:
+            target_dir = target_dir.joinpath(*relative_parts[:-1])
+        return target_dir / f"{relative_parts[-1]}{suffix}"
+
     def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
-        return (self._primary_resource_root.path / "prompts",)
+        fallback_dirs = [self._workspace_root]
+        fallback_dirs.extend(resource_root.path for resource_root in self._resource_roots)
+        return tuple(dict.fromkeys(fallback_dirs))
 
     def _plugin_prompt_fallback_dirs(self, plugin_root: Path) -> tuple[Path, ...]:
         resolved_root = Path(plugin_root).resolve()
-        return (resolved_root / "prompts", resolved_root, *self._workspace_prompt_fallback_dirs())
+        return (resolved_root, *self._workspace_prompt_fallback_dirs())
 
-    def _build_plugin_context_by_root(self, flow_definitions: Dict[str, Any]) -> Dict[Path, str]:
+    def _build_namespace_context_by_root(self, flow_definitions: Dict[str, Any]) -> Dict[Path, str]:
         contexts: Dict[Path, str] = {}
         for qualified_name, definition in flow_definitions.items():
             metadata = getattr(definition, "metadata", {}) or {}
-            plugin_root = metadata.get("plugin_root")
-            if not isinstance(plugin_root, str) or not plugin_root.strip():
+            namespace_root = namespace_root_from_metadata(metadata)
+            if namespace_root is None:
                 continue
-            plugin_name = metadata.get("plugin")
-            if not isinstance(plugin_name, str) or not plugin_name.strip():
-                candidate = str(qualified_name)
-                if "::" in candidate:
-                    plugin_name = candidate.split("::", 1)[0]
-                elif "." in candidate:
-                    plugin_name = candidate.split(".", 1)[0]
-                else:
-                    plugin_name = ""
-            cleaned_name = str(plugin_name).strip()
+            cleaned_name = namespace_name_from_metadata(
+                metadata,
+                fallback_qualified_name=str(qualified_name),
+            )
             if cleaned_name:
-                contexts[Path(plugin_root).resolve()] = cleaned_name
+                contexts[namespace_root] = cleaned_name
         return contexts
 
     def _plugin_context_for_root(self, plugin_root: Path | None) -> str | None:
         if plugin_root is None:
             return None
-        return self._plugin_context_by_root.get(Path(plugin_root).resolve())
+        return self._namespace_context_by_root.get(Path(plugin_root).resolve())
 
-    def _load_agent_file(self, yaml_file: Path, *, source: str, plugin_root: Path | None = None) -> None:
+    def _load_agent_file(
+        self,
+        yaml_file: Path,
+        *,
+        source: str,
+        plugin_root: Path | None = None,
+        default_name: str | None = None,
+    ) -> None:
         from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
         try:
             if yaml_file.suffix.lower() == ".md":
@@ -315,7 +394,10 @@ class CompositeAgentManager:
                         "context_plugin": context_plugin,
                     }
                 document = load_markdown_asset_document(yaml_file, **markdown_kwargs)
-                raw = compile_markdown_agent_definition(document, default_name=yaml_file.stem)
+                raw = compile_markdown_agent_definition(
+                    document,
+                    default_name=default_name or yaml_file.stem,
+                )
             else:
                 raw = yaml.safe_load(yaml_file.read_text(encoding="utf-8")) or {}
             if not isinstance(raw, dict):
@@ -326,32 +408,101 @@ class CompositeAgentManager:
 
             name = raw.get("name")
             flow_name = raw.get("flow") or raw.get("agent")
+            base_agent = raw.get("base_agent") or raw.get("extends")
+            
+            # Hybrid agent support: check for self-contained flow fields
+            flow_fields = {
+                "vm_source", "vm_entry", "vm_module", "vm_modules", 
+                "vm_file", "vm_files", "module", "entry_fn"
+            }
+            is_self_contained = any(field in raw for field in flow_fields)
+            
             if not name:
                 logger.warning(
                     "Skipping agent file '%s': missing required field 'name'.", yaml_file
                 )
                 return
-            if not flow_name:
+                
+            if is_self_contained:
+                # Compile a FlowDefinition from these fields
+                if not flow_name:
+                    flow_name = f"agents.{name}"
+                
+                # We need to register this flow in the flow registry.
+                # Since we don't have direct access to WorkspaceCatalog's flow registry here,
+                # we'll store it in self._flow_definitions so it can be picked up.
+                # However, the registry is usually owned by WorkspaceCatalog.
+                # For workspace agents, we might need a way to inject this.
+                
+                # Re-using logic from WorkspaceCatalog._load_workspace_markdown_flow
+                execution_mode = str(
+                    raw.get("execution_mode")
+                    or ("vm" if any(raw.get(key) for key in ("vm_source", "vm_file", "vm_module", "vm_files", "vm_modules")) else "llm")
+                ).strip() or "llm"
+                
+                from pocketcode.core.runtime_models import FlowDefinition  # noqa: PLC0415
+                from pocketcode.core.prompt_loader import coerce_str_list  # noqa: PLC0415
+                
+                # For self-contained agents, the flow definition is embedded
+                flow_def_obj = FlowDefinition(
+                    name=flow_name,
+                    description=str(raw.get("description", "")),
+                    llm_profile=str(raw.get("llm_profile")) if raw.get("llm_profile") else None,
+                    tools=coerce_str_list(raw.get("tools")),
+                    handoff_agents=coerce_str_list(raw.get("handoff_agents")),
+                    execution_mode=execution_mode,
+                    deterministic_handler=str(raw.get("deterministic_handler") or raw.get("handler") or "").strip() or None,
+                    composite_agents=coerce_str_list(raw.get("composite_agents")),
+                    system_prompt=str(raw.get("inline_prompt") or raw.get("prompt") or "").strip(),
+                    # For self-contained, we might not have external prompt files easily resolvable here 
+                    # without more complex logic, but inline_prompt is usually enough.
+                    module=str(raw["module"]).strip() if raw.get("module") else None,
+                    entry_fn=str(raw["entry_fn"]).strip() if raw.get("entry_fn") else None,
+                    vm_entry=str(raw["vm_entry"]).strip() if raw.get("vm_entry") else None,
+                    vm_module=str(raw["vm_module"]).strip() if raw.get("vm_module") else None,
+                    vm_modules=coerce_str_list(raw.get("vm_modules")),
+                    vm_file=str(raw["vm_file"]).strip() if raw.get("vm_file") else None,
+                    vm_files=coerce_str_list(raw.get("vm_files")),
+                    vm_source=str(raw["vm_source"]).strip() if raw.get("vm_source") else None,
+                    metadata={
+                        "source": "self-contained-markdown",
+                        "path": str(yaml_file.resolve()),
+                    }
+                )
+                self._flow_definitions[flow_name] = flow_def_obj
+                # Ensure the agent profile points to this flow
+                raw["flow"] = flow_name
+
+            if not flow_name and not base_agent and not is_self_contained:
                 logger.warning(
-                    "Skipping agent file '%s': missing required field 'flow'.", yaml_file
+                    "Skipping agent file '%s': missing required field 'flow' or 'extends'.", yaml_file
                 )
                 return
 
-            normalized_flow_name = str(flow_name).strip()
-            validate_registry_reference(
-                normalized_flow_name,
-                allowed_kinds={"agent", "flow"},
-                field_name=f"{yaml_file.name}: flow",
-            )
-            normalized_flow_name = normalize_registry_reference(
-                normalized_flow_name,
-                allowed_kinds={"agent", "flow"},
-            )
-            flow_def = (
-                self._flow_definitions.get(str(flow_name))
-                or self._flow_definitions.get(normalized_flow_name)
-            )
-
+            normalized_flow_name = str(flow_name).strip() if flow_name else None
+            normalized_base_agent = str(base_agent).strip() if base_agent else None
+            if not is_self_contained:
+                if normalized_flow_name:
+                    validate_registry_reference(
+                        normalized_flow_name,
+                        allowed_kinds={"agent", "flow"},
+                        field_name=f"{yaml_file.name}: flow",
+                    )
+                    normalized_flow_name = normalize_registry_reference(
+                        normalized_flow_name,
+                        allowed_kinds={"agent", "flow"},
+                    )
+                if normalized_base_agent:
+                    validate_registry_reference(
+                        normalized_base_agent,
+                        allowed_kinds={"agent", "flow"},
+                        field_name=f"{yaml_file.name}: extends",
+                    )
+                    normalized_base_agent = normalize_registry_reference(
+                        normalized_base_agent,
+                        allowed_kinds={"agent", "flow"},
+                    )
+            
             tool_confirmation_raw = raw.get("tool_confirmation", {})
             if not isinstance(tool_confirmation_raw, dict):
                 tool_confirmation_raw = {}
@@ -365,7 +516,6 @@ class CompositeAgentManager:
             if skills_raw is not None and not isinstance(skills_raw, list):
                 skills_raw = None
 
-            inherited_tools = list(getattr(flow_def, "tools", None) or []) or None
             extra_prompts = [str(p) for p in raw.get("extra_prompts", []) if isinstance(p, str)]
             for index, prompt_ref in enumerate(extra_prompts):
                 validate_prompt_source(prompt_ref, field_name=f"{yaml_file.name}: extra_prompts[{index}]")
@@ -387,13 +537,10 @@ class CompositeAgentManager:
 
             agent = Agent(
                 name=str(name),
-                flow=normalized_flow_name,
+                flow=normalized_flow_name or "",
+                base_agent=normalized_base_agent,
                 description=str(raw.get("description", "")),
-                llm_profile=(
-                    str(raw["llm_profile"])
-                    if raw.get("llm_profile")
-                    else getattr(flow_def, "llm_profile", None)
-                ),
+                llm_profile=str(raw["llm_profile"]) if raw.get("llm_profile") else None,
                 extra_prompts=extra_prompts,
                 skills=(
                     [str(skill) for skill in skills_raw if isinstance(skill, str)]
@@ -401,11 +548,7 @@ class CompositeAgentManager:
                     else None
                 ),
                 inline_prompt=str(raw.get("inline_prompt") or raw.get("prompt") or "").strip(),
-                tools=(
-                    normalized_tools
-                    if has_tools_key and normalized_tools is not None
-                    else inherited_tools
-                ),
+                tools=normalized_tools if has_tools_key and normalized_tools is not None else None,
                 tool_confirmation={
                     "default": str(tool_confirmation_raw["default"])
                     if tool_confirmation_raw.get("default")
@@ -442,8 +585,11 @@ class CompositeAgentManager:
 
         data: Dict[str, Any] = {
             "name": agent.name,
-            "flow": normalize_registry_reference(str(agent.flow), allowed_kinds={"agent", "flow"}),
         }
+        if getattr(agent, "base_agent", None):
+            data["extends"] = normalize_registry_reference(str(agent.base_agent), allowed_kinds={"agent", "flow"})
+        if getattr(agent, "flow", None):
+            data["flow"] = normalize_registry_reference(str(agent.flow), allowed_kinds={"agent", "flow"})
         if agent.description:
             data["description"] = agent.description
         if agent.llm_profile:
@@ -465,6 +611,113 @@ class CompositeAgentManager:
         if tool_confirmation:
             data["tool_confirmation"] = tool_confirmation
         return data
+
+    def _resolve_all_agents(self) -> Dict[str, Any]:
+        resolved: Dict[str, Any] = {}
+        failed: set[str] = set()
+        for name in list(self._agents):
+            materialized = self._resolve_agent(name, resolved=resolved, resolving=[], failed=failed)
+            if materialized is not None:
+                resolved[name] = materialized
+        return resolved
+
+    def _resolve_agent(
+        self,
+        name: str,
+        *,
+        resolved: Dict[str, Any],
+        resolving: List[str],
+        failed: set[str],
+    ) -> Any | None:
+        if name in resolved:
+            return resolved[name]
+        if name in failed:
+            return None
+        raw_agent = self._agents.get(name)
+        if raw_agent is None:
+            failed.add(name)
+            return None
+        if name in resolving:
+            logger.warning("Skipping agent '%s': inheritance cycle detected (%s).", name, " -> ".join([*resolving, name]))
+            failed.add(name)
+            return None
+
+        base_agent_name = str(getattr(raw_agent, "base_agent", "") or "").strip() or None
+        base_agent = None
+        if base_agent_name:
+            base_agent = self._resolve_agent(
+                base_agent_name,
+                resolved=resolved,
+                resolving=[*resolving, name],
+                failed=failed,
+            )
+            if base_agent is None:
+                logger.warning(
+                    "Skipping agent '%s': extends unknown or invalid base agent '%s'.",
+                    name,
+                    base_agent_name,
+                )
+                failed.add(name)
+                return None
+
+        materialized = self._merge_agent(base_agent, raw_agent)
+        if not str(getattr(materialized, "flow", "") or "").strip():
+            logger.warning("Skipping agent '%s': no target flow after inheritance resolution.", name)
+            failed.add(name)
+            return None
+        resolved[name] = materialized
+        return materialized
+
+    def _merge_agent(self, base_agent: Any | None, agent: Any) -> Any:
+        from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
+
+        if base_agent is None:
+            return Agent(
+                name=agent.name,
+                flow=agent.flow,
+                base_agent=agent.base_agent,
+                description=agent.description,
+                llm_profile=agent.llm_profile,
+                inline_prompt=agent.inline_prompt,
+                extra_prompts=list(agent.extra_prompts),
+                skills=None if agent.skills is None else list(agent.skills),
+                tools=None if agent.tools is None else list(agent.tools),
+                tool_confirmation={
+                    "default": (agent.tool_confirmation or {}).get("default"),
+                    "overrides": dict((agent.tool_confirmation or {}).get("overrides") or {}),
+                },
+                source=agent.source,
+                source_path=agent.source_path,
+            )
+
+        merged_prompt_parts = [part for part in [base_agent.inline_prompt, agent.inline_prompt] if str(part or "").strip()]
+        merged_confirmation = {
+            "default": (base_agent.tool_confirmation or {}).get("default"),
+            "overrides": dict((base_agent.tool_confirmation or {}).get("overrides") or {}),
+        }
+        agent_confirmation = agent.tool_confirmation or {}
+        if agent_confirmation.get("default") is not None:
+            merged_confirmation["default"] = agent_confirmation.get("default")
+        merged_confirmation["overrides"].update(dict(agent_confirmation.get("overrides") or {}))
+        if not merged_confirmation["overrides"]:
+            merged_confirmation.pop("overrides", None)
+        if merged_confirmation.get("default") is None and "default" in merged_confirmation:
+            merged_confirmation.pop("default", None)
+
+        return Agent(
+            name=agent.name,
+            flow=agent.flow or base_agent.flow,
+            base_agent=agent.base_agent,
+            description=agent.description or base_agent.description,
+            llm_profile=agent.llm_profile if agent.llm_profile is not None else base_agent.llm_profile,
+            inline_prompt="\n\n".join(merged_prompt_parts),
+            extra_prompts=[*list(base_agent.extra_prompts), *list(agent.extra_prompts)],
+            skills=list(agent.skills) if agent.skills is not None else (list(base_agent.skills) if base_agent.skills is not None else None),
+            tools=list(agent.tools) if agent.tools is not None else (list(base_agent.tools) if base_agent.tools is not None else None),
+            tool_confirmation=merged_confirmation,
+            source=agent.source,
+            source_path=agent.source_path,
+        )
 
 
 AgentManager = CompositeAgentManager

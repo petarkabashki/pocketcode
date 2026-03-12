@@ -40,4 +40,4 @@ include = ["pocketcode*"]
 exclude = ["tests*", "docs*", "prompts*", "projects*"] # Exclude non-package directories
 
 [tool.setuptools.package-data]
-"pocketcode" = ["plugins/**/*.yaml", "plugins/**/*.md"]
+"pocketcode" = ["catalogs/**/*.md", "catalogs/**/*.yaml", "catalogs/**/*.tool.py"]

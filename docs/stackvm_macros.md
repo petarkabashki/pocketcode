@@ -130,7 +130,7 @@ Generate a fresh helper symbol:
 [ [ "tmp" gensym ] ] syntax-quote "fresh-name" defmacro
 ```
 
-For a checked-in end-to-end example, see `examples/stackvm_macro_authoring_plugin/`.
+For a checked-in end-to-end example, see `examples/stackvm_macro_authoring_example/`.
 
 ## Debugging And Introspection
 
@@ -154,7 +154,7 @@ Current macro support is intentionally limited:
 
 ## Example References
 
-- `examples/stackvm_tool_normalize_plugin/`: built-in `tool-once`
-- `examples/stackvm_buttons_plugin/`: built-in `tool-once` plus `prompt-route`
-- `examples/stackvm_delegate_return_plugin/`: built-in `tool-once` plus `delegate-return`
-- `examples/stackvm_macro_authoring_plugin/`: user-authored `defmacro`, `syntax-quote`, `unquote`, and `unquote-splice`
+- `examples/stackvm_tool_normalize_example/`: built-in `tool-once`
+- `examples/stackvm_buttons_example/`: built-in `tool-once` plus `prompt-route`
+- `examples/stackvm_delegate_return_example/`: built-in `tool-once` plus `delegate-return`
+- `examples/stackvm_macro_authoring_example/`: user-authored `defmacro`, `syntax-quote`, `unquote`, and `unquote-splice`

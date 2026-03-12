@@ -8,7 +8,6 @@ from .shared import PickerOption
 class TextualAppControlCenterMixin:
     def _asset_category_options(self) -> tuple[PickerOption, ...]:
         active_profile = self._engine.active_agent_profile
-        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         session_default = self._engine.session_confirmation_overrides.get("default_policy") or "inherit"
         active_skill_names = tuple(
             str(getattr(skill, "name", skill))
@@ -35,12 +34,6 @@ class TextualAppControlCenterMixin:
                 label=f"Agent: {active_profile.name if active_profile else 'none'}",
                 description="Switch, edit, clone, or delete the active agent profile",
                 search_text="agent profile active edit clone delete",
-            ),
-            PickerOption(
-                value="mode",
-                label=f"Mode: {active_mode.name if active_mode else 'none'}",
-                description="Switch, clear, edit, clone, or delete a mode",
-                search_text="mode preset switch clear edit clone delete",
             ),
             PickerOption(
                 value="llm",
@@ -129,7 +122,6 @@ class TextualAppControlCenterMixin:
         self.call_after_refresh(lambda: self._open_asset_action_picker(selected_value, options))
 
     def _asset_action_options(self, category: str) -> tuple[PickerOption, ...]:
-        active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
         if category == "profile":
             return (
                 PickerOption("select", "Switch Active Profile", search_text="select switch active profile"),
@@ -137,16 +129,6 @@ class TextualAppControlCenterMixin:
                 PickerOption("clone", "Clone Current Profile", search_text="clone agent profile workspace"),
                 PickerOption("delete", "Delete Current Profile", search_text="delete remove workspace agent"),
             )
-        if category == "mode":
-            options = [
-                PickerOption("select", "Switch Active Mode", search_text="select switch mode"),
-                PickerOption("edit", "Edit Current Mode", search_text="edit mode markdown"),
-                PickerOption("clone", "Clone Current Mode", search_text="clone mode"),
-                PickerOption("delete", "Delete Current Mode", search_text="delete remove mode"),
-            ]
-            if active_mode is not None:
-                options.insert(1, PickerOption("clear", "Clear Active Mode", search_text="clear reset active mode"))
-            return tuple(options)
         if category == "llm":
             return (
                 PickerOption("select", "Switch Global LLM", search_text="select switch llm"),
@@ -220,29 +202,6 @@ class TextualAppControlCenterMixin:
                 return
             if action == "delete":
                 self._confirm_delete_current_asset("agent")
-                return
-        if category == "mode":
-            if action == "select":
-                self._open_mode_picker()
-                return
-            if action == "clear":
-                self._set_active_mode_effect(None)
-                self._write_info("Mode cleared.")
-                self._commit_engine_ui_update()
-                return
-            if action == "edit":
-                self._open_mode_editor()
-                return
-            if action == "clone":
-                self._open_name_prompt(
-                    title="Clone Mode",
-                    placeholder="review-copy",
-                    help_text="Enter the new mode name / filename.",
-                    on_submit=lambda value: self._clone_selected_asset("mode", value),
-                )
-                return
-            if action == "delete":
-                self._confirm_delete_current_asset("mode")
                 return
         if category == "llm":
             if action == "select":

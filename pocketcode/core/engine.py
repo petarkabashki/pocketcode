@@ -14,9 +14,8 @@ import yaml
 
 from pocketcode.core.agent_manager import AgentManager
 from pocketcode.config.loader import WORKSPACE_SETTINGS_FILENAME
+from pocketcode.core.catalog_metadata import namespace_name_from_metadata, namespace_root_from_metadata
 from pocketcode.core.markdown_profiles import (
-    ModeDefinition,
-    ModeManager,
     SkillDefinition,
     SkillManager,
     parse_markdown_front_matter,
@@ -24,7 +23,7 @@ from pocketcode.core.markdown_profiles import (
 from pocketcode.core.agent_runtime import AgentRuntime
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.namespace_registry import RegistryError
-from pocketcode.core.plugin_manager import PluginManager
+from pocketcode.core.workspace_catalog import WorkspaceCatalog
 from pocketcode.core.prompt_loader import (
     coerce_str_list,
     is_prompt_reference,
@@ -49,6 +48,7 @@ from pocketcode.core.runtime_observability import (
 )
 from pocketcode.core.runtime_models import AgentProfile, FlowDefinition
 from pocketcode.core.resource_roots import primary_resource_root
+from pocketcode.core.runtime_storage import load_entry_history, normalize_entry_history, save_entry_history
 from pocketcode.core.session_manager import SessionManager
 from pocketcode.core.stackvm_expander import expand_stackvm_ast
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
@@ -62,7 +62,6 @@ from pocketcode.core.markdown_assets import (
     compile_markdown_tool_definition,
     parse_markdown_asset_text_document,
 )
-from pocketcode.core.markdown_graph_flow import build_graph_flow_from_metadata
 from pocketcode.cli.debugger_commands import build_debugger_predicate_from_label
 
 logger = logging.getLogger(__name__)
@@ -79,32 +78,24 @@ class PocketCodeEngine:
             self._llm_config = {}
         self._tool_confirmation_config = self._build_tool_confirmation_config()
 
-        self._plugins = PluginManager(config=config, workspace_root=self._workspace_root)
-        self._plugins.load()
+        self._catalog = WorkspaceCatalog(config=config, workspace_root=self._workspace_root)
+        self._catalog.load()
+        self._plugins = self._catalog
 
         # T011: instantiate AgentManager after plugins are loaded.
         self._agent_profile_manager = AgentManager(self._workspace_root, prompt_registry=self._plugins.prompts)
         self._agent_profile_manager.load(dict(self._plugins.agents))
-        self._mode_manager = ModeManager(
-            self._workspace_root,
-            flow_registry=self._plugins.flows,
-            tool_registry=self._plugins.tools,
-            prompt_registry=self._plugins.prompts,
-            agent_profile_getter=self._agent_profile_manager.get,
-        )
-        self._mode_manager.load()
         self._skill_manager = SkillManager(
             self._workspace_root,
             tool_registry=self._plugins.tools,
             prompt_registry=self._plugins.prompts,
         )
         self._skill_manager.load()
-        self._session_manager = SessionManager(self._workspace_root)
+        self._session_manager = SessionManager(self._workspace_root, config=self._config)
         self._workspace_llm_profile_manager = WorkspaceLlmProfileManager(self._workspace_root)
         self._workspace_llm_profile_manager.load()
         self._validate_loaded_reference_surfaces()
         self.active_agent_profile = None  # type: ignore[assignment]  # AgentProfile | None
-        self.active_mode: ModeDefinition | None = None
         self.session_profile_overrides: Dict[str, Dict[str, Any]] = {}
         self.session_global_skills_override: List[str] | None = None
         self.enabled_skills = self._configured_enabled_skills()
@@ -112,7 +103,7 @@ class PocketCodeEngine:
         self._llm_router = LlmRouter(config=config, plugin_llm_profiles=self._merged_llm_profiles())
         self._tool_runtime = self._build_tool_runtime()
         self._agent_runtime = AgentRuntime(
-            plugin_manager=self._plugins,
+            catalog=self._plugins,
             llm_router=self._llm_router,
             tool_runtime=self._tool_runtime,
             runtime_config=self._runtime_config,
@@ -163,15 +154,16 @@ class PocketCodeEngine:
             raise ValueError("Unsupported asset kind. Expected one of: agent, flow, tool.")
 
         resource_root = primary_resource_root(self._workspace_root)
-        target_dir = resource_root.path / f"{normalized_kind}s"
+        target_dir = resource_root.path
         target_dir.mkdir(parents=True, exist_ok=True)
-        asset_path = target_dir / f"{normalized_name}.md"
+        asset_path = self._workspace_markdown_asset_path(normalized_kind, normalized_name, resource_root=resource_root)
         if asset_path.exists():
             raise ValueError(f"{normalized_kind.title()} asset already exists: {asset_path}")
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
 
         companion_path: Path | None = None
         if normalized_kind == "tool":
-            companion_path = target_dir / f"{normalized_name}.py"
+            companion_path = target_dir / self._tool_handler_filename(normalized_name)
             if companion_path.exists():
                 raise ValueError(f"Tool handler module already exists: {companion_path}")
             companion_path.write_text(
@@ -248,11 +240,10 @@ class PocketCodeEngine:
             raise ValueError(f"Agent profile '{normalized_name}' already exists.")
 
         resource_root = primary_resource_root(self._workspace_root)
-        target_dir = resource_root.path / "agents"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        asset_path = target_dir / f"{normalized_name}.md"
+        asset_path = self._workspace_markdown_asset_path("agent", normalized_name, resource_root=resource_root)
         if asset_path.exists():
             raise ValueError(f"Agent asset already exists: {asset_path}")
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
         markdown_text = self._stackvm_agent_scaffold(normalized_name, flow_name=normalized_flow)
         asset_path.write_text(markdown_text, encoding="utf-8")
         self.reload()
@@ -446,14 +437,14 @@ class PocketCodeEngine:
                 vm_entry=script_entry,
                 vm_file=str(script_path),
                 metadata={
-                    "plugin": "__stackvm_cli__",
-                    "plugin_root": str(script_path.parent),
+                    "namespace": "__stackvm_cli__",
+                    "namespace_root": str(script_path.parent),
                     "resource_root": str(self._stackvm_script_root().parent),
                     "markdown_path": str(script_path),
                 },
             )
             temp_profile = AgentProfile(
-                name=f"stackvm-script::{script_path.stem}",
+                name=f"stackvm-script.{script_path.stem}",
                 flow="__stackvm_cli__.script",
                 description=f"Temporary profile for {script_path.name}",
                 source="synthesised",
@@ -507,7 +498,10 @@ class PocketCodeEngine:
         normalized_name = self._normalize_asset_file_name(new_name)
         source_asset = self.get_markdown_asset(normalized_kind, source_name)
         source_path = Path(source_asset["path"]).resolve()
-        target_path = source_path.with_name(f"{normalized_name}{source_path.suffix}")
+        if normalized_kind == "agent":
+            target_path = self._workspace_markdown_asset_path(normalized_kind, normalized_name)
+        else:
+            target_path = source_path.with_name(self._markdown_asset_filename(normalized_kind, normalized_name))
         if target_path.exists():
             raise ValueError(f"{normalized_kind.title()} asset already exists: {target_path}")
 
@@ -626,7 +620,7 @@ class PocketCodeEngine:
 
         if normalized_kind == "tool":
             _, local_name, tool_impl, path = self._resolve_workspace_markdown_tool(normalized_name)
-            companion_path = path.with_suffix(".py") if path.with_suffix(".py").exists() else None
+            companion_path = self._tool_handler_path_from_markdown(path, tool_impl)
             return {
                 "kind": normalized_kind,
                 "name": local_name,
@@ -641,13 +635,6 @@ class PocketCodeEngine:
         self._plugins.load()
         # T014: reload APM after plugins reload.
         self._agent_profile_manager.reload(dict(self._plugins.agents))
-        self._mode_manager.set_registries(
-            flow_registry=self._plugins.flows,
-            tool_registry=self._plugins.tools,
-            prompt_registry=self._plugins.prompts,
-            agent_profile_getter=self._agent_profile_manager.get,
-        )
-        self._mode_manager.load()
         self._skill_manager.set_registries(
             tool_registry=self._plugins.tools,
             prompt_registry=self._plugins.prompts,
@@ -657,17 +644,7 @@ class PocketCodeEngine:
         self._validate_loaded_reference_surfaces()
         # Re-apply active profile by name if it still exists; else fall back to
         # the current agent's default profile.
-        if self.active_mode is not None:
-            still_exists = self._mode_manager.get(self.active_mode.name)
-            if still_exists is not None:
-                self.set_mode(still_exists.name)
-            else:
-                self.active_mode = None
-                if self.current_agent:
-                    self._activate_default_profile_for(self.current_agent)
-                else:
-                    self.active_agent_profile = None
-        elif self.active_agent_profile is not None:
+        if self.active_agent_profile is not None:
             still_exists = self._agent_profile_manager.get(self.active_agent_profile.name)
             if still_exists is not None:
                 self.active_agent_profile = self._apply_session_profile_overrides(still_exists)
@@ -704,9 +681,6 @@ class PocketCodeEngine:
         for handoff_key in invalid_handoff_overrides:
             self.handoff_llm_overrides.pop(handoff_key, None)
 
-        if self.active_mode is not None and self._mode_manager.get(self.active_mode.name) is None:
-            self.active_mode = None
-
         self.enabled_skills = [
             skill_name
             for skill_name in self.enabled_skills
@@ -715,7 +689,6 @@ class PocketCodeEngine:
 
     def _validate_loaded_reference_surfaces(self) -> None:
         self._validate_loaded_agent_profiles()
-        self._validate_loaded_modes()
         self._validate_loaded_skills()
 
     def _validate_loaded_agent_profiles(self) -> None:
@@ -723,7 +696,15 @@ class PocketCodeEngine:
         if profile_manager is None:
             return
 
-        for profile in list(profile_manager.list()):
+        for raw_profile in list(profile_manager.list()):
+            profile = profile_manager.resolve(raw_profile.name) if hasattr(profile_manager, "resolve") else raw_profile
+            if profile is None:
+                logger.warning(
+                    "Agent profile '%s' could not be resolved after inheritance. Removing it from the loaded registry.",
+                    raw_profile.name,
+                )
+                self._drop_loaded_profile(raw_profile.name)
+                continue
             normalized_agent_name = self._normalize_agent_name(profile.agent)
             if not normalized_agent_name or normalized_agent_name not in self._plugins.agents:
                 logger.warning(
@@ -751,60 +732,6 @@ class PocketCodeEngine:
                 allow_context_deferred=False,
             )
             self._store_loaded_profile(profile)
-
-    def _validate_loaded_modes(self) -> None:
-        mode_manager = getattr(self, "_mode_manager", None)
-        if mode_manager is None:
-            return
-
-        for mode in list(mode_manager.list()):
-            target_flow = None
-            if mode.agent:
-                base_profile = self._base_agent_profile(mode.agent)
-                if base_profile is None:
-                    logger.warning(
-                        "Mode '%s' references unknown agent profile '%s'. Removing it from the loaded registry.",
-                        mode.name,
-                        mode.agent,
-                    )
-                    self._drop_loaded_mode(mode.name)
-                    continue
-                target_flow = self._normalize_agent_name(base_profile.agent)
-            elif mode.flow:
-                target_flow = self._normalize_agent_name(mode.flow)
-
-            if target_flow and target_flow not in self._plugins.agents:
-                logger.warning(
-                    "Mode '%s' targets unknown flow '%s'. Removing it from the loaded registry.",
-                    mode.name,
-                    mode.flow or target_flow,
-                )
-                self._drop_loaded_mode(mode.name)
-                continue
-
-            updated_mode = dataclasses.replace(
-                mode,
-                flow=target_flow if mode.flow and target_flow else mode.flow,
-                tools=(
-                    self._qualify_existing_tool_refs(
-                        mode.tools,
-                        owner_name=mode.name,
-                        field_name="tools",
-                        context_agent=target_flow,
-                        allow_context_deferred=target_flow is None,
-                    )
-                    if mode.tools is not None
-                    else None
-                ),
-                extra_prompts=self._filter_existing_prompt_refs(
-                    mode.extra_prompts,
-                    owner_name=mode.name,
-                    field_name="extra_prompts",
-                    context_plugin=self._context_plugin_for_agent(target_flow) if target_flow else None,
-                    allow_context_deferred=target_flow is None,
-                ),
-            )
-            self._store_loaded_mode(updated_mode)
 
     def _validate_loaded_skills(self) -> None:
         skill_manager = getattr(self, "_skill_manager", None)
@@ -947,8 +874,10 @@ class PocketCodeEngine:
         agent_definition = self._plugins.agents.get(agent_name)
         if agent_definition is None:
             return None
-        plugin_name = (agent_definition.metadata or {}).get("plugin")
-        return str(plugin_name).strip() if plugin_name else None
+        return namespace_name_from_metadata(
+            getattr(agent_definition, "metadata", {}) or {},
+            fallback_qualified_name=agent_name,
+        )
 
     def _store_loaded_profile(self, profile: AgentProfile) -> None:
         manager = getattr(self, "_agent_profile_manager", None)
@@ -961,18 +890,6 @@ class PocketCodeEngine:
         mapping = self._manager_store(manager, "_agents", "_profiles")
         if mapping is not None:
             mapping.pop(profile_name, None)
-
-    def _store_loaded_mode(self, mode: ModeDefinition) -> None:
-        manager = getattr(self, "_mode_manager", None)
-        mapping = self._manager_store(manager, "_modes")
-        if mapping is not None:
-            mapping[mode.name] = mode
-
-    def _drop_loaded_mode(self, mode_name: str) -> None:
-        manager = getattr(self, "_mode_manager", None)
-        mapping = self._manager_store(manager, "_modes")
-        if mapping is not None:
-            mapping.pop(mode_name, None)
 
     def _store_loaded_skill(self, skill: SkillDefinition) -> None:
         manager = getattr(self, "_skill_manager", None)
@@ -1090,7 +1007,6 @@ class PocketCodeEngine:
             "last_used_skills": list(last_used_skills) if isinstance(last_used_skills, list) else [],
             "agent_profiles": copy.deepcopy(agent_profiles),
             "active_profile": last_used.get("active_profile"),
-            "active_mode": last_used.get("active_mode"),
             "global_llm_profile": last_used.get("global_llm_profile"),
             "session_confirmation_default": last_used.get("session_confirmation_default"),
             "auto_confirm_tools": bool(last_used.get("auto_confirm_tools", self.auto_confirm_tools)),
@@ -1153,31 +1069,11 @@ class PocketCodeEngine:
         return config_path
 
     def get_textual_entry_history(self) -> List[str]:
-        last_used = self._textual_last_used_config(create=False)
-        raw_history = last_used.get("entry_history", [])
-        if not isinstance(raw_history, list):
-            return []
-        history: List[str] = []
-        for item in raw_history:
-            text = str(item or "").strip()
-            if text:
-                history.append(text)
-        return history[-100:]
+        return load_entry_history(self._workspace_root, self._config)
 
     def set_last_used_entry_history(self, entries: List[str]) -> Path:
-        last_used = self._textual_last_used_config(create=True)
-        normalized_entries: List[str] = []
-        for item in entries:
-            text = str(item or "").strip()
-            if text:
-                normalized_entries.append(text)
-        normalized_entries = normalized_entries[-100:]
-        if normalized_entries:
-            last_used["entry_history"] = normalized_entries
-        else:
-            last_used.pop("entry_history", None)
-        self._cleanup_textual_last_used_config()
-        return self._write_workspace_config()
+        normalized_entries = normalize_entry_history(entries)
+        return save_entry_history(self._workspace_root, normalized_entries, self._config)
 
     @property
     def active_agent(self):
@@ -1193,13 +1089,11 @@ class PocketCodeEngine:
         if not normalized_agent_name:
             self.current_agent = None
             self.active_agent_profile = None
-            self.active_mode = None
             self.enabled_skills = self._configured_enabled_skills()
             self._maybe_refresh_runtime_components()
             return
         if normalized_agent_name not in self._plugins.agents:
             raise KeyError(f"Unknown agent '{agent_name}'.")
-        self.active_mode = None
         self.current_agent = normalized_agent_name
         # T012: auto-activate the agent's default profile.
         self._activate_default_profile_for(normalized_agent_name)
@@ -1211,9 +1105,8 @@ class PocketCodeEngine:
         """Activate a named agent profile, or clear the active profile if name is None."""
         if name is None:
             self.active_agent_profile = None
-            self.active_mode = None
             return
-        profile = self._base_agent_profile(name)
+        profile = self._resolved_agent_profile(name)
         if profile is None:
             available = [p.name for p in self._agent_profile_manager.list()]
             raise ValueError(
@@ -1225,7 +1118,6 @@ class PocketCodeEngine:
             raise ValueError(
                 f"Agent profile '{name}' targets unknown agent '{profile.agent}'."
         )
-        self.active_mode = None
         self.current_agent = normalized_profile_agent
         self.active_agent_profile = self._apply_session_profile_overrides(profile)
         self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
@@ -1233,34 +1125,6 @@ class PocketCodeEngine:
 
     def set_active_agent(self, name: Optional[str]) -> None:
         self.set_active_agent_profile(name)
-
-    def list_modes(self) -> List[str]:
-        return [mode.name for mode in self._mode_manager.list()]
-
-    def get_mode(self, name: Optional[str] = None) -> Any:
-        if name is None:
-            return self.active_mode
-        return self._mode_manager.get(name)
-
-    def set_mode(self, name: Optional[str]) -> None:
-        if name is None:
-            self.active_mode = None
-            if self.current_agent:
-                self._activate_default_profile_for(self.current_agent)
-            else:
-                self.active_agent_profile = None
-            return
-
-        mode = self._mode_manager.get(name)
-        if mode is None:
-            raise ValueError(f"Unknown mode '{name}'. Available: {self.list_modes()}")
-
-        profile = self._resolve_mode_profile(mode)
-        self.active_mode = mode
-        self.current_agent = self._normalize_agent_name(profile.agent)
-        self.active_agent_profile = self._apply_session_profile_overrides(profile)
-        self.enabled_skills = self._configured_enabled_skills(self.active_agent_profile.name)
-        self._maybe_refresh_runtime_components()
 
     def _normalize_agent_name(self, agent_name: Any) -> Optional[str]:
         cleaned = str(agent_name or "").strip()
@@ -1289,10 +1153,6 @@ class PocketCodeEngine:
 
         if canonical_candidate in agents_registry:
             return canonical_candidate
-
-        legacy = canonical_candidate.replace(".", "::")
-        if legacy in agents_registry:
-            return legacy
 
         return canonical_candidate
 
@@ -1379,22 +1239,8 @@ class PocketCodeEngine:
         if cleaned:
             self.set_active_agent_profile(cleaned)
             last_used["active_profile"] = cleaned
-            last_used.pop("active_mode", None)
         else:
             last_used.pop("active_profile", None)
-        self._cleanup_textual_last_used_config()
-        return self._write_workspace_config()
-
-    def set_last_used_mode(self, mode_name: Optional[str]) -> Path:
-        last_used = self._textual_last_used_config(create=True)
-        cleaned = str(mode_name).strip() if mode_name else ""
-        if cleaned:
-            self.set_mode(cleaned)
-            last_used["active_mode"] = cleaned
-            last_used.pop("active_profile", None)
-        else:
-            self.set_mode(None)
-            last_used.pop("active_mode", None)
         self._cleanup_textual_last_used_config()
         return self._write_workspace_config()
 
@@ -1455,7 +1301,6 @@ class PocketCodeEngine:
         if preset is None:
             raise ValueError(f"Unknown selection preset '{name}'.")
         self._replace_last_used_selection_snapshot(preset)
-        self.active_mode = None
         self.active_agent_profile = None
         self.global_llm_override = None
         self.session_profile_overrides = self._normalize_session_profile_overrides(preset.get("agent_profiles", {}))
@@ -1510,7 +1355,7 @@ class PocketCodeEngine:
             if self.active_agent_profile is None:
                 return None
             return self._base_agent_profile(self.active_agent_profile.name) or self.active_agent_profile
-        profile = self._base_agent_profile(name)
+        profile = self._resolved_agent_profile(name) if effective else self._base_agent_profile(name)
         if profile is None and self.active_agent_profile is not None and self.active_agent_profile.name == name:
             profile = self.active_agent_profile
         if not effective or profile is None:
@@ -1631,21 +1476,14 @@ class PocketCodeEngine:
             front_matter = {
                 "name": name,
                 "description": f"Workspace markdown flow '{name}'.",
+                "execution_mode": "vm",
+                "vm_entry": "main",
             }
             front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
             return (
                 f"---\n{front_matter_text}\n---\n\n"
-                "```yaml flow\n"
-                "start: start\n"
-                "nodes:\n"
-                "  start:\n"
-                "    kind: noop\n"
-                "  done:\n"
-                f"    kind: output\n    message: \"{name} flow scaffold ready.\"\n"
-                "```\n\n"
-                "```mermaid graph\n"
-                "graph TD\n"
-                "  start --> done\n"
+                "```vm\n"
+                f"[ \"StackVM flow {name} ready.\" answer ] \"main\" define\n"
                 "```\n"
             )
 
@@ -1654,7 +1492,7 @@ class PocketCodeEngine:
             front_matter = {
                 "name": name,
                 "description": f"Workspace markdown tool '{name}'.",
-                "handler": f"./{name}.py:{class_name}",
+                "handler": f"./{self._tool_handler_filename(name)}:{class_name}",
             }
             front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
             return (
@@ -1734,7 +1572,14 @@ class PocketCodeEngine:
                 if not handler_path.is_absolute():
                     source_handler_path = (source_path.parent / handler_path).resolve()
                     if source_handler_path.exists():
-                        cloned_rel_path = handler_path.with_name(f"{new_name}{source_handler_path.suffix}")
+                        source_base_name = self._asset_base_name_from_path(source_path, asset_kind="tool")
+                        cloned_rel_path = handler_path.with_name(
+                            self._rename_asset_related_filename(
+                                filename=handler_path.name,
+                                old_base=source_base_name,
+                                new_base=new_name,
+                            )
+                        )
                         companion_path = (source_path.parent / cloned_rel_path).resolve()
                         companion_text = source_handler_path.read_text(encoding="utf-8")
                         cloned_rel_text = cloned_rel_path.as_posix()
@@ -1775,20 +1620,37 @@ class PocketCodeEngine:
         raw = compile_markdown_agent_definition(document, default_name=target_path.stem)
 
         flow_name = raw.get("flow") or raw.get("agent")
-        if not flow_name:
-            raise ValueError(f"Markdown agent '{target_path}' is missing required field 'flow'.")
-        validate_registry_reference(
-            str(flow_name).strip(),
-            allowed_kinds={"agent", "flow"},
-            field_name=f"{target_path.name}: flow",
-        )
-        normalized_flow = normalize_registry_reference(str(flow_name).strip(), allowed_kinds={"agent", "flow"})
-        self._validate_live_registry_reference(
-            normalized_flow,
-            registry=self._plugins.flows,
-            allowed_kinds={"agent", "flow"},
-            field_name=f"{target_path.name}: flow",
-        )
+        base_agent = raw.get("base_agent") or raw.get("extends")
+        flow_fields = {"vm_source", "vm_entry", "vm_module", "vm_modules", "vm_file", "vm_files", "module", "entry_fn"}
+        is_self_contained = any(field in raw for field in flow_fields)
+        if not flow_name and not base_agent and not is_self_contained:
+            raise ValueError(f"Markdown agent '{target_path}' is missing required field 'flow' or 'extends'.")
+        if flow_name:
+            validate_registry_reference(
+                str(flow_name).strip(),
+                allowed_kinds={"agent", "flow"},
+                field_name=f"{target_path.name}: flow",
+            )
+            normalized_flow = normalize_registry_reference(str(flow_name).strip(), allowed_kinds={"agent", "flow"})
+            self._validate_live_registry_reference(
+                normalized_flow,
+                registry=self._plugins.flows,
+                allowed_kinds={"agent", "flow"},
+                field_name=f"{target_path.name}: flow",
+            )
+        if base_agent:
+            validate_registry_reference(
+                str(base_agent).strip(),
+                allowed_kinds={"agent", "flow"},
+                field_name=f"{target_path.name}: extends",
+            )
+            normalized_base_agent = normalize_registry_reference(str(base_agent).strip(), allowed_kinds={"agent", "flow"})
+            profile_manager = getattr(self, "_agent_profile_manager", None)
+            base_exists = normalized_base_agent in getattr(self._plugins, "agents", {})
+            if not base_exists and profile_manager is not None:
+                base_exists = profile_manager.get(normalized_base_agent) is not None
+            if not base_exists:
+                raise ValueError(f"{target_path.name}: extends references unknown agent '{base_agent}'.")
 
         tools_raw = raw.get("tools")
         if tools_raw is not None:
@@ -1857,8 +1719,7 @@ class PocketCodeEngine:
         )
 
         metadata = flow_definition.get("metadata") or {}
-        if isinstance(metadata, dict) and metadata.get("markdown_graphs"):
-            build_graph_flow_from_metadata(flow_definition)
+        pass  # no graphs
 
     def _validate_markdown_tool_handler(self, *, markdown_text: str, target_path: Path) -> None:
         document = self._parse_workspace_markdown_asset_text_document(markdown_text, target_path=target_path)
@@ -2075,6 +1936,83 @@ class PocketCodeEngine:
             raise ValueError(f"Ambiguous workspace markdown flow name: {name}")
         return matches[0]
 
+    def _markdown_asset_filename(self, asset_kind: str, name: str) -> str:
+        if asset_kind == "agent":
+            return f"{name}.agent.md"
+        if asset_kind == "tool":
+            return f"{name}.tool.md"
+        if asset_kind == "flow":
+            return f"{name}.md"
+        raise ValueError(f"Unsupported asset kind: {asset_kind}")
+
+    def _workspace_markdown_asset_path(
+        self,
+        asset_kind: str,
+        name: str,
+        *,
+        resource_root: Any | None = None,
+    ) -> Path:
+        normalized_kind = str(asset_kind or "").strip().lower()
+        normalized_name = self._normalize_asset_file_name(name)
+        active_resource_root = resource_root or primary_resource_root(self._workspace_root)
+        base_path = active_resource_root.path
+        if normalized_kind != "agent":
+            return base_path / self._markdown_asset_filename(normalized_kind, normalized_name)
+
+        parts = [part for part in normalized_name.split(".") if part]
+        if not parts:
+            raise ValueError("Agent name must not be empty.")
+        group = parts[0]
+        relative_parts = parts[1:] or [group]
+        target_dir = base_path / f"agent.{group}"
+        if len(relative_parts) > 1:
+            target_dir = target_dir.joinpath(*relative_parts[:-1])
+        return target_dir / f"{relative_parts[-1]}.agent.md"
+
+    def _tool_handler_filename(self, name: str) -> str:
+        return f"{name}.tool.py"
+
+    def _tool_handler_path_from_markdown(self, markdown_path: Path, tool_impl: Any) -> Path | None:
+        source_path = getattr(tool_impl, "_tool_source_path", None)
+        if source_path is not None:
+            try:
+                front_matter, _body = parse_markdown_front_matter(markdown_path.read_text(encoding="utf-8"))
+                handler_value = front_matter.get("handler") or front_matter.get("callable")
+                if isinstance(handler_value, str) and ":" in handler_value:
+                    path_part, _object_name = handler_value.split(":", 1)
+                    handler_path = Path(path_part)
+                    if not handler_path.is_absolute():
+                        resolved = (markdown_path.parent / handler_path).resolve()
+                        if resolved.exists():
+                            return resolved
+            except Exception:
+                pass
+
+        conventional_path = markdown_path.with_name(
+            self._tool_handler_filename(self._asset_base_name_from_path(markdown_path, asset_kind="tool"))
+        )
+        return conventional_path if conventional_path.exists() else None
+
+    def _asset_base_name_from_path(self, path: Path, *, asset_kind: str) -> str:
+        name = Path(path).name
+        if asset_kind == "agent" and name.endswith(".agent.md"):
+            return name[: -len(".agent.md")]
+        if asset_kind == "tool":
+            if name.endswith(".tool.md"):
+                return name[: -len(".tool.md")]
+            if name.endswith(".tool.py"):
+                return name[: -len(".tool.py")]
+        if name.endswith(".md"):
+            return name[: -len(".md")]
+        return Path(path).stem
+
+    def _rename_asset_related_filename(self, *, filename: str, old_base: str, new_base: str) -> str:
+        if filename == old_base:
+            return new_base
+        if filename.startswith(f"{old_base}."):
+            return f"{new_base}{filename[len(old_base):]}"
+        return filename
+
     def _resolve_stackvm_flow_definition(self, name: str) -> tuple[str, FlowDefinition]:
         normalized_name = self._require_known_agent_name(name)
         definition = self._plugins.agents.get(normalized_name)
@@ -2145,12 +2083,12 @@ class PocketCodeEngine:
         metadata = dict(getattr(definition, "metadata", {}) or {})
         search_roots: list[Path] = []
         markdown_path = metadata.get("markdown_path")
-        plugin_root = metadata.get("plugin_root")
+        namespace_root = namespace_root_from_metadata(metadata)
         resource_root = metadata.get("resource_root")
         if markdown_path:
             search_roots.append(Path(str(markdown_path)).resolve().parent)
-        if plugin_root:
-            search_roots.append(Path(str(plugin_root)).resolve())
+        if namespace_root is not None:
+            search_roots.append(namespace_root)
         if resource_root:
             search_roots.append(Path(str(resource_root)).resolve())
         if not search_roots:
@@ -2322,7 +2260,7 @@ class PocketCodeEngine:
         }
         active_profile.flow = qualified_name
 
-        self._plugins.agents.unregister_plugin(namespace)
+        self._plugins.agents.unregister_namespace(namespace)
         self._plugins.agents.register(namespace, flow_name, definition)
         try:
             result = self._run_stackvm_flow_definition(
@@ -2335,7 +2273,7 @@ class PocketCodeEngine:
                 entry_override=definition.vm_entry,
             )
         finally:
-            self._plugins.agents.unregister_plugin(namespace)
+            self._plugins.agents.unregister_namespace(namespace)
 
         result["target_kind"] = "script"
         result["name"] = self._stackvm_script_display_name(script_path)
@@ -2398,31 +2336,6 @@ class PocketCodeEngine:
             selection.pop("global_llm_profile", None)
         self._cleanup_invalid_textual_selection_presets(removed_llm=name)
         self._reload_llm_runtime()
-        return self._write_workspace_config()
-
-    def get_mode_text(self, name: str) -> str:
-        return self._mode_manager.get_mode_text(name)
-
-    def clone_mode(self, src_name: str, new_name: str) -> Path:
-        target_path = self._mode_manager.clone(src_name, new_name)
-        self._mode_manager.load()
-        return target_path
-
-    def update_mode(self, name: str, *, markdown_text: str) -> Path:
-        target_path = self._mode_manager.save_text(name, markdown_text)
-        self._mode_manager.load()
-        if self.active_mode is not None and self.active_mode.name == name:
-            self.set_mode(name)
-        return target_path
-
-    def delete_mode(self, name: str) -> Path:
-        target_path = self._mode_manager.delete(name)
-        if self.active_mode is not None and self.active_mode.name == name:
-            self.set_mode(None)
-        selection = self._textual_last_used_config(create=True)
-        if selection.get("active_mode") == name:
-            selection.pop("active_mode", None)
-        self._cleanup_invalid_textual_selection_presets(removed_mode=name)
         return self._write_workspace_config()
 
     def update_llm_profile(self, name: str, *, profile_config: Dict[str, Any]) -> Any:
@@ -2494,7 +2407,7 @@ class PocketCodeEngine:
         )
         self._agent_profile_manager.save(updated)
         self._agent_profile_manager.reload(dict(self._plugins.agents))
-        refreshed = self._agent_profile_manager.get(name)
+        refreshed = self._resolved_agent_profile(name)
         if refreshed is not None and self.active_agent_profile and self.active_agent_profile.name == name:
             self.active_agent_profile = self._apply_session_profile_overrides(refreshed)
         return refreshed
@@ -2718,10 +2631,13 @@ class PocketCodeEngine:
             default_name = explicit.name
         else:
             default_name = normalized_agent_name  # synthesised profile is named after the agent
-        profile = self._base_agent_profile(default_name)
+        profile = self._resolved_agent_profile(default_name)
         if profile is None:
             # Fall back to any profile whose agent field matches.
-            for p in self._agent_profile_manager.list():
+            for raw_profile in self._agent_profile_manager.list():
+                p = self._resolved_agent_profile(raw_profile.name)
+                if p is None:
+                    continue
                 if self._normalize_agent_name(p.agent) == normalized_agent_name:
                     profile = p
                     break
@@ -2868,7 +2784,6 @@ class PocketCodeEngine:
             if agents:
                 initial_agent = agents[0]
 
-        active_mode = getattr(self, "active_mode", None)
         active_skills = self.get_active_skills() if hasattr(self, "get_active_skills") else []
         active_skill_existing_tool_refs = (
             self._active_skill_existing_tool_refs()
@@ -2900,7 +2815,6 @@ class PocketCodeEngine:
             "session_tool_confirmation": self._copy_session_confirmation_overrides(),
             # T013: inject active agent profile so AgentRuntime / ToolRuntime can read it.
             "active_agent_profile": self.active_agent_profile,
-            "active_mode": active_mode.name if active_mode is not None else None,
             "active_skills": active_skills,
             "active_skill_existing_tool_refs": active_skill_existing_tool_refs,
             "active_skill_tool_names": active_skill_tool_names,
@@ -2933,14 +2847,12 @@ class PocketCodeEngine:
         return str(shared_store.get("final_output") or shared_store.get("final_answer") or "No output generated.")
 
     def _build_run_summary(self, shared_store: Dict[str, Any], cli_context: Dict[str, Any]) -> Dict[str, Any]:
-        active_mode = getattr(self, "active_mode", None)
         vm_validation_warnings = shared_store.get("last_vm_validation_warnings", {})
         if not isinstance(vm_validation_warnings, list):
             vm_validation_warnings = []
         return {
             "agent_path": self._build_agent_path(shared_store),
             "current_agent": shared_store.get("active_agent") or self.current_agent,
-            "active_mode": shared_store.get("active_mode") or (active_mode.name if active_mode else None),
             "active_skills": [skill.name for skill in shared_store.get("active_skills", []) or []],
             "current_llm_profile": shared_store.get("last_llm_profile"),
             "current_llm_model": (
@@ -2964,10 +2876,8 @@ class PocketCodeEngine:
         shared_store: Dict[str, Any],
         cli_context: Dict[str, Any],
     ) -> Dict[str, Any]:
-        active_mode = getattr(self, "active_mode", None)
         return {
             "active_agent": shared_store.get("active_agent") or self.current_agent,
-            "active_mode": shared_store.get("active_mode") or (active_mode.name if active_mode else None),
             "active_node_id": shared_store.get("active_node_id"),
             "active_node_kind": shared_store.get("active_node_kind"),
             "pending_tool": self._debug_snapshot_value(shared_store.get("pending_tool")),
@@ -3008,7 +2918,6 @@ class PocketCodeEngine:
     def status(self) -> Dict[str, Any]:
         selected_agent = self.active_agent_profile.name if self.active_agent_profile else None
         selected_llm_profile = self._selected_llm_profile()
-        active_mode = getattr(self, "active_mode", None)
         runtime_flow = (
             self._runtime_config.get("agent_runtime_flow")
             or self._runtime_config.get("agent_runtime_workflow")
@@ -3019,7 +2928,6 @@ class PocketCodeEngine:
             "selected_flow": self.current_agent,
             "selected_agent": selected_agent,
             "selected_llm_profile": selected_llm_profile,
-            "mode": active_mode.name if active_mode else None,
             "skills": list(self.enabled_skills),
             "runtime_flow": runtime_flow,
             # T013: expose active agent profile name.
@@ -3043,7 +2951,6 @@ class PocketCodeEngine:
             },
             "available_flows": self.list_flows(),
             "available_agents": self.list_available_agents(),
-            "available_modes": self.list_modes(),
             "available_skills": self.list_skills(),
             "available_llm_profiles": self.list_llm_profiles(),
             "last_run_summary": dict(self.last_run_summary),
@@ -3111,16 +3018,13 @@ class PocketCodeEngine:
         session_manager = getattr(self, "_session_manager", None)
         if session_manager is None:
             raise RuntimeError("Session persistence is not available.")
-        active_mode_name = self.active_mode.name if self.active_mode is not None else None
         active_profile_name = self.active_agent_profile.name if self.active_agent_profile is not None else None
         current_agent_name = self.current_agent
         self.session_profile_overrides = {}
         self.session_global_skills_override = None
         self.clear_session_confirmation_overrides()
         self.clear_session_debugger_breakpoints(update_session=False)
-        if active_mode_name:
-            self.set_mode(active_mode_name)
-        elif active_profile_name:
+        if active_profile_name:
             self.set_active_agent_profile(active_profile_name)
         elif current_agent_name:
             self.set_agent(current_agent_name)
@@ -3306,7 +3210,6 @@ class PocketCodeEngine:
         return self.get_agent_profile(profile_name)
 
     def _restore_saved_session(self, record: Any) -> None:
-        active_mode_name = str(getattr(record, "active_mode", "") or "").strip()
         active_profile_name = str(getattr(record, "active_profile", "") or "").strip()
         active_agent_name = str(getattr(record, "active_agent", "") or "").strip()
         llm_profile_name = str(getattr(record, "global_llm_profile", "") or "").strip()
@@ -3320,23 +3223,16 @@ class PocketCodeEngine:
             else None
         )
 
-        self.active_mode = None
         self.active_agent_profile = None
         self.current_agent = None
 
-        if active_mode_name:
-            try:
-                self.set_mode(active_mode_name)
-            except Exception:
-                logger.warning("Saved session mode '%s' is unavailable; falling back.", active_mode_name)
-
-        if self.active_mode is None and active_profile_name:
+        if active_profile_name:
             try:
                 self.set_active_agent_profile(active_profile_name)
             except Exception:
                 logger.warning("Saved session profile '%s' is unavailable; falling back.", active_profile_name)
 
-        if self.active_mode is None and self.active_agent_profile is None and active_agent_name:
+        if self.active_agent_profile is None and active_agent_name:
             try:
                 self.set_agent(active_agent_name)
             except Exception:
@@ -3395,80 +3291,6 @@ class PocketCodeEngine:
                 if qualified and qualified not in resolved:
                     resolved.append(qualified)
         return resolved
-
-    def _resolve_mode_profile(self, mode: ModeDefinition) -> AgentProfile:
-        base_profile: AgentProfile | None = None
-        if mode.agent:
-            base_profile = self._agent_profile_manager.get(mode.agent)
-            if base_profile is None:
-                raise ValueError(f"Mode '{mode.name}' references unknown agent profile '{mode.agent}'.")
-        elif mode.flow:
-            base_profile = self._agent_profile_manager.get(mode.flow) or self._get_default_profile_for(mode.flow)
-        elif self.active_agent_profile is not None:
-            base_profile = self.active_agent_profile
-        elif self.current_agent:
-            base_profile = self._get_default_profile_for(self.current_agent)
-
-        target_flow = mode.flow or (base_profile.agent if base_profile is not None else None) or self.current_agent
-        if not target_flow:
-            raise ValueError(f"Mode '{mode.name}' could not resolve a target flow.")
-        if target_flow not in self._plugins.agents:
-            raise ValueError(f"Mode '{mode.name}' targets unknown flow '{target_flow}'.")
-
-        if mode.llm_profile:
-            self._llm_router.resolve_profile_config(mode.llm_profile)
-
-        context_agent = target_flow
-        if mode.tools_specified:
-            if mode.tools is None:
-                tools = None
-            else:
-                tools = [
-                    qualified
-                    for qualified in (
-                        self._qualify_tool_reference(tool_ref, context_agent=context_agent)
-                        for tool_ref in mode.tools
-                    )
-                    if qualified
-                ]
-        else:
-            tools = list(base_profile.tools) if base_profile is not None and base_profile.tools is not None else None
-
-        base_confirmation = dict(base_profile.tool_confirmation or {}) if base_profile is not None else {}
-        mode_confirmation = dict(mode.tool_confirmation or {})
-        merged_confirmation: Dict[str, Any] = {}
-        merged_default = mode_confirmation.get("default", base_confirmation.get("default"))
-        if merged_default:
-            merged_confirmation["default"] = self._normalize_confirmation_policy(str(merged_default))
-        merged_overrides = dict(base_confirmation.get("overrides", {}))
-        merged_overrides.update(mode_confirmation.get("overrides", {}))
-        normalized_overrides = {
-            str(tool_name): normalized
-            for tool_name, policy in merged_overrides.items()
-            if (normalized := self._normalize_confirmation_policy(str(policy))) is not None
-        }
-        if normalized_overrides:
-            merged_confirmation["overrides"] = normalized_overrides
-
-        inherited_extra_prompts = list(base_profile.extra_prompts) if base_profile is not None else []
-        inline_parts = []
-        if base_profile is not None and base_profile.inline_prompt:
-            inline_parts.append(base_profile.inline_prompt)
-        if mode.inline_prompt:
-            inline_parts.append(mode.inline_prompt)
-
-        return AgentProfile(
-            name=mode.name,
-            flow=target_flow,
-            description=mode.description or (base_profile.description if base_profile is not None else ""),
-            llm_profile=mode.llm_profile or (base_profile.llm_profile if base_profile is not None else None),
-            inline_prompt="\n\n".join(part for part in inline_parts if part),
-            extra_prompts=inherited_extra_prompts + list(mode.extra_prompts),
-            tools=tools,
-            tool_confirmation=merged_confirmation,
-            source="mode",
-            source_path=mode.source_path,
-        )
 
     def _qualify_tool_reference(
         self,
@@ -3663,14 +3485,9 @@ class PocketCodeEngine:
             skill.name if hasattr(skill, "name") else str(skill)
             for skill in active_skills or []
         ]
-        active_mode = source.get("active_mode")
-        current_active_mode = getattr(self, "active_mode", None)
-        if not active_mode and current_active_mode is not None:
-            active_mode = current_active_mode.name
         return {
             "active_agent": self._normalize_agent_key_for_persistence(source.get("active_agent") or self.current_agent),
             "active_profile": getattr(active_profile, "name", None),
-            "active_mode": active_mode,
             "enabled_skills": skill_names,
             "global_llm_profile": source.get("cli_llm_override") or self.global_llm_override,
             "session_global_skills_override": list(getattr(self, "session_global_skills_override", None) or []),
@@ -3870,7 +3687,7 @@ class PocketCodeEngine:
     def _refresh_runtime_components(self) -> None:
         self._tool_runtime = self._build_tool_runtime()
         self._agent_runtime = AgentRuntime(
-            plugin_manager=self._plugins,
+            catalog=self._plugins,
             llm_router=self._llm_router,
             tool_runtime=self._tool_runtime,
             runtime_config=self._runtime_config,
@@ -3878,7 +3695,6 @@ class PocketCodeEngine:
 
     def _restore_textual_selection_state(self) -> None:
         snapshot = self._current_last_used_selection_snapshot()
-        selected_mode = str(snapshot.get("active_mode") or "").strip()
         selected_profile = str(snapshot.get("active_profile") or "").strip()
         selected_llm = str(snapshot.get("global_llm_profile") or "").strip()
         session_default = snapshot.get("session_confirmation_default")
@@ -3889,9 +3705,7 @@ class PocketCodeEngine:
         if session_default is not None:
             self.set_session_confirmation_default(session_default)
 
-        if selected_mode and self._mode_manager.get(selected_mode) is not None:
-            self.set_mode(selected_mode)
-        elif selected_profile and self._base_agent_profile(selected_profile) is not None:
+        if selected_profile and self._base_agent_profile(selected_profile) is not None:
             self.set_active_agent_profile(selected_profile)
 
         if selected_llm:
@@ -3949,9 +3763,7 @@ class PocketCodeEngine:
 
     def _capture_textual_selection_snapshot(self) -> Dict[str, Any]:
         snapshot: Dict[str, Any] = {}
-        if self.active_mode is not None:
-            snapshot["active_mode"] = self.active_mode.name
-        elif self.active_agent_profile is not None:
+        if self.active_agent_profile is not None:
             snapshot["active_profile"] = self.active_agent_profile.name
         if self.global_llm_override:
             snapshot["global_llm_profile"] = self.global_llm_override
@@ -3974,9 +3786,6 @@ class PocketCodeEngine:
 
     def _normalize_textual_selection_snapshot(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         snapshot: Dict[str, Any] = {}
-        active_mode = str(raw.get("active_mode") or "").strip()
-        if active_mode:
-            snapshot["active_mode"] = active_mode
         active_profile = str(raw.get("active_profile") or "").strip()
         if active_profile:
             snapshot["active_profile"] = active_profile
@@ -4023,7 +3832,6 @@ class PocketCodeEngine:
         normalized = self._normalize_textual_selection_snapshot(snapshot)
         last_used = self._textual_last_used_config(create=True)
         for key in (
-            "active_mode",
             "active_profile",
             "global_llm_profile",
             "skills",
@@ -4045,7 +3853,6 @@ class PocketCodeEngine:
         *,
         removed_profile: str | None = None,
         removed_llm: str | None = None,
-        removed_mode: str | None = None,
     ) -> None:
         presets = self._textual_selection_presets_config(create=False)
         if not presets:
@@ -4065,8 +3872,6 @@ class PocketCodeEngine:
                         snapshot.pop("agent_profiles", None)
             if removed_llm and snapshot.get("global_llm_profile") == removed_llm:
                 snapshot.pop("global_llm_profile", None)
-            if removed_mode and snapshot.get("active_mode") == removed_mode:
-                snapshot.pop("active_mode", None)
             presets[preset_name] = snapshot
 
     def _textual_profile_state(self, profile_name: str, *, create: bool) -> Dict[str, Any]:
@@ -4203,6 +4008,14 @@ class PocketCodeEngine:
             return active_profile
         return None
 
+    def _resolved_agent_profile(self, name: str) -> Any:
+        manager = getattr(self, "_agent_profile_manager", None)
+        if manager is not None and hasattr(manager, "resolve"):
+            profile = manager.resolve(name)
+            if profile is not None:
+                return profile
+        return self._base_agent_profile(name)
+
     def _base_tool_selection_for_profile(self, profile_name: str) -> Optional[List[str]]:
         profile = self._base_agent_profile(profile_name)
         if profile is None:
@@ -4259,10 +4072,10 @@ class PocketCodeEngine:
     def _refresh_active_profile(self, profile_name: str) -> None:
         if self.active_agent_profile is None or self.active_agent_profile.name != profile_name:
             return
-        raw_profile = self._base_agent_profile(profile_name)
-        if raw_profile is None:
+        resolved_profile = self._resolved_agent_profile(profile_name)
+        if resolved_profile is None:
             return
-        self.active_agent_profile = self._apply_session_profile_overrides(raw_profile)
+        self.active_agent_profile = self._apply_session_profile_overrides(resolved_profile)
         self.enabled_skills = self._configured_enabled_skills(profile_name)
         self._maybe_refresh_runtime_components()
 

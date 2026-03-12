@@ -11,7 +11,7 @@ Primary sources:
 
 Typical plugin layout:
 ```text
-.pocketcode/plugins/my_plugin/
+.pocketcode/my_plugin/
 ├── plugin.yaml
 ├── flows/
 ├── prompts/

@@ -1,8 +1,0 @@
-schema_version: 1
-name: stackvm_structured_return_finalize_example
-description: Normalize tool data, let a VM delegate return a structured YAML decision, and finalize in the caller
-flows:
-  normalize:
-    markdown: flows/normalize.md
-  confirm_delegate:
-    markdown: flows/confirm_delegate.md

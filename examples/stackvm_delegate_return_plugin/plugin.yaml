@@ -1,8 +1,0 @@
-schema_version: 1
-name: stackvm_delegate_return_example
-description: Normalize tool data, delegate with return_to_caller, and pass the delegate answer through with StackVM
-flows:
-  normalize:
-    markdown: flows/normalize.md
-  confirm_delegate:
-    markdown: flows/confirm_delegate.md

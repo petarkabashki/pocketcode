@@ -12,7 +12,7 @@ Primary sources:
 Composite agents can come from:
 - flow-level `default_agent`
 - plugin-local `agents/*.yaml`
-- workspace `.pocketcode/agents/*.yaml`
+- workspace `.pocketcode/*.agent.yaml`
 - synthesized defaults
 
 Fields to preserve:

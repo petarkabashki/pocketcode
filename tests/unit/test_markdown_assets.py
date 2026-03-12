@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from pocketcode.core.markdown_assets import (
+    compile_markdown_agent_definition,
     compile_markdown_flow_definition,
     compile_markdown_tool_definition,
     load_markdown_asset_document,
+    serialize_markdown_agent_definition,
 )
 
 
@@ -44,7 +46,7 @@ graph TD
     assert str(root / "shared.md") in document.sources
 
 
-def test_compile_markdown_flow_definition_collects_graph_metadata(tmp_path: Path):
+def test_compile_markdown_flow_definition_ignores_graph_blocks_as_execution_metadata(tmp_path: Path):
     flow_file = tmp_path / "review.md"
     flow_file.write_text(
         """---
@@ -67,7 +69,7 @@ graph TD
     assert compiled["module"] == "flows/review.py"
     assert compiled["entry_fn"] == "create_flow"
     assert compiled["prompt"] == "Review prompt."
-    assert compiled["metadata"]["markdown_graphs"][0]["language"] == "mermaid"
+    assert "metadata" not in compiled or "markdown_graphs" not in compiled.get("metadata", {})
 
 
 def test_compile_markdown_tool_definition_reads_schema_block(tmp_path: Path):
@@ -120,3 +122,45 @@ Prompt text.
 
     assert compiled["execution_mode"] == "vm"
     assert compiled["vm_source"] == '"hello from vm" answer'
+
+
+def test_compile_markdown_agent_definition_maps_extends_to_base_agent(tmp_path: Path):
+    agent_file = tmp_path / "review.agent.md"
+    agent_file.write_text(
+        """---
+name: review.safe
+extends: core.review
+---
+Use a stricter review bar.
+""",
+        encoding="utf-8",
+    )
+
+    document = load_markdown_asset_document(agent_file)
+    compiled = compile_markdown_agent_definition(document, default_name="review.safe")
+
+    assert compiled["base_agent"] == "core.review"
+    assert compiled["inline_prompt"] == "Use a stricter review bar."
+
+
+def test_serialize_markdown_agent_definition_writes_extends(tmp_path: Path):
+    agent = type(
+        "Agent",
+        (),
+        {
+            "name": "review.safe",
+            "flow": "core.review",
+            "base_agent": "core.review",
+            "description": "",
+            "llm_profile": None,
+            "skills": None,
+            "tools": None,
+            "extra_prompts": [],
+            "tool_confirmation": {},
+            "inline_prompt": "Use a stricter review bar.",
+        },
+    )()
+
+    serialized = serialize_markdown_agent_definition(agent)
+
+    assert "extends: core.review" in serialized

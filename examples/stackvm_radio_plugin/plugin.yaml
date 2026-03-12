@@ -1,6 +1,0 @@
-schema_version: 1
-name: stackvm_radio_example
-description: Normalize tool data, present a radio interaction, and continue within StackVM
-flows:
-  normalize:
-    markdown: flows/normalize.md

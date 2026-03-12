@@ -4,7 +4,7 @@ Primary sources:
 - `readme.md`
 - `docs/modes_and_skills.md`
 - `pocketcode/core/markdown_profiles.py`
-- `.pocketcode/plugins/workspace_builder/prompts/authoring_reference.md`
+- `.pocketcode/workspace_builder.authoring_reference.prompt.md`
 
 ## Scope rules
 

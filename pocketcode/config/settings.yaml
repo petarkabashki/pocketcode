@@ -49,13 +49,15 @@ runtime:
     nodes: {}
     handoffs: {}
   llm_pricing: {}
+  storage:
+    session_state_dir: .pocketstate
+    entry_history_dir: .pockethist
 
+  # Canonical discovery surface.
   # Relative paths are resolved from the current workspace directory.
-  # Each path can be either:
-  # 1) a folder containing plugin subfolders, or
-  # 2) a direct plugin folder with plugin.yaml
-  plugin_paths:
-    - .pocketcode/plugins
+  # Each entry is either one namespace root or one flat namespace pack root.
+  workspace_paths: []
+    - .github
 
   require_tool_confirmation: true
   auto_approved_tools: []

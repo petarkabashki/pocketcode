@@ -23,6 +23,7 @@ from pocketcode.core.reference_syntax import (
     validate_registry_reference,
 )
 from pocketcode.core.resource_roots import ResourceRoot, discover_resource_roots, primary_resource_root
+from pocketcode.core.tool_conventions import iter_tool_module_files
 
 logger = logging.getLogger(__name__)
 
@@ -86,22 +87,6 @@ def normalize_tool_selection(
 
 
 @dataclass(frozen=True)
-class ModeDefinition:
-    name: str
-    description: str = ""
-    flow: Optional[str] = None
-    agent: Optional[str] = None
-    llm_profile: Optional[str] = None
-    inline_prompt: str = ""
-    extra_prompts: List[str] = field(default_factory=list)
-    tools: Optional[List[str]] = None
-    tools_specified: bool = False
-    tool_confirmation: Dict[str, Any] = field(default_factory=dict)
-    source: str = "workspace"
-    source_path: Optional[Path] = None
-
-
-@dataclass(frozen=True)
 class SkillDefinition:
     name: str
     description: str = ""
@@ -114,292 +99,6 @@ class SkillDefinition:
     assets: List[str] = field(default_factory=list)
     source: str = "workspace"
     source_path: Optional[Path] = None
-
-
-class ModeManager:
-    def __init__(
-        self,
-        workspace_root: Path,
-        *,
-        flow_registry: Any | None = None,
-        tool_registry: Any | None = None,
-        prompt_registry: Any | None = None,
-        agent_profile_getter: Callable[[str], Any | None] | None = None,
-    ) -> None:
-        self._workspace_root = Path(workspace_root).resolve()
-        self._flow_registry = flow_registry
-        self._tool_registry = tool_registry
-        self._prompt_registry = prompt_registry
-        self._agent_profile_getter = agent_profile_getter
-        self._resource_roots: list[ResourceRoot] = discover_resource_roots(self._workspace_root)
-        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
-        self._modes_dir = self._primary_resource_root.path / "modes"
-        self._modes: Dict[str, ModeDefinition] = {}
-        self._resource_root_filters = self._build_resource_root_filters()
-
-    def set_registries(
-        self,
-        *,
-        flow_registry: Any | None = None,
-        tool_registry: Any | None = None,
-        prompt_registry: Any | None = None,
-        agent_profile_getter: Callable[[str], Any | None] | None = None,
-    ) -> None:
-        self._flow_registry = flow_registry
-        self._tool_registry = tool_registry
-        self._prompt_registry = prompt_registry
-        if agent_profile_getter is not None:
-            self._agent_profile_getter = agent_profile_getter
-
-    def load(self) -> None:
-        self._modes = {}
-        self._resource_roots = discover_resource_roots(self._workspace_root)
-        self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
-        self._modes_dir = self._primary_resource_root.path / "modes"
-        self._resource_root_filters = self._build_resource_root_filters()
-
-        for resource_root in self._resource_roots:
-            modes_dir = resource_root.path / "modes"
-            if not modes_dir.is_dir():
-                continue
-            resource_filter = self._resource_root_filter(resource_root)
-            for mode_path in sorted(modes_dir.rglob("*.md")):
-                if resource_filter.ignores(mode_path, is_dir=False):
-                    continue
-                mode = self._load_mode_file(mode_path)
-                if mode is None:
-                    continue
-                existing = self._modes.get(mode.name)
-                if existing is not None:
-                    logger.warning(
-                        "Mode name collision for '%s': '%s' overrides '%s'.",
-                        mode.name,
-                        mode_path,
-                        existing.source_path,
-                    )
-                self._modes[mode.name] = mode
-
-    def get(self, name: str) -> Optional[ModeDefinition]:
-        return self._modes.get(name)
-
-    def list(self) -> list[ModeDefinition]:
-        return sorted(self._modes.values(), key=lambda mode: mode.name)
-
-    def get_mode_text(self, name: str) -> str:
-        mode = self.get(name)
-        if mode is None:
-            raise ValueError(f"Unknown mode '{name}'.")
-        source_path = mode.source_path
-        if source_path is not None and source_path.exists():
-            return source_path.read_text(encoding="utf-8")
-        return self._dump_mode_text(mode)
-
-    def save_text(self, name: str, markdown_text: str) -> Path:
-        mode = self._mode_from_text(markdown_text, source_path=self._modes_dir / f"{name}.md")
-        if mode.name != name:
-            raise ValueError(
-                f"Mode front matter name '{mode.name}' does not match target mode '{name}'. "
-                "Use clone to create a differently named mode."
-            )
-        self._modes_dir.mkdir(parents=True, exist_ok=True)
-        target_path = self._modes_dir / f"{name}.md"
-        target_path.write_text(markdown_text.strip() + "\n", encoding="utf-8")
-        self.load()
-        return target_path
-
-    def clone(self, src_name: str, new_name: str) -> Path:
-        source_mode = self.get(src_name)
-        if source_mode is None:
-            raise ValueError(f"Unknown mode '{src_name}'.")
-        cleaned_name = str(new_name).strip()
-        if not cleaned_name:
-            raise ValueError("Mode name cannot be empty.")
-        target_path = self._modes_dir / f"{cleaned_name}.md"
-        if target_path.exists():
-            raise ValueError(
-                f"Cannot clone: target file '{target_path}' already exists. "
-                "Choose a different name or remove the existing file first."
-            )
-        cloned_mode = ModeDefinition(
-            name=cleaned_name,
-            description=source_mode.description,
-            flow=source_mode.flow,
-            agent=source_mode.agent,
-            llm_profile=source_mode.llm_profile,
-            inline_prompt=source_mode.inline_prompt,
-            extra_prompts=list(source_mode.extra_prompts),
-            tools=list(source_mode.tools) if source_mode.tools is not None else None,
-            tools_specified=source_mode.tools_specified,
-            tool_confirmation=dict(source_mode.tool_confirmation or {}),
-            source="workspace",
-            source_path=target_path.resolve(),
-        )
-        self._modes_dir.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(self._dump_mode_text(cloned_mode), encoding="utf-8")
-        self.load()
-        return target_path
-
-    def delete(self, name: str) -> Path:
-        mode = self.get(name)
-        if mode is None:
-            raise ValueError(f"Unknown mode '{name}'.")
-        if mode.source_path is None:
-            raise ValueError(f"Mode '{name}' has no source path.")
-        target_path = Path(mode.source_path)
-        if not target_path.exists():
-            raise ValueError(f"Mode file does not exist: {target_path}")
-        target_path.unlink()
-        self.load()
-        return target_path
-
-    def _load_mode_file(self, mode_path: Path) -> Optional[ModeDefinition]:
-        try:
-            return self._mode_from_text(mode_path.read_text(encoding="utf-8"), source_path=mode_path)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Skipping mode file '%s': %s", mode_path, exc)
-            return None
-
-    def _mode_from_text(self, markdown_text: str, *, source_path: Path) -> ModeDefinition:
-        front_matter, body = parse_markdown_front_matter(markdown_text)
-        raw_name = front_matter.get("name") or source_path.stem
-        if not isinstance(raw_name, str) or not raw_name.strip():
-            raise ValueError(f"Skipping mode file '{source_path}': missing name.")
-
-        tools_specified, tools = normalize_tool_selection(front_matter.get("tools"))
-        flow_value = str(front_matter["flow"]).strip() if front_matter.get("flow") else None
-        agent_value = str(front_matter["agent"]).strip() if front_matter.get("agent") else None
-        if agent_value:
-            self._validate_agent_profile_reference(
-                agent_value,
-                field_name=f"{source_path.name}: agent",
-            )
-        if flow_value:
-            validate_registry_reference(flow_value, allowed_kinds={"agent", "flow"}, field_name=f"{source_path.name}: flow")
-            flow_value = normalize_registry_reference(flow_value, allowed_kinds={"agent", "flow"})
-            self._qualify_registry_reference_or_raise(
-                self._flow_registry,
-                flow_value,
-                field_name=f"{source_path.name}: flow",
-            )
-        extra_prompts = coerce_str_list(front_matter.get("extra_prompts"))
-        for index, prompt_ref in enumerate(extra_prompts):
-            validate_prompt_source(prompt_ref, field_name=f"{source_path.name}: extra_prompts[{index}]")
-        extra_prompts = [normalize_prompt_source(prompt_ref) for prompt_ref in extra_prompts]
-        for index, prompt_ref in enumerate(extra_prompts):
-            self._validate_prompt_source_reference(
-                prompt_ref,
-                source_path=source_path,
-                field_name=f"{source_path.name}: extra_prompts[{index}]",
-            )
-        if tools:
-            for index, tool_ref in enumerate(tools):
-                validate_registry_reference(tool_ref, allowed_kinds={"tool"}, field_name=f"{source_path.name}: tools[{index}]")
-            tools = [normalize_registry_reference(tool_ref, allowed_kinds={"tool"}) for tool_ref in tools]
-            for index, tool_ref in enumerate(tools):
-                self._qualify_registry_reference_or_raise(
-                    self._tool_registry,
-                    tool_ref,
-                    field_name=f"{source_path.name}: tools[{index}]",
-                )
-        return ModeDefinition(
-            name=raw_name.strip(),
-            description=str(front_matter.get("description", "")),
-            flow=flow_value,
-            agent=agent_value,
-            llm_profile=(
-                str(front_matter["llm_profile"]).strip()
-                if front_matter.get("llm_profile")
-                else None
-            ),
-            inline_prompt=body,
-            extra_prompts=extra_prompts,
-            tools=tools,
-            tools_specified=tools_specified,
-            tool_confirmation=normalize_tool_confirmation(front_matter.get("tool_confirmation")),
-            source_path=source_path.resolve(),
-        )
-
-    def _dump_mode_text(self, mode: ModeDefinition) -> str:
-        front_matter: Dict[str, Any] = {
-            "name": mode.name,
-        }
-        if mode.description:
-            front_matter["description"] = mode.description
-        if mode.flow:
-            front_matter["flow"] = mode.flow
-        if mode.agent:
-            front_matter["agent"] = mode.agent
-        if mode.llm_profile:
-            front_matter["llm_profile"] = mode.llm_profile
-        if mode.tools_specified:
-            front_matter["tools"] = list(mode.tools) if mode.tools is not None else []
-        if mode.extra_prompts:
-            front_matter["extra_prompts"] = list(mode.extra_prompts)
-        if mode.tool_confirmation:
-            front_matter["tool_confirmation"] = dict(mode.tool_confirmation)
-
-        front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=False).strip()
-        body = mode.inline_prompt.strip()
-        if body:
-            return f"---\n{front_matter_text}\n---\n{body}\n"
-        return f"---\n{front_matter_text}\n---\n"
-
-    def _build_resource_root_filters(self) -> Dict[Path, DiscoveryFilter]:
-        return {
-            resource_root.path.resolve(): DiscoveryFilter.from_root(
-                resource_root.path,
-                ignore_dir=resource_root.path,
-            )
-            for resource_root in self._resource_roots
-        }
-
-    def _resource_root_filter(self, resource_root: ResourceRoot) -> DiscoveryFilter:
-        return self._resource_root_filters[resource_root.path.resolve()]
-
-    def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
-        return (self._primary_resource_root.path / "prompts",)
-
-    def _qualify_registry_reference_or_raise(self, registry: Any, reference: str, *, field_name: str) -> str:
-        if registry is None:
-            return reference
-        try:
-            return registry.qualify(reference, context_plugin="workspace")
-        except Exception as exc:  # noqa: BLE001
-            raise ValueError(f"{field_name} could not be resolved: {reference} ({exc})") from exc
-
-    def _validate_prompt_source_reference(self, prompt_ref: str, *, source_path: Path, field_name: str) -> None:
-        if is_prompt_reference(prompt_ref):
-            if self._prompt_registry is None:
-                return
-            try:
-                resolve_prompt_reference(
-                    prompt_ref,
-                    prompt_registry=self._prompt_registry,
-                    context_plugin="workspace",
-                )
-            except Exception as exc:  # noqa: BLE001
-                raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
-            return
-        try:
-            load_prompt_markdown(
-                base_dir=source_path.parent,
-                prompt_file=prompt_ref,
-                fallback_dirs=self._workspace_prompt_fallback_dirs(),
-                prompt_registry=self._prompt_registry,
-                context_plugin="workspace",
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
-
-    def _validate_agent_profile_reference(self, agent_name: str, *, field_name: str) -> None:
-        if self._agent_profile_getter is None:
-            return
-        try:
-            profile = self._agent_profile_getter(agent_name)
-        except Exception as exc:  # noqa: BLE001
-            raise ValueError(f"{field_name} could not be resolved: {agent_name} ({exc})") from exc
-        if profile is None:
-            raise ValueError(f"{field_name} could not be resolved: {agent_name}")
 
 
 class SkillManager:
@@ -438,11 +137,8 @@ class SkillManager:
         self._resource_root_filters = self._build_resource_root_filters()
 
         for resource_root in self._resource_roots:
-            skills_dir = resource_root.path / "skills"
-            if not skills_dir.is_dir():
-                continue
             resource_filter = self._resource_root_filter(resource_root)
-            for skill_dir in sorted(path for path in skills_dir.iterdir() if path.is_dir()):
+            for skill_dir in self._iter_skill_dirs(resource_root):
                 if resource_filter.ignores(skill_dir, is_dir=True):
                     continue
                 skill = self._load_skill_dir(skill_dir, resource_root)
@@ -542,9 +238,7 @@ class SkillManager:
 
         skill_slug = self._slugify(skill_name)
         resource_filter = self._resource_root_filter(resource_root)
-        for tool_file in sorted(tools_root.rglob("*.py")):
-            if tool_file.name == "__init__.py":
-                continue
+        for tool_file in iter_tool_module_files(tools_root):
             if resource_filter.ignores(tool_file, is_dir=False):
                 continue
             try:
@@ -561,6 +255,30 @@ class SkillManager:
                 qualified_name = f"skill.{skill_slug}.{tool_name}"
                 loaded[qualified_name] = tool_impl
         return loaded
+
+    def _iter_skill_dirs(self, resource_root: ResourceRoot) -> list[Path]:
+        candidates: list[Path] = []
+        seen: set[Path] = set()
+
+        skills_dir = resource_root.path / "skills"
+        if skills_dir.is_dir():
+            for path in sorted(candidate for candidate in skills_dir.iterdir() if candidate.is_dir()):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                candidates.append(path)
+
+        for path in sorted(candidate for candidate in resource_root.path.iterdir() if candidate.is_dir()):
+            if not path.name.startswith("skill."):
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            candidates.append(path)
+
+        return candidates
 
     def _build_resource_root_filters(self) -> Dict[Path, DiscoveryFilter]:
         return {

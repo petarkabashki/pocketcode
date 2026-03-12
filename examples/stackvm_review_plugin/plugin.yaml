@@ -1,6 +1,0 @@
-schema_version: 1
-name: stackvm_example
-description: Example multi-file StackVM review plugin
-flows:
-  review:
-    markdown: flows/review.md

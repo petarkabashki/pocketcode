@@ -129,8 +129,6 @@ class TextualAppAssetManagementMixin:
                 self._write_info(f"Cloned active LLM profile to {target_path}.")
             else:
                 self._write_info(f"Cloned active LLM profile to workspace profile '{new_name}'.")
-        elif asset_name == "mode":
-            self._write_info(f"Cloned active mode to {cloned}.")
         else:
             self._write_error(f"Unsupported clone target: {asset_name}")
             return
@@ -143,9 +141,6 @@ class TextualAppAssetManagementMixin:
             current_name = self._engine.active_agent_profile.name if self._engine.active_agent_profile else None
         elif asset_name == "llm":
             current_name = self._current_llm_profile_name()
-        elif asset_name == "mode":
-            active_mode = self._engine.get_mode() if hasattr(self._engine, "get_mode") else None
-            current_name = active_mode.name if active_mode is not None else None
         if not current_name:
             self._write_error(f"No active {asset_name} selected.")
             return
@@ -166,8 +161,6 @@ class TextualAppAssetManagementMixin:
             self._write_info(f"Deleted workspace agent '{deleted_name}' from {target_path}.")
         elif asset_name == "llm":
             self._write_info(f"Deleted workspace LLM profile '{deleted_name}' from {target_path}.")
-        elif asset_name == "mode":
-            self._write_info(f"Deleted mode '{deleted_name}' from {target_path}.")
         else:
             self._write_error(f"Unsupported delete target: {asset_name}")
             return
@@ -188,7 +181,6 @@ class TextualAppAssetManagementMixin:
                 self._engine, "get_textual_selection_preset"
             ) else {}
             description_parts = [
-                f"mode={snapshot.get('active_mode')}" if isinstance(snapshot, dict) and snapshot.get("active_mode") else "",
                 f"profile={snapshot.get('active_profile')}" if isinstance(snapshot, dict) and snapshot.get("active_profile") else "",
                 f"llm={snapshot.get('global_llm_profile')}" if isinstance(snapshot, dict) and snapshot.get("global_llm_profile") else "",
             ]

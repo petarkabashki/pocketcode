@@ -12,11 +12,11 @@ Read first:
 - `references/workspace-assets.md`
 
 Choose workspace scope when the asset is intentionally shared across plugins or sessions:
-- `.pocketcode/tools/`
+- `.pocketcode/*.tool.py or .pocketcode/*.tool.md`
 - `.pocketcode/prompts/`
 - `.pocketcode/skills/`
 - `.pocketcode/modes/`
-- `.pocketcode/agents/`
+- `.pocketcode/*.agent.*`
 
 Prefer plugin scope when the asset is specific to one plugin.
 

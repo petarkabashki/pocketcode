@@ -57,7 +57,6 @@ def parse_reference(
         if not target:
             raise ValueError(f"Typed reference '{kind}:' is missing a target.")
 
-    target = target.replace("::", ".")
     if "#" in target:
         container, name = target.split("#", 1)
         container = container.strip()
@@ -100,7 +99,7 @@ def normalize_registry_reference_compat(ref: str, *, allowed_kinds: Iterable[str
     try:
         return normalize_registry_reference(cleaned, allowed_kinds=allowed_kinds)
     except ValueError:
-        return cleaned.replace("::", ".")
+        return cleaned
 
 
 def normalize_prompt_reference(prompt_ref: str) -> str:

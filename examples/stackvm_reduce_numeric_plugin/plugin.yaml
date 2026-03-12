@@ -1,6 +1,0 @@
-schema_version: 1
-name: stackvm_reduce_numeric_example
-description: Numeric aggregation StackVM example
-flows:
-  summarize:
-    markdown: flows/summarize.md
