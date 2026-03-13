@@ -23,7 +23,7 @@ Execution approach:
 - Use the local workspace-builder skill pack under `.pocketcode/skills/` when the task needs deeper guidance:
   - `pocketcode-workspace-builder`
   - `pocketcode-graph-authoring`
-  - `pocketcode-plugin-authoring`
+  - `pocketcode-namespace-authoring`
   - `pocketcode-profiles-prompts`
   - `pocketcode-tools-runtime`
   - `pocketcode-workspace-assets`

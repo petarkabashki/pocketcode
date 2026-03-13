@@ -15,20 +15,20 @@ Use for:
 - transition wiring with `>>` and action-labelled edges
 - retry behavior, shared store access, async/batch patterns
 
-## Plugin manifests and flow registration
+## Namespace assets and flow registration
 
 Read:
-- `pocketcode/core/manifest_loader.py`
-- `pocketcode/core/plugin_manager.py`
-- `docs/plugin_architecture.md`
-- `specs/003-unified-plugin-namespace/quickstart.md`
-- `references/plugin-sources.md`
+- `pocketcode/core/resource_roots.py`
+- `pocketcode/core/workspace_catalog.py`
+- `docs/architecture.md`
+- `docs/configuration.md`
+- `references/namespace-sources.md`
 
 Use for:
-- `plugin.yaml`
-- `flows:` blocks
+- flat namespace-pack flow assets
+- grouped resource-root collections
 - prompt registration and prompt file resolution
-- plugin discovery, qualified names, and cross-plugin references
+- resource-root discovery, qualified names, and cross-namespace references
 
 ## Composite agents, prompts, modes, and skills
 
@@ -76,4 +76,3 @@ Use for:
 - `.pocketcode/skills/`
 - `.pocketcode/*.agent.*`
 - portability when the current workspace is not the repo root
-

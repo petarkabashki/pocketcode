@@ -24,7 +24,7 @@ Key implications from `pocketflow.py`:
 ## How PocketCoder uses PocketFlow
 
 `docs/pocketflow_agents.md` and the runtime show the practical pattern:
-- PocketCoder agents are PocketFlow `Flow` factories registered from `plugin.yaml`.
+- PocketCoder agents are PocketFlow `Flow` factories registered through resource-root and namespace asset loading.
 - A standard PocketCoder flow often uses one node whose `post()` returns `llm_delegate` when `_llm_router` is available.
 - Shared store keys commonly used by PocketCoder:
   - `initial_request`
@@ -40,7 +40,7 @@ When editing a PocketFlow-based agent:
 1. Choose the smallest node/flow type that fits.
 2. Keep `prep/exec/post` responsibilities separate.
 3. Return explicit transition strings from `post()`.
-4. Register the zero-arg factory from `plugin.yaml`.
+4. Register the zero-arg factory from the owning Markdown or Python-backed namespace asset.
 5. Verify the flow is compatible with PocketCoder shared-store conventions.
 
 ## Patterns to preserve
@@ -54,4 +54,3 @@ Avoid:
 - hiding critical shared-store mutations in `exec()`
 - relying on repo-specific global state instead of `shared`
 - adding complex graph branching when a single-node flow is sufficient
-

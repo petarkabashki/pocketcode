@@ -138,11 +138,11 @@ class TestUiTextHelpers:
 
     def test_profile_editor_hint_tracks_profile_source(self):
         workspace_profile = SimpleNamespace(name="coder.safe", source="workspace")
-        plugin_profile = SimpleNamespace(name="coder.default", source="plugin")
+        resource_root_profile = SimpleNamespace(name="coder.default", source="resource_root")
 
         assert _build_profile_editor_hint(None) == "Select an agent to edit agent settings."
         assert "Editing workspace agent 'coder.safe'" in _build_profile_editor_hint(workspace_profile)
-        assert "Clone it to a workspace agent to edit" in _build_profile_editor_hint(plugin_profile)
+        assert "Clone it to a workspace agent to edit" in _build_profile_editor_hint(resource_root_profile)
 
     def test_navigation_status_ignores_hover_but_pointer_hint_requires_it(self):
         class _Probe(PocketCodeTextualApp):
@@ -429,7 +429,7 @@ class TestTextualRuntimeSelectors:
 
         context_text = select_context_summary(status, cli_context)
         sessions_text = select_saved_sessions_summary(sessions)
-        prompts_text = select_prompt_summary(("plugin/prompts/base.md",), active_profile)
+        prompts_text = select_prompt_summary(("namespace/prompts/base.md",), active_profile)
 
         assert "session_id: session-1" in context_text
         assert "files: 2" in context_text
@@ -1380,7 +1380,7 @@ class _TextualEngineStub:
         target = name or self.global_llm_override or "fast"
         sources = {
             "fast": "workspace",
-            "smart": "plugin",
+            "smart": "resource_root",
         }
         return {
             "name": target,

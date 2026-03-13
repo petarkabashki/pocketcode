@@ -48,7 +48,7 @@ class AgentRuntime:
         tool_runtime: ToolRuntime,
         runtime_config: Dict[str, Any],
     ):
-        self._plugins = catalog
+        self._catalog = catalog
         self._llm_router = llm_router
         self._tool_runtime = tool_runtime
         self._runtime_config = runtime_config
@@ -69,7 +69,7 @@ class AgentRuntime:
                 shared_store["error_message"] = "No active agent could be resolved."
                 self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"])
                 break
-            if agent_name not in self._plugins.agents:
+            if agent_name not in self._catalog.agents:
                 shared_store["error_message"] = f"Agent '{agent_name}' is not registered."
                 self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"], agent=agent_name)
                 break
@@ -135,7 +135,7 @@ class AgentRuntime:
         # FR-011: populate registry snapshot for PocketFlow agents (T028)
         if "_registry" not in shared_store:
             try:
-                shared_store["_registry"] = self._plugins._holder.get()
+                shared_store["_registry"] = self._catalog._holder.get()
             except AttributeError:
                 # Defensive: test doubles (MagicMock, etc.) may not have _holder
                 shared_store["_registry"] = None
@@ -164,7 +164,7 @@ class AgentRuntime:
             raise RunCancelledError(self._get_cancel_reason(shared_store))
 
     def _run_agent_turn(self, agent_name: str, shared_store: Dict[str, Any]) -> str:
-        agent_definition = self._plugins.agents[agent_name]
+        agent_definition = self._catalog.agents[agent_name]
         active_profile = self._get_active_profile_for_agent(agent_name, shared_store)
 
         shared_store["active_agent"] = agent_name
@@ -274,16 +274,16 @@ class AgentRuntime:
         hook_refs = list(getattr(active_profile, "hooks", None) or [])
         if not hook_refs:
             return []
-        context_plugin = self._resolve_profile_plugin_name(active_profile) or self._context_plugin_for_agent(agent_name)
+        context_namespace = self._resolve_profile_namespace_name(active_profile) or self._context_namespace_for_agent(agent_name)
         resolved: list[HookDefinition] = []
         seen: set[str] = set()
         for hook_ref in hook_refs:
             try:
-                qualified_name = self._plugins.hooks.qualify(str(hook_ref), context_plugin=context_plugin)
+                qualified_name = self._catalog.hooks.qualify(str(hook_ref), context_namespace=context_namespace)
                 if qualified_name in seen:
                     continue
                 seen.add(qualified_name)
-                hook_definition = self._plugins.hooks.resolve(qualified_name)
+                hook_definition = self._catalog.hooks.resolve(qualified_name)
                 resolved.append(hook_definition)
             except Exception:
                 logger.warning("Skipping unresolved hook '%s' for agent '%s'.", hook_ref, agent_name)
@@ -329,7 +329,7 @@ class AgentRuntime:
         agent_definition: AgentDefinition,
         shared_store: Dict[str, Any],
     ) -> str | None:
-        tool_names = list(shared_store.get("active_allowed_tools") or self._plugins.resolve_tools_for_agent(agent_name))
+        tool_names = list(shared_store.get("active_allowed_tools") or self._catalog.resolve_tools_for_agent(agent_name))
         tool_definitions = self._tool_runtime.describe_tools(tool_names)
         llm_profile = self._resolve_llm_profile(agent_name, agent_definition, shared_store)
         system_prompt = self._build_agent_system_prompt(agent_name=agent_name)
@@ -467,12 +467,12 @@ class AgentRuntime:
             metadata = dict(agent_definition.metadata or {})
             search_roots: list[Path] = []
             markdown_path = metadata.get("markdown_path")
-            plugin_root = metadata.get("namespace_root")
+            namespace_root = metadata.get("namespace_root")
             resource_root = metadata.get("resource_root")
             if markdown_path:
                 search_roots.append(Path(str(markdown_path)).resolve().parent)
-            if plugin_root:
-                search_roots.append(Path(str(plugin_root)).resolve())
+            if namespace_root:
+                search_roots.append(Path(str(namespace_root)).resolve())
             if resource_root:
                 search_roots.append(Path(str(resource_root)).resolve())
 
@@ -597,7 +597,7 @@ class AgentRuntime:
 
         handler = self._resolve_python_handler(
             handler_reference=handler_ref,
-            plugin_root=Path(str(agent_definition.metadata.get("namespace_root", ""))).resolve()
+            namespace_root=Path(str(agent_definition.metadata.get("namespace_root", ""))).resolve()
             if agent_definition.metadata.get("namespace_root")
             else None,
         )
@@ -630,7 +630,7 @@ class AgentRuntime:
         agent_definition: AgentDefinition,
         shared_store: Dict[str, Any],
     ) -> str:
-        sub_agents = [a for a in agent_definition.composite_agents if a in self._plugins.agents]
+        sub_agents = [a for a in agent_definition.composite_agents if a in self._catalog.agents]
         if not sub_agents:
             shared_store["error_message"] = (
                 f"Composite agent '{agent_name}' has no valid composite_agents configured."
@@ -838,7 +838,7 @@ class AgentRuntime:
     def _run_tool_call(self, shared_store: Dict[str, Any]) -> None:
         self._raise_if_cancelled(shared_store)
         active_agent = str(shared_store.get("active_agent") or "").strip()
-        agent_definition = self._plugins.agents.get(active_agent) if active_agent else None
+        agent_definition = self._catalog.agents.get(active_agent) if active_agent else None
         active_profile = (
             self._get_active_profile_for_agent(active_agent, shared_store)
             if active_agent and agent_definition is not None
@@ -924,7 +924,7 @@ class AgentRuntime:
             return
 
         target_agent = str(target_agent)
-        if target_agent not in self._plugins.agents:
+        if target_agent not in self._catalog.agents:
             shared_store["error_message"] = f"Handoff target agent '{target_agent}' is not registered."
             self._emit_event(shared_store, "runtime_error", message=shared_store["error_message"], target_agent=target_agent)
             return
@@ -1037,8 +1037,8 @@ class AgentRuntime:
     ) -> Dict[str, Any]:
         policy: Dict[str, Any] = {}
 
-        if source_agent and source_agent in self._plugins.agents:
-            source_definition = self._plugins.agents[source_agent]
+        if source_agent and source_agent in self._catalog.agents:
+            source_definition = self._catalog.agents[source_agent]
             if isinstance(source_definition.default_handoff_policy, dict):
                 policy.update(source_definition.default_handoff_policy)
             target_policy = source_definition.handoff_policies.get(target_agent)
@@ -1212,7 +1212,7 @@ class AgentRuntime:
         return "error"
 
     def _build_agent_system_prompt(self, *, agent_name: str) -> str:
-        agent_prompt = self._plugins.agents[agent_name].system_prompt
+        agent_prompt = self._catalog.agents[agent_name].system_prompt
         if agent_prompt and agent_prompt.strip():
             return agent_prompt.strip()
         return f"You are agent '{agent_name}'. Use tools and route actions reliably."
@@ -1228,14 +1228,14 @@ class AgentRuntime:
     ) -> tuple[str | None, bool]:
         current_transition = transition
         halt = False
-        plugin_root_value = agent_definition.metadata.get("namespace_root")
-        plugin_root = Path(str(plugin_root_value)).resolve() if plugin_root_value else None
+        namespace_root_value = agent_definition.metadata.get("namespace_root")
+        namespace_root = Path(str(namespace_root_value)).resolve() if namespace_root_value else None
 
         for handler_reference in handler_references:
             self._raise_if_cancelled(shared_store)
             handler = self._resolve_python_handler(
                 handler_reference=handler_reference,
-                plugin_root=plugin_root,
+                namespace_root=namespace_root,
             )
             outcome = self._invoke_handler(
                 handler=handler,
@@ -1278,9 +1278,9 @@ class AgentRuntime:
         self,
         *,
         handler_reference: str,
-        plugin_root: Path | None,
+        namespace_root: Path | None,
     ) -> Callable[..., Any]:
-        cache_key = f"{plugin_root}:{handler_reference}"
+        cache_key = f"{namespace_root}:{handler_reference}"
         if cache_key in self._python_handler_cache:
             return self._python_handler_cache[cache_key]
 
@@ -1288,11 +1288,11 @@ class AgentRuntime:
             path_part, function_name = handler_reference.split(":", 1)
             candidate_file = Path(path_part)
             if not candidate_file.is_absolute():
-                if plugin_root is None:
+                if namespace_root is None:
                     raise FileNotFoundError(
                         f"Cannot resolve relative handler path without namespace_root: {handler_reference}"
                     )
-                candidate_file = (plugin_root / path_part).resolve()
+                candidate_file = (namespace_root / path_part).resolve()
 
             if not candidate_file.is_file():
                 raise FileNotFoundError(
@@ -1349,8 +1349,8 @@ class AgentRuntime:
             kwargs["phase"] = phase
         if "transition" in signature.parameters:
             kwargs["transition"] = transition
-        if "plugins" in signature.parameters:
-            kwargs["plugins"] = self._plugins
+        if "catalog" in signature.parameters:
+            kwargs["catalog"] = self._catalog
         if "llm_router" in signature.parameters:
             kwargs["llm_router"] = self._llm_router
         if "tool_runtime" in signature.parameters:
@@ -1408,17 +1408,17 @@ class AgentRuntime:
         """
         if profile is None or not profile.extra_prompts:
             return ""
-        workspace_root = self._plugins.workspace_root
-        plugin_root = self._resolve_profile_plugin_root(profile)
-        context_plugin = self._resolve_profile_plugin_name(profile)
+        workspace_root = self._catalog.workspace_root
+        namespace_root = self._resolve_profile_namespace_root(profile)
+        context_namespace = self._resolve_profile_namespace_name(profile)
         parts: List[str] = []
         for path_str in profile.extra_prompts:
             if is_prompt_reference(path_str):
                 try:
                     prompt_text, _ = resolve_prompt_reference(
                         path_str,
-                        prompt_registry=self._plugins.prompts,
-                        context_plugin=context_plugin,
+                        prompt_registry=self._catalog.prompts,
+                        context_namespace=context_namespace,
                     )
                     if prompt_text:
                         parts.append(prompt_text)
@@ -1435,12 +1435,12 @@ class AgentRuntime:
                 candidate = profile.source_path.parent / path_str
                 if candidate.is_file():
                     resolved = candidate
-            if resolved is None and plugin_root is not None:
-                candidate = plugin_root / path_str
+            if resolved is None and namespace_root is not None:
+                candidate = namespace_root / path_str
                 if candidate.is_file():
                     resolved = candidate
             if resolved is None:
-                for base_dir in self._plugins._workspace_prompt_fallback_dirs():
+                for base_dir in self._catalog._workspace_prompt_fallback_dirs():
                     candidate = base_dir / path_str
                     if candidate.is_file():
                         resolved = candidate
@@ -1488,10 +1488,10 @@ class AgentRuntime:
 
         return "\n\n".join(part for part in parts if part)
 
-    def _context_plugin_for_agent(self, agent_name: str | None) -> str | None:
+    def _context_namespace_for_agent(self, agent_name: str | None) -> str | None:
         if not agent_name:
             return None
-        agent_definition = self._plugins.agents.get(agent_name)
+        agent_definition = self._catalog.agents.get(agent_name)
         if agent_definition is None:
             return None
         return namespace_name_from_metadata(
@@ -1506,7 +1506,7 @@ class AgentRuntime:
         active_profile: Any,
         shared_store: Dict[str, Any],
     ) -> List[str]:
-        tool_names = list(self._plugins.resolve_tools_for_agent(agent_name))
+        tool_names = list(self._catalog.resolve_tools_for_agent(agent_name))
         if active_profile is not None and active_profile.tools is not None:
             tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
 
@@ -1523,24 +1523,24 @@ class AgentRuntime:
         if profile is None:
             return None
         profile_agent = getattr(profile, "agent", None)
-        normalized_agent_name = self._plugins.agents.qualify(agent_name)
-        normalized_profile_agent = self._plugins.agents.qualify(profile_agent) if profile_agent else None
+        normalized_agent_name = self._catalog.agents.qualify(agent_name)
+        normalized_profile_agent = self._catalog.agents.qualify(profile_agent) if profile_agent else None
         return profile if normalized_profile_agent == normalized_agent_name else None
 
-    def _resolve_profile_plugin_root(self, profile: Any) -> Path | None:
+    def _resolve_profile_namespace_root(self, profile: Any) -> Path | None:
         agent_name = getattr(profile, "agent", None)
         if not isinstance(agent_name, str):
             return None
-        agent_definition = self._plugins.agents.get(agent_name)
+        agent_definition = self._catalog.agents.get(agent_name)
         if agent_definition is None:
             return None
         return namespace_root_from_metadata(getattr(agent_definition, "metadata", {}) or {})
 
-    def _resolve_profile_plugin_name(self, profile: Any) -> str | None:
+    def _resolve_profile_namespace_name(self, profile: Any) -> str | None:
         agent_name = getattr(profile, "agent", None)
         if not isinstance(agent_name, str):
             return None
-        agent_definition = self._plugins.agents.get(agent_name)
+        agent_definition = self._catalog.agents.get(agent_name)
         if agent_definition is None:
             return None
         return namespace_name_from_metadata(

@@ -3,7 +3,7 @@ from tests.integration.stackvm_test_utils import (
     EXAMPLES_ROOT,
     make_example_engine,
     write_fixture,
-    write_temp_stackvm_plugin,
+    write_temp_stackvm_namespace,
 )
 
 
@@ -348,11 +348,11 @@ def test_real_engine_runs_checked_in_stackvm_threshold_router_example_high(tmp_p
 
 
 def test_real_engine_rejects_transition_words_inside_parallel_map(tmp_path):
-    plugin_root, flow_ref = write_temp_stackvm_plugin(
+    namespace_root, flow_ref = write_temp_stackvm_namespace(
         tmp_path,
-        plugin_dir_name="stackvm_parallel_map_invalid_plugin",
-        plugin_name="stackvm_parallel_map_invalid_example",
-        plugin_description="Invalid parallel-map runtime transition example",
+        namespace_dir_name="stackvm_parallel_map_invalid_namespace",
+        namespace_name="stackvm_parallel_map_invalid_example",
+        namespace_description="Invalid parallel-map runtime transition example",
         flow_name="bad",
         flow_description="Invalid parallel-map flow that tries to finalize inside a child quotation",
         flow_body_lines=[
@@ -369,7 +369,7 @@ def test_real_engine_rejects_transition_words_inside_parallel_map(tmp_path):
     engine = make_example_engine(
         tmp_path,
         flow_ref,
-        workspace_paths=[plugin_root.parent],
+        workspace_paths=[namespace_root.parent],
     )
 
     result = engine.process_request("run invalid map", {})
@@ -381,11 +381,11 @@ def test_real_engine_rejects_transition_words_inside_parallel_map(tmp_path):
 
 
 def test_real_engine_rejects_transition_words_inside_reduce(tmp_path):
-    plugin_root, flow_ref = write_temp_stackvm_plugin(
+    namespace_root, flow_ref = write_temp_stackvm_namespace(
         tmp_path,
-        plugin_dir_name="stackvm_reduce_invalid_plugin",
-        plugin_name="stackvm_reduce_invalid_example",
-        plugin_description="Invalid reduce runtime transition example",
+        namespace_dir_name="stackvm_reduce_invalid_namespace",
+        namespace_name="stackvm_reduce_invalid_example",
+        namespace_description="Invalid reduce runtime transition example",
         flow_name="bad",
         flow_description="Invalid reduce flow that tries to finalize inside a child quotation",
         flow_body_lines=[
@@ -403,7 +403,7 @@ def test_real_engine_rejects_transition_words_inside_reduce(tmp_path):
     engine = make_example_engine(
         tmp_path,
         flow_ref,
-        workspace_paths=[plugin_root.parent],
+        workspace_paths=[namespace_root.parent],
     )
 
     result = engine.process_request("run invalid reduce", {})

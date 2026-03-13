@@ -25,14 +25,14 @@ def resolve_prompt_reference(
     prompt_ref: str,
     *,
     prompt_registry: Any,
-    context_plugin: str | None = None,
+    context_namespace: str | None = None,
 ) -> Tuple[str, List[str]]:
     if prompt_registry is None:
         raise ValueError(f"Prompt registry is required to resolve prompt reference '{prompt_ref}'.")
 
     reference = parse_prompt_reference(prompt_ref)
-    qualified_ref = prompt_registry.qualify(reference.target, context_plugin=context_plugin)
-    prompt_text = prompt_registry.resolve(qualified_ref, context_plugin=context_plugin)
+    qualified_ref = prompt_registry.qualify(reference.target, context_namespace=context_namespace)
+    prompt_text = prompt_registry.resolve(qualified_ref, context_namespace=context_namespace)
     return str(prompt_text).strip(), [f"prompt:{qualified_ref}"]
 
 
@@ -81,7 +81,7 @@ def load_prompt_markdown(
     _stack: set[str] | None = None,
     fallback_dirs: Sequence[Path] = (),
     prompt_registry: Any | None = None,
-    context_plugin: str | None = None,
+    context_namespace: str | None = None,
 ) -> Tuple[str, List[str]]:
     stack = _stack if _stack is not None else set()
 
@@ -89,7 +89,7 @@ def load_prompt_markdown(
         resolved_text, resolved_sources = resolve_prompt_reference(
             prompt_file,
             prompt_registry=prompt_registry,
-            context_plugin=context_plugin,
+            context_namespace=context_namespace,
         )
         normalized_ref = normalize_prompt_reference(prompt_file)
         stack_key = f"prompt:{normalized_ref}"
@@ -123,7 +123,7 @@ def load_prompt_markdown(
         _stack=stack,
         fallback_dirs=fallback_dirs,
         prompt_registry=prompt_registry,
-        context_plugin=context_plugin,
+        context_namespace=context_namespace,
     )
     stack.remove(stack_key)
 
@@ -139,7 +139,7 @@ def expand_prompt_markdown_text(
     _stack: set[str] | None = None,
     fallback_dirs: Sequence[Path] = (),
     prompt_registry: Any | None = None,
-    context_plugin: str | None = None,
+    context_namespace: str | None = None,
 ) -> Tuple[str, List[str]]:
     stack = _stack if _stack is not None else set()
     resolved_source_path = source_path.resolve() if isinstance(source_path, Path) else None
@@ -153,7 +153,7 @@ def expand_prompt_markdown_text(
             _stack=stack,
             fallback_dirs=fallback_dirs,
             prompt_registry=prompt_registry,
-            context_plugin=context_plugin,
+            context_namespace=context_namespace,
         )
         sources.extend(included_sources)
         return included_text
@@ -172,7 +172,7 @@ def resolve_prompt_bundle(
     default_files: Iterable[str] | None = None,
     fallback_dirs: Sequence[Path] = (),
     prompt_registry: Any | None = None,
-    context_plugin: str | None = None,
+    context_namespace: str | None = None,
 ) -> Tuple[str, List[str]]:
     sections: List[str] = []
     sources: List[str] = []
@@ -203,7 +203,7 @@ def resolve_prompt_bundle(
             prompt_file=prompt_file,
             fallback_dirs=fallback_dirs,
             prompt_registry=prompt_registry,
-            context_plugin=context_plugin,
+            context_namespace=context_namespace,
         )
         if loaded_text:
             sections.append(loaded_text)

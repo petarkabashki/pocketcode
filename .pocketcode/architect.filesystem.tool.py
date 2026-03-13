@@ -1,4 +1,4 @@
-"""Compatibility re-export for architect plugin filesystem tools.
+"""Compatibility re-export for architect namespace filesystem tools.
 
 The canonical implementation lives in pocketcode.core_tools.filesystem.
 """

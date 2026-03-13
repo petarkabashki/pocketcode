@@ -78,6 +78,8 @@ Common runtime keys used by the current engine include:
 - `llm_overrides`: config-level flow and handoff LLM overrides
 - `textual`: Textual UI settings and persisted selection state
 
+At startup, PocketCoder discovers resource roots from the workspace, loads any extra configured namespace roots from `runtime.workspace_paths`, and compiles those sources into one in-memory `WorkspaceCatalog`. The catalog is the runtime snapshot queried by the engine; the resource roots remain the underlying filesystem authoring surface.
+
 `runtime.default_agent` is normalized against the loaded flow registry during engine startup and when saved from the Textual system-settings editor. Legacy values such as `core::react` are accepted, but when the backing registry can qualify them they are persisted in canonical dotted form such as `core.react`.
 
 ### Runtime storage paths
@@ -260,7 +262,7 @@ Resource-root namespace-pack example:
 ├── coder.coder.md
 ├── coder.system.prompt.md
 ├── coder.git.tool.py
-├── workspace_builder.plugin_builder.md
+├── workspace_builder.workspace_builder.md
 └── workspace_builder.system.prompt.md
 ```
 
@@ -304,7 +306,7 @@ Workspace LLM profiles are loaded from every discovered `<resource_root>/llm-pro
 They are loaded in addition to:
 
 - `llm.profiles` from `pocketcode.yml`
-- plugin-provided `llm_profiles`
+- resource-root and namespace-provided `llm_profiles`
 
 These files are the editable workspace-backed copies used by the Textual clone/edit flows.
 
@@ -346,7 +348,7 @@ Notes:
 - `skills` is optional. When omitted, the profile falls back to the global Textual skill selection order.
 - `hooks` is optional. When omitted, the profile inherits the parent hook list or synthesised default chain.
 - `tools` is optional. When omitted, the profile inherits the flow tool set.
-- `extra_prompts` are resolved relative to the profile file first, then against plugin and workspace fallback roots.
+- `extra_prompts` are resolved relative to the profile file first, then against namespace and workspace fallback roots.
 - workspace Markdown-backed profiles use the same front matter fields and store their inline guidance in the Markdown body.
 - `{{ include:... }}` and `{{ import:prompt:... }}` directives inside Markdown-backed agent bodies are expanded during load.
 - saving a workspace agent profile rewrites registry-backed `flow`, `hooks`, `tools`, and `tool_confirmation.overrides` entries to canonical dotted ids; `prompt:` entries remain typed and file-path prompt entries remain unchanged.

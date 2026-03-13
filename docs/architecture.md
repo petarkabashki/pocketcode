@@ -4,16 +4,16 @@ This document describes the current runtime architecture implemented in the repo
 
 ## System Model
 
-PocketCoder is a resource-root and namespace runtime with four distinct layers:
+PocketCoder is a resource-root runtime with four distinct layers:
 
 1. `FlowDefinition`: the executable runtime unit loaded from workspace namespaces and direct resource roots.
-2. `CompositeAgent` / agent: a named overlay for a flow, optionally inheriting from another agent.
+2. `CompositeAgent` / agent: a named agent definition or overlay for a flow, optionally inheriting from another agent.
 3. `SkillDefinition`: an additive session pack that extends prompts and tool availability.
 4. `HookDefinition`: a reusable VM-backed lifecycle overlay discovered from resource roots and referenced by agents.
 
-Markdown-authored flows, tools, prompts, agent profiles, and skills are compilation inputs, not a separate runtime layer. They are normalized into the same registries and runtime models used by direct resource folders and Python factories referenced from Markdown. See `markdown_assets.md` for the asset-level syntax and validation model.
+Markdown-authored flows, tools, prompts, agents, and skills are compilation inputs, not a separate runtime layer. They are normalized into the same registries and runtime models used by direct resource folders and Python factories referenced from Markdown. See `markdown_assets.md` for the asset-level syntax and validation model.
 
-The engine always executes a flow. Agents, hooks, and skills modify how that flow is invoked.
+The engine always executes a flow. Agents, hooks, and skills modify how that flow is invoked. In practice, new authoring should prefer self-contained Markdown agents, but the runtime still materializes them as a flow plus an agent record internally.
 
 For new executable authoring, the canonical shape is a self-contained Markdown VM program plus optional sibling `.tool.py` / `.prompt.md` helpers. `FlowDefinition` remains the internal runtime model, but new docs use "VM program" when describing the preferred authoring unit.
 
@@ -33,6 +33,9 @@ PocketCoder distinguishes between:
 
 1. `workspace_root`: the operational project boundary used for config, external runtime state, and filesystem safety.
 2. `resource_root`: a discoverable folder inside the workspace that can contribute direct flat resources.
+3. `catalog`: the in-memory runtime snapshot built from all discovered resource roots plus configured namespace roots.
+
+`resource_root` is the filesystem primitive. `WorkspaceCatalog` is the compiled runtime view produced from those roots. The engine executes against the catalog so lookups, precedence handling, and registry qualification do not require repeated filesystem traversal.
 
 The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain flat convention files such as `*.md`, `*.agent.md`, `*.agent.yaml`, `*.hook.md`, `*.hook.yaml`, `*.tool.md`, `*.prompt.md`, or `*.tool.py`, resource collections such as `agents/`, `hooks/`, `prompts/`, `tools/`, `skills/`, or `llm-profiles/`, or typed collection folders such as `agent.<group>/`, `hook.<group>/`, `tool.<group>/`, and `skill.<name>/`.
 
@@ -68,7 +71,7 @@ Markdown asset loading participates in the same two phases:
 - Markdown files are expanded and compiled into structured definitions during loader execution.
 - registry-backed refs inside those compiled definitions are then canonicalized and validated against the live registries.
 
-That shared model applies across prompt files, Markdown hook definitions, Markdown tool definitions, Markdown flow definitions, Markdown agent profiles, and skills.
+That shared model applies across prompt files, Markdown hook definitions, Markdown tool definitions, Markdown flow definitions, Markdown agent definitions, and skills.
 
 Within a resource root, flat files still load exactly as before. New workspace agent writes use grouped `agent.<group>/...` paths, and the additional folder conventions are additive:
 
@@ -123,7 +126,7 @@ These root-provider commands are implemented directly against engine/session ser
 
 The active-agent provider path is also implemented for declarative command aliases stored on the resolved active agent profile:
 
-- agent-profile `commands` metadata is loaded through the normal YAML and Markdown agent loaders
+- agent `commands` metadata is loaded through the normal YAML and Markdown agent loaders
 - inheritance merges command declarations by command name, with child declarations replacing parent declarations of the same name
 - the active-agent provider currently exposes only declarations whose visibility is `exported`
 - exported declarations delegate through the same engine/provider runtime used by root commands
@@ -451,7 +454,7 @@ Current enabled-skill resolution order is:
 
 Current effective tool set is:
 
-1. flow tool list resolved from plugin definitions
+1. flow tool list resolved from flow and resource-root definitions
 2. filtered by active profile `tools` when a tool allowlist is present
 3. extended by enabled skill references to already-registered tools
 4. extended by enabled skill-provided tool modules

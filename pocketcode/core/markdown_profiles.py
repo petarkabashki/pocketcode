@@ -299,7 +299,7 @@ class SkillManager:
         if registry is None:
             return reference
         try:
-            return registry.qualify(reference, context_plugin="workspace")
+            return registry.qualify(reference, context_namespace="workspace")
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"{field_name} could not be resolved: {reference} ({exc})") from exc
 
@@ -311,7 +311,7 @@ class SkillManager:
                 resolve_prompt_reference(
                     prompt_ref,
                     prompt_registry=self._prompt_registry,
-                    context_plugin="workspace",
+                    context_namespace="workspace",
                 )
             except Exception as exc:  # noqa: BLE001
                 raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
@@ -322,7 +322,7 @@ class SkillManager:
                 prompt_file=prompt_ref,
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=self._prompt_registry,
-                context_plugin="workspace",
+                context_namespace="workspace",
             )
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc

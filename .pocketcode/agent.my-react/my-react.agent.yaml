@@ -5,7 +5,7 @@ llm_profile: gemini-3-flash-preview
 hooks:
 - workspace.memory.chat_history
 skills:
-- pocketcode-plugin-authoring
+- pocketcode-namespace-authoring
 - pocketcode-profiles-prompts
 - pocketcode-tools-runtime
 - pocketcode-workspace-assets

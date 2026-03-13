@@ -11,7 +11,7 @@ def test_self_contained_markdown_agent_execution(tmp_path):
     # 1. Create a self-contained agent file
     profiles_dir = tmp_path / ".pocketcode" / "agents"
     profiles_dir.mkdir(parents=True, exist_ok=True)
-    (profiles_dir / "hybrid.md").write_text(
+    (profiles_dir / "hybrid.agent.md").write_text(
         """---
 name: hybrid
 vm_source: |
@@ -37,17 +37,17 @@ Hybrid prompt.
     assert flow_def is not None
 
     # 4. Setup Runtime to execute it
-    plugin_manager = MagicMock(spec=WorkspaceCatalog)
+    catalog = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     tool_runtime = MagicMock(spec=ToolRuntime)
     
-    # Inject our self-contained flow and agent into the mock plugin manager
-    plugin_manager.agents = {"agents.hybrid": flow_def, "hybrid": flow_def}
-    plugin_manager.flows = plugin_manager.agents
-    plugin_manager.resolve_tools_for_agent.return_value = []
+    # Inject our self-contained flow and agent into the mock catalog
+    catalog.agents = {"agents.hybrid": flow_def, "hybrid": flow_def}
+    catalog.flows = catalog.agents
+    catalog.resolve_tools_for_agent.return_value = []
     
     runtime = AgentRuntime(
-        catalog=plugin_manager,
+        catalog=catalog,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={}

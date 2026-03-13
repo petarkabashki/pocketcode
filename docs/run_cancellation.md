@@ -116,7 +116,7 @@ This is narrower than `subprocess_json`, but it gives a reliable hard-stop bound
 This matches the codebase better than a global switch:
 
 - `ask_user_input` and `confirm_user_input` are inherently in-process and interactive
-- some tools may eventually depend on plugin/runtime context
+- some tools may eventually depend on namespace/runtime context
 - many built-in file/search/system tools are already naturally serializable and are good candidates for isolation
 
 This split gives hard-stop semantics where they are technically sound without lying about guarantees for tools that cannot support them.

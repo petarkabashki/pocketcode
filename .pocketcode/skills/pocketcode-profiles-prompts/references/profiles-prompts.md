@@ -11,7 +11,7 @@ Primary sources:
 
 Composite agents can come from:
 - flow-level `default_agent`
-- plugin-local `agents/*.yaml`
+- namespace-local `.agent.*`
 - workspace `.pocketcode/*.agent.yaml`
 - synthesized defaults
 
@@ -45,4 +45,3 @@ From `prompt_loader.py`:
 2. Use `extra_prompts` for overlays, not for the main asset prompt.
 3. Avoid repo-only prompt includes when the asset should be portable across workspaces.
 4. Keep confirmation policies and tool lists minimal and explicit.
-

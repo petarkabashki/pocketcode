@@ -11,7 +11,7 @@ Read first:
 - `references/tools-runtime.md`
 
 Use it when the task touches:
-- plugin tools
+- namespace-local tools
 - workspace tools
 - skill-owned tools
 - tool confirmation
@@ -19,4 +19,3 @@ Use it when the task touches:
 - runtime allowlist behavior
 
 When in doubt, match the real runtime path from `ToolRuntime` and `AgentRuntime` instead of designing a cleaner but incompatible abstraction.
-

@@ -7,19 +7,19 @@ Covers all cases specified in T029:
   - resolve()                : qualified ref
   - resolve()                : unqualified, 1 owner → WARNING
   - resolve()                : unqualified, 2 owners → RegistryError
-  - resolve()                : context_plugin local-first
+  - resolve()                : context_namespace local-first
   - unregister_namespace()      : removes all entries
   - snapshot()               : deep copy isolation
   - list_all()               : sorted qualified names
   - list_by_namespace()         : namespace-scoped dict
-  - plugins()                : sorted plugin list
+  - namespaces()             : sorted namespace list
   - __contains__             : membership check
   - items()                  : (qname, impl) iterator
   - RegistryHolder.get/swap  : thread-safe pointer swap
 
 Prompt-registry coverage (NamespaceRegistry[str]):
-  - resolve("plugin.name")   : succeeds
-  - resolve("missing")       : RegistryError when plugin not loaded
+  - resolve("namespace.name"): succeeds
+  - resolve("missing")       : RegistryError when namespace not loaded
   - resolve("name") 1 owner  : WARNING emitted, resolves
   - resolve("name") 2 owners : RegistryError
 """
@@ -52,22 +52,22 @@ def _make_tool(tag: str = "tool") -> Any:
 # ---------------------------------------------------------------------------
 
 class TestRegisterSuccess:
-    def test_single_plugin_single_resource(self):
+    def test_single_namespace_single_resource(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         t = _make_tool("read_file")
         reg.register("core", "read_file", t)
         assert "core.read_file" in reg
 
-    def test_multiple_plugins_same_bare_name(self):
+    def test_multiple_namespaces_same_bare_name(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         a = _make_tool("a")
         b = _make_tool("b")
-        reg.register("plugin_a", "tool", a)
-        reg.register("plugin_b", "tool", b)
-        assert "plugin_a.tool" in reg
-        assert "plugin_b.tool" in reg
+        reg.register("namespace_a", "tool", a)
+        reg.register("namespace_b", "tool", b)
+        assert "namespace_a.tool" in reg
+        assert "namespace_b.tool" in reg
 
-    def test_multiple_resources_one_plugin(self):
+    def test_multiple_resources_one_namespace(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("core", "read_file", _make_tool("r"))
         reg.register("core", "write_file", _make_tool("w"))
@@ -87,14 +87,14 @@ class TestRegisterSuccess:
 # ---------------------------------------------------------------------------
 
 class TestRegisterCollision:
-    def test_same_plugin_same_name_raises(self):
+    def test_same_namespace_same_name_raises(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("core", "read_file", _make_tool())
         with pytest.raises(RegistryError, match="core.read_file"):
             reg.register("core", "read_file", _make_tool())
 
-    def test_different_plugins_same_qname_impossible(self):
-        """Qualified names are 'plugin.name' — two plugins can share a bare name, no collision."""
+    def test_different_namespaces_same_qname_impossible(self):
+        """Qualified names are 'namespace.name' and different namespaces may share a bare name."""
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("a", "tool", _make_tool("a"))
         reg.register("b", "tool", _make_tool("b"))  # must NOT raise
@@ -111,14 +111,14 @@ class TestResolveQualified:
         reg.register("core", "read_file", t)
         assert reg.resolve("core.read_file") is t
 
-    def test_qualified_different_plugins(self):
+    def test_qualified_different_namespaces(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         a = _make_tool("a")
         b = _make_tool("b")
-        reg.register("plugin_a", "tool", a)
-        reg.register("plugin_b", "tool", b)
-        assert reg.resolve("plugin_a.tool") is a
-        assert reg.resolve("plugin_b.tool") is b
+        reg.register("namespace_a", "tool", a)
+        reg.register("namespace_b", "tool", b)
+        assert reg.resolve("namespace_a.tool") is a
+        assert reg.resolve("namespace_b.tool") is b
 
     def test_qualified_missing_raises(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
@@ -188,28 +188,28 @@ class TestResolveUnqualifiedMultipleOwners:
 
 
 # ---------------------------------------------------------------------------
-# resolve() — context_plugin local-first
+# resolve() — context_namespace local-first
 # ---------------------------------------------------------------------------
 
-class TestResolveContextPlugin:
+class TestResolveContextNamespace:
     def test_local_wins_over_global(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         local = _make_tool("local")
         other = _make_tool("other")
-        reg.register("myplugin", "tool", local)
-        reg.register("otherplugin", "tool", other)
+        reg.register("my_namespace", "tool", local)
+        reg.register("other_namespace", "tool", other)
 
-        result = reg.resolve("tool", context_plugin="myplugin")
+        result = reg.resolve("tool", context_namespace="my_namespace")
         assert result is local
 
     def test_local_resolve_no_warning_needed(self, caplog):
         """Local resolution shouldn't go through the unqualified path (no WARNING)."""
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         t = _make_tool()
-        reg.register("myplugin", "tool", t)
+        reg.register("my_namespace", "tool", t)
 
         with caplog.at_level(logging.WARNING, logger="pocketcode.core.namespace_registry"):
-            result = reg.resolve("tool", context_plugin="myplugin")
+            result = reg.resolve("tool", context_namespace="my_namespace")
 
         assert result is t
         # No warning should be emitted for local resolution
@@ -218,27 +218,27 @@ class TestResolveContextPlugin:
     def test_falls_back_to_global_when_not_local(self, caplog):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         t = _make_tool()
-        reg.register("otherplugin", "tool", t)
+        reg.register("other_namespace", "tool", t)
 
         with caplog.at_level(logging.WARNING, logger="pocketcode.core.namespace_registry"):
-            result = reg.resolve("tool", context_plugin="myplugin")  # myplugin doesn't own "tool"
+            result = reg.resolve("tool", context_namespace="my_namespace")  # local namespace doesn't own "tool"
 
         assert result is t  # resolved via global 1-owner path
 
-    def test_context_plugin_ambiguous_global_still_raises(self):
+    def test_context_namespace_ambiguous_global_still_raises(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("a", "tool", _make_tool("a"))
         reg.register("b", "tool", _make_tool("b"))
-        # context_plugin "c" has no local "tool" → falls to global → ambiguous
+        # context_namespace "c" has no local "tool" → falls to global → ambiguous
         with pytest.raises(RegistryError):
-            reg.resolve("tool", context_plugin="c")
+            reg.resolve("tool", context_namespace="c")
 
-    def test_typed_unqualified_ref_uses_context_plugin(self):
+    def test_typed_unqualified_ref_uses_context_namespace(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         local = _make_tool("local")
-        reg.register("myplugin", "tool", local)
+        reg.register("my_namespace", "tool", local)
 
-        result = reg.resolve("tool:tool", context_plugin="myplugin")
+        result = reg.resolve("tool:tool", context_namespace="my_namespace")
         assert result is local
 
 
@@ -246,7 +246,7 @@ class TestResolveContextPlugin:
 # unregister_namespace()
 # ---------------------------------------------------------------------------
 
-class TestUnregisterPlugin:
+class TestUnregisterNamespace:
     def test_removes_all_resources(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("core", "a", _make_tool("a"))
@@ -268,7 +268,7 @@ class TestUnregisterPlugin:
         with pytest.raises(RegistryError):
             reg.resolve("tool")
 
-    def test_bare_name_still_resolves_from_other_plugin(self, caplog):
+    def test_bare_name_still_resolves_from_other_namespace(self, caplog):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         t = _make_tool()
         reg.register("a", "tool", _make_tool())
@@ -292,7 +292,7 @@ class TestContains:
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.unregister_namespace("nonexistent")  # must not raise
 
-    def test_unregister_clears_plugins_list(self):
+    def test_unregister_clears_namespaces_list(self):
         reg: NamespaceRegistry[Any] = NamespaceRegistry()
         reg.register("core", "tool", _make_tool())
         reg.unregister_namespace("core")
@@ -333,7 +333,7 @@ class TestSnapshot:
 
 
 # ---------------------------------------------------------------------------
-# list_all(), list_by_namespace(), plugins(), __contains__(), items()
+# list_all(), list_by_namespace(), namespaces(), __contains__(), items()
 # ---------------------------------------------------------------------------
 
 class TestEnumerationAPI:
@@ -357,7 +357,7 @@ class TestEnumerationAPI:
         reg = self._populated()
         assert reg.list_by_namespace("nonexistent") == {}
 
-    def test_plugins_sorted(self):
+    def test_namespaces_sorted(self):
         reg = self._populated()
         assert reg.namespaces() == ["a", "b"]
 
@@ -433,10 +433,10 @@ class TestPromptRegistry:
         prompts.register("core", "system", "You are a helpful assistant.")
         assert prompts.resolve("core.system") == "You are a helpful assistant."
 
-    def test_registry_error_when_plugin_not_loaded(self):
+    def test_registry_error_when_namespace_not_loaded(self):
         prompts: NamespaceRegistry[str] = NamespaceRegistry()
         with pytest.raises(RegistryError):
-            prompts.resolve("missing_plugin.system")
+            prompts.resolve("missing_namespace.system")
 
     def test_unqualified_one_owner_emits_warning(self, caplog):
         prompts: NamespaceRegistry[str] = NamespaceRegistry()

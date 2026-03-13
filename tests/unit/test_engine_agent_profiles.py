@@ -63,7 +63,7 @@ class _SkillManagerStub:
         return sorted(self._skills.values(), key=lambda skill: skill.name)
 
 
-class _PluginsWithToolResolution:
+class _CatalogWithToolResolution:
     def __init__(self):
         self.agents = {"coder::coder": object()}
         self.resolve_call_count = 0
@@ -73,10 +73,10 @@ class _PluginsWithToolResolution:
         return ["tool.b", "tool.a"]
 
 
-class _PluginsWithQualifiedTools:
+class _CatalogWithQualifiedTools:
     def __init__(self):
         self.agents = {
-            "coder::coder": type("Defn", (), {"metadata": {"plugin": "core"}, "default_agent_profile": None})()
+            "coder::coder": type("Defn", (), {"metadata": {"namespace": "core"}, "default_agent_profile": None})()
         }
         self.tools = NamespaceRegistry()
         self.tools.register("core", "read_file", lambda **kw: {"ok": True})
@@ -91,12 +91,16 @@ class TestEngineAgentProfiles:
     def test_validate_loaded_agent_profiles_canonicalizes_refs_and_prunes_missing_targets(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         agents = NamespaceRegistry()
-        agents.register("coder", "coder", type("Defn", (), {"metadata": {"plugin": "core"}, "default_agent_profile": None})())
+        agents.register(
+            "coder",
+            "coder",
+            type("Defn", (), {"metadata": {"namespace": "core"}, "default_agent_profile": None})(),
+        )
         tools = NamespaceRegistry()
         tools.register("core", "read_file", lambda **kw: {"ok": True})
         prompts = NamespaceRegistry()
         prompts.register("resource_root.pocketcode", "keep", "Keep prompt.")
-        engine._plugins = type("Plugins", (), {"agents": agents, "tools": tools, "prompts": prompts})()
+        engine._catalog = type("Plugins", (), {"agents": agents, "tools": tools, "prompts": prompts})()
         engine._agent_profile_manager = _ProfileManagerStub(
             {
                 "coder.safe": AgentProfile(
@@ -127,7 +131,7 @@ class TestEngineAgentProfiles:
         tools.register("core", "read_file", lambda **kw: {"ok": True})
         prompts = NamespaceRegistry()
         prompts.register("resource_root.pocketcode", "keep", "Keep prompt.")
-        engine._plugins = type("Plugins", (), {"agents": agents, "tools": tools, "prompts": prompts})()
+        engine._catalog = type("Plugins", (), {"agents": agents, "tools": tools, "prompts": prompts})()
         engine._agent_profile_manager = _ProfileManagerStub({})
         engine._skill_manager = _SkillManagerStub(
             {
@@ -152,7 +156,7 @@ class TestEngineAgentProfiles:
         engine._llm_config = {"default_profile": "fast"}
         registry = NamespaceRegistry()
         registry.register("core", "react", object())
-        engine._plugins = type("Plugins", (), {"agents": registry})()
+        engine._catalog = type("Plugins", (), {"agents": registry})()
 
         settings = engine.get_system_settings()
 
@@ -164,7 +168,7 @@ class TestEngineAgentProfiles:
         engine._llm_config = {"default_profile": "fast"}
         registry = NamespaceRegistry()
         registry.register("core", "react", object())
-        engine._plugins = type("Plugins", (), {"agents": registry})()
+        engine._catalog = type("Plugins", (), {"agents": registry})()
 
         settings = engine.get_system_settings()
 
@@ -174,7 +178,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(name="coder.safe", flow="coder::coder", source="workspace")
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine.current_agent = None
         engine.active_agent_profile = None
 
@@ -187,7 +191,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         registry = NamespaceRegistry()
         registry.register("coder", "coder", type("Defn", (), {"default_agent_profile": None})())
-        engine._plugins = type("Plugins", (), {"agents": registry})()
+        engine._catalog = type("Plugins", (), {"agents": registry})()
         engine._activate_default_profile_for = lambda agent_name: setattr(engine, "current_agent", agent_name)
         engine.current_agent = None
         engine.active_agent_profile = None
@@ -200,7 +204,7 @@ class TestEngineAgentProfiles:
         registry = NamespaceRegistry()
         registry.register("coder", "coder", object())
         registry.register("asker", "asker", object())
-        engine._plugins = type("Plugins", (), {"agents": registry})()
+        engine._catalog = type("Plugins", (), {"agents": registry})()
         engine._agent_profile_manager = _ProfileManagerStub(
             {
                 "coder.safe": AgentProfile(name="coder.safe", flow="coder::coder"),
@@ -224,7 +228,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
         engine.reload_called = False
         engine.reload = lambda: setattr(engine, "reload_called", True)
 
@@ -253,7 +257,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
         engine.reload_called = False
         engine.reload = lambda: setattr(engine, "reload_called", True)
 
@@ -280,7 +284,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
         engine.reload_called = False
         engine.reload = lambda: setattr(engine, "reload_called", True)
 
@@ -309,7 +313,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(
+        engine._catalog = SimpleNamespace(
             tools=tool_registry,
             flows=NamespaceRegistry(),
             prompts=NamespaceRegistry(),
@@ -342,7 +346,7 @@ class TestEngineAgentProfiles:
             "sample_flow",
             SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
         )
-        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
         engine.reload = lambda: None
 
         try:
@@ -369,7 +373,7 @@ class TestEngineAgentProfiles:
             "sample_flow",
             SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
         )
-        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
         engine.reload = lambda: None
 
         engine.update_markdown_asset(
@@ -397,7 +401,7 @@ class TestEngineAgentProfiles:
             "sample_flow",
             SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
         )
-        engine._plugins = SimpleNamespace(
+        engine._catalog = SimpleNamespace(
             tools=NamespaceRegistry(),
             flows=flow_registry,
             prompts=NamespaceRegistry(),
@@ -429,7 +433,7 @@ class TestEngineAgentProfiles:
             "sample_flow",
             SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
         )
-        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
         engine.reload = lambda: None
 
         try:
@@ -456,7 +460,7 @@ class TestEngineAgentProfiles:
             "sample_flow",
             SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
         )
-        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
         engine.reload = lambda: None
 
         try:
@@ -483,7 +487,7 @@ class TestEngineAgentProfiles:
             "sample_flow",
             SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
         )
-        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, prompts=NamespaceRegistry(), resource_roots=[])
         engine.reload = lambda: None
 
         try:
@@ -511,7 +515,7 @@ class TestEngineAgentProfiles:
         )
         flow_registry = NamespaceRegistry()
         flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
-        engine._plugins = SimpleNamespace(
+        engine._catalog = SimpleNamespace(
             tools=NamespaceRegistry(),
             flows=flow_registry,
             prompts=NamespaceRegistry(),
@@ -540,7 +544,7 @@ class TestEngineAgentProfiles:
         engine._agent_profile_manager = _ProfileManagerStub(
             {"review": AgentProfile(name="review", flow="plug.agent", source="workspace", source_path=agent_path)}
         )
-        engine._plugins = SimpleNamespace(
+        engine._catalog = SimpleNamespace(
             tools=NamespaceRegistry(),
             flows=NamespaceRegistry(),
             prompts=NamespaceRegistry(),
@@ -571,7 +575,7 @@ class TestEngineAgentProfiles:
         )
         flow_registry = NamespaceRegistry()
         flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
-        engine._plugins = SimpleNamespace(
+        engine._catalog = SimpleNamespace(
             tools=NamespaceRegistry(),
             flows=flow_registry,
             prompts=NamespaceRegistry(),
@@ -602,7 +606,7 @@ class TestEngineAgentProfiles:
         )
         flow_registry = NamespaceRegistry()
         flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
-        engine._plugins = SimpleNamespace(
+        engine._catalog = SimpleNamespace(
             tools=NamespaceRegistry(),
             flows=flow_registry,
             prompts=NamespaceRegistry(),
@@ -639,7 +643,7 @@ class TestEngineAgentProfiles:
             "sample_flow",
             SimpleNamespace(name="sample_flow", metadata={"markdown_path": str(flow_path)}),
         )
-        engine._plugins = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=NamespaceRegistry(), flows=flow_registry, resource_roots=[])
         engine.reload_called = False
         engine.reload = lambda: setattr(engine, "reload_called", True)
 
@@ -670,7 +674,7 @@ class TestEngineAgentProfiles:
         )
         flow_registry = NamespaceRegistry()
         flow_registry.register("plug", "agent", SimpleNamespace(name="plug.agent"))
-        engine._plugins = SimpleNamespace(
+        engine._catalog = SimpleNamespace(
             tools=NamespaceRegistry(),
             flows=flow_registry,
             prompts=NamespaceRegistry(),
@@ -698,7 +702,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
         engine.reload = lambda: None
 
         try:
@@ -725,7 +729,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
         engine.reload = lambda: None
 
         try:
@@ -750,7 +754,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
         engine.reload = lambda: None
 
         try:
@@ -777,7 +781,7 @@ class TestEngineAgentProfiles:
         engine._workspace_root = tmp_path
         tool_registry = NamespaceRegistry()
         tool_registry.register("workspace", "sample_tool", SimpleNamespace(_tool_source_path=tool_path))
-        engine._plugins = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
+        engine._catalog = SimpleNamespace(tools=tool_registry, flows=NamespaceRegistry(), resource_roots=[])
         engine.reload_called = False
         engine.reload = lambda: setattr(engine, "reload_called", True)
 
@@ -794,7 +798,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(name="ghost.safe", flow="ghost::ghost", source="workspace")
         engine._agent_profile_manager = _ProfileManagerStub({"ghost.safe": profile})
-        engine._plugins = type("Plugins", (), {"agents": {}})()
+        engine._catalog = type("Plugins", (), {"agents": {}})()
         engine.current_agent = None
         engine.active_agent_profile = None
 
@@ -860,7 +864,7 @@ class TestEngineAgentProfiles:
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -907,7 +911,7 @@ class TestEngineAgentProfiles:
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1042,7 +1046,7 @@ class TestEngineAgentProfiles:
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1098,7 +1102,7 @@ class TestEngineAgentProfiles:
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1139,7 +1143,7 @@ class TestEngineAgentProfiles:
 
     def test_list_tools_for_agent_caches_unfiltered_results(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        engine._plugins = _PluginsWithToolResolution()
+        engine._catalog = _CatalogWithToolResolution()
         engine.active_agent_profile = None
         engine.enabled_skills = []
         engine._skill_manager = _SkillManagerStub({})
@@ -1150,7 +1154,7 @@ class TestEngineAgentProfiles:
 
         assert first == ["tool.a", "tool.b"]
         assert second == ["tool.a", "tool.b"]
-        assert engine._plugins.resolve_call_count == 1
+        assert engine._catalog.resolve_call_count == 1
 
     def test_list_tools_for_agent_accepts_typed_flow_reference(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -1158,9 +1162,9 @@ class TestEngineAgentProfiles:
         registry.register(
             "coder",
             "coder",
-            type("Defn", (), {"metadata": {"plugin": "core"}, "default_agent_profile": None})(),
+            type("Defn", (), {"metadata": {"namespace": "core"}, "default_agent_profile": None})(),
         )
-        engine._plugins = type(
+        engine._catalog = type(
             "Plugins",
             (),
             {
@@ -1185,7 +1189,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         registry = NamespaceRegistry()
         registry.register("coder", "coder", object())
-        engine._plugins = type("Plugins", (), {"agents": registry})()
+        engine._catalog = type("Plugins", (), {"agents": registry})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1199,7 +1203,7 @@ class TestEngineAgentProfiles:
 
     def test_enable_skill_registers_provided_tools_and_resolves_existing_tool_refs(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        engine._plugins = _PluginsWithQualifiedTools()
+        engine._catalog = _CatalogWithQualifiedTools()
         engine._skill_manager = _SkillManagerStub(
             {
                 "python-testing": SkillDefinition(
@@ -1250,7 +1254,7 @@ class TestEngineAgentProfiles:
         }
         engine._runtime_config = engine._config["runtime"]
         engine._llm_config = engine._config["llm"]
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object(), "asker::asker": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object(), "asker::asker": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1305,7 +1309,7 @@ class TestEngineAgentProfiles:
         engine._llm_config = engine._config["llm"]
         registry = NamespaceRegistry()
         registry.register("core", "react", object())
-        engine._plugins = type("Plugins", (), {"agents": registry})()
+        engine._catalog = type("Plugins", (), {"agents": registry})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1328,7 +1332,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._runtime_config = {"textual": {"control_presentation": "modal"}}
         engine._llm_config = {"default_profile": "fast"}
-        engine._plugins = type("Plugins", (), {"agents": {}})()
+        engine._catalog = type("Plugins", (), {"agents": {}})()
 
         settings = engine.get_system_settings()
 
@@ -1338,7 +1342,7 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._runtime_config = {"textual": {"user_input_popups": True}}
         engine._llm_config = {"default_profile": "fast"}
-        engine._plugins = type("Plugins", (), {"agents": {}})()
+        engine._catalog = type("Plugins", (), {"agents": {}})()
 
         settings = engine.get_system_settings()
 
@@ -1533,7 +1537,7 @@ class TestEngineAgentProfiles:
         engine._config = {"runtime": {"textual": {}}}
         engine._runtime_config = engine._config["runtime"]
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine._skill_manager = _SkillManagerStub({"python-testing": SkillDefinition(name="python-testing")})
         engine._llm_router = type(
             "Router",
@@ -1577,7 +1581,7 @@ class TestEngineAgentProfiles:
         engine._config = {"runtime": {"textual": {}}}
         engine._runtime_config = engine._config["runtime"]
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
-        engine._plugins = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
         engine._skill_manager = _SkillManagerStub({"python-testing": SkillDefinition(name="python-testing")})
         engine._llm_router = type(
             "Router",

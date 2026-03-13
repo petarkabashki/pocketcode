@@ -15,7 +15,7 @@ Use workspace scope for assets that are meant to be reused broadly:
 - reusable modes
 - workspace agent profiles
 
-Use plugin scope for assets that belong to one plugin's behavior.
+Use namespace scope for assets that belong to one namespace's behavior.
 
 ## Portability rules
 
@@ -30,4 +30,3 @@ When the current workspace is not this repo:
 2. Use relative references within the workspace.
 3. Avoid hidden dependencies on repo-only files.
 4. Update local guidance when behavior changes.
-

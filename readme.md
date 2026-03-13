@@ -6,10 +6,10 @@ Canonical implementation documentation lives in `docs/`. Treat `docs/` and the c
 
 ## What Changed
 
-Pocketcode now uses a small plugin-first core:
+Pocketcode now uses a resource-root and namespace-first core:
 
-- Plugins declare tools, prompts, and flows in `plugin.yaml`.
-- Flows are the primary runtime unit and are implemented as PocketFlow `Flow` factories.
+- Resource roots declare tools, prompts, flows, hooks, skills, and agents through flat namespace-pack files and grouped collections.
+- Flows are the primary runtime unit and are implemented as PocketFlow `Flow` factories or StackVM-backed Markdown assets.
 - Flow prompts live in external Markdown files with `{{ include:path.md }}` support.
 - Flows support Python `pre`, `steps`, and `post` handlers alongside LLM and deterministic execution modes.
 - Agents can override LLM selection, tool allowlists, extra prompts, and confirmation policy for a flow.
@@ -27,7 +27,7 @@ Pocketcode now uses a small plugin-first core:
 - The package-owned `core` resource root lives under `pocketcode/.pocketcore/`
 - Repo-shipped workspace assets live under flat namespace/resource-root files in `.pocketcode/`
 - The default flow is `core::react`
-- `.pocketcode/plugins/workspace_builder/` ships a dedicated authoring agent for creating and editing workspace plugin resources plus workspace-level assets such as tools, prompts, skills, and agents.
+- `.pocketcode/workspace_builder.workspace_builder.md` ships a dedicated authoring agent for creating and editing workspace namespace resources plus workspace-level assets such as tools, prompts, skills, and agents.
 - Shared filesystem tool behavior is implemented in `pocketcode/core_tools/filesystem.py`.
 - Structured file operation tools live in `pocketcode/core_tools/file_ops.py`, covering interactive file/folder selection, line/pattern-based extraction, staged replacements with diff previews, and explicit apply/cancel steps.
 - Git and context elephant store tools are workspace-owned flat `.tool.py` assets under `.pocketcode/`, such as `.pocketcode/workspace_git.git.tool.py` and `.pocketcode/workspace_context.context_elephant_store_tools.tool.py`.
@@ -36,14 +36,13 @@ Pocketcode now uses a small plugin-first core:
 
 Pocketcode also loads workspace-local resources from the workspace root:
 
-- `.pocketcode/plugins/`: workspace plugin folder discovered through `runtime.plugin_paths`
-- `.pocketcode/plugins/workspace_builder/`: example repo-shipped workspace plugin for authoring `plugin.yaml`, flows, prompts, agents, tools, skills, and other `.pocketcode/` assets
-- `.pocketcode/agents/`: workspace agent YAML files
+- `.pocketcode/`: default workspace resource root; flat namespace-pack files such as `<namespace>.md`, `<namespace>.prompt.md`, `<namespace>.tool.py`, and `<namespace>.<agent>.agent.md` load from here
+- `.pocketcode/agents/`: recursive workspace agent collections using `*.agent.md` and `*.agent.yaml`
 - `.pocketcode/modes/`: workspace Markdown mode files
 - `.pocketcode/skills/`: workspace skill folders containing `SKILL.md` plus optional `tools/`, `scripts/`, `references/`, and `assets/`
-- `.pocketcode/skills/pocketcode-workspace-builder/`: umbrella skill pack for the workspace builder, with focused companion skills for PocketFlow graphs, plugin authoring, profiles/prompts, tools/runtime, and workspace assets
+- `.pocketcode/skills/pocketcode-workspace-builder/`: umbrella skill pack for the workspace builder, with focused companion skills for PocketFlow graphs, namespace authoring, profiles/prompts, tools/runtime, and workspace assets
 - `.pocketcode/tools/`: shared Python tools auto-registered under the `workspace` namespace
-- `.pocketcode/prompts/`: shared prompt files registered under the `workspace` namespace and usable as fallback prompt files for plugin agents and agent `extra_prompts`
+- `.pocketcode/prompts/`: shared prompt files registered under the `workspace` namespace and usable as fallback prompt files for namespace-backed agents and agent `extra_prompts`
 
 For shared workspace tools, Pocketcode auto-discovers public tool exports from Python files in `.pocketcode/tools/`. A module can expose tools either through a `TOOLS` export or through public top-level callables / `BaseTool` classes.
 The repo now ships `.pocketcode/tools/file_ops.py` as the reference pattern for workspace tool re-exports, making the same file selection and staged editing tools available as `workspace::select_filesystem_entry`, `workspace::extract_text`, `workspace::stage_text_replace`, `workspace::apply_staged_edit`, and `workspace::cancel_staged_edit`.
@@ -52,25 +51,25 @@ The repo now ships `.pocketcode/tools/file_ops.py` as the reference pattern for 
 
 Checked-in examples live under `examples/`.
 
-- `examples/stackvm_review_plugin/`: a multi-file StackVM-backed plugin flow using `vm_entry`, `vm_modules`, and Markdown-backed VM modules.
-- `examples/stackvm_handoff_plugin/`: a StackVM-backed router flow that hands off to a normal PocketFlow delegate.
-- `examples/stackvm_resilient_plugin/`: a StackVM-backed flow that requests a tool, branches on failure, and hands off to a fallback flow.
-- `examples/stackvm_config_router_plugin/`: a config-driven StackVM router that reads YAML from the workspace, uses conversion helpers, selects a route from a list, and hands off accordingly.
-- `examples/stackvm_nested_router_plugin/`: a nested-data StackVM router that uses safe nested traversal and safe nested updates over mixed dict/list YAML config.
-- `examples/stackvm_tool_normalize_plugin/`: a StackVM flow that normalizes tool-derived YAML into shared state with safe helpers before producing the final answer.
-- `examples/stackvm_normalize_handoff_plugin/`: a StackVM flow that normalizes tool-derived YAML into shared state and then hands off to different delegates based on the normalized result.
-- `examples/stackvm_normalize_ask_plugin/`: a StackVM flow that normalizes tool-derived YAML into shared state and then surfaces a user question from the normalized result.
-- `examples/stackvm_normalize_confirm_plugin/`: a StackVM flow that normalizes tool-derived YAML, prompts for a bridged user reply, and continues to a final answer in the same VM turn.
-- `examples/stackvm_buttons_plugin/`: a StackVM flow that normalizes tool-derived YAML, presents structured button choices through the bridged interaction channel, and continues from the selected option.
-- `examples/stackvm_radio_plugin/`: a StackVM flow that normalizes tool-derived YAML, presents a radio-style structured choice through the bridged interaction channel, and continues from the selected mode.
-- `examples/stackvm_prompt_return_plugin/`: a StackVM caller/delegate pair where the delegate prompts for a structured choice and returns the resulting decision to the caller through the handoff stack.
-- `examples/stackvm_checklist_return_plugin/`: a StackVM caller/delegate pair where the delegate collects multiple checklist selections and returns the resulting decision to the caller through the handoff stack.
-- `examples/stackvm_structured_return_routing_plugin/`: a StackVM caller/delegate pair where the delegate returns a YAML decision string and the caller parses that returned value to choose the final downstream route.
-- `examples/stackvm_structured_return_finalize_plugin/`: a StackVM caller/delegate pair where the delegate returns a YAML decision string and the caller parses that returned value into the final answer directly.
-- `examples/stackvm_nested_structured_return_plugin/`: a StackVM caller/delegate pair where the delegate returns nested YAML and the caller uses `get-in?` with defaults before composing the final answer.
-- `examples/stackvm_nested_structured_return_routing_plugin/`: a StackVM caller/delegate pair where the delegate returns nested YAML and the caller uses `get-in?` to choose the final downstream route, with defaults for optional nested fields.
-- `examples/stackvm_checklist_handoff_plugin/`: a StackVM flow that normalizes tool-derived YAML, collects checklist actions, formats them with `join`, and hands off to different delegates based on the selected list.
-- `examples/stackvm_multistage_pipeline_plugin/`: a StackVM caller/delegate pair where the caller collects checklist actions, the delegate asks a second structured question, and the caller finalizes from both decisions after the delegate returns.
+- `examples/stackvm_review_example/`: a multi-file StackVM-backed flow using `vm_entry`, `vm_modules`, and Markdown-backed VM modules.
+- `examples/stackvm_handoff_example/`: a StackVM-backed router flow that hands off to a normal PocketFlow delegate.
+- `examples/stackvm_resilient_example/`: a StackVM-backed flow that requests a tool, branches on failure, and hands off to a fallback flow.
+- `examples/stackvm_config_router_example/`: a config-driven StackVM router that reads YAML from the workspace, uses conversion helpers, selects a route from a list, and hands off accordingly.
+- `examples/stackvm_nested_router_example/`: a nested-data StackVM router that uses safe nested traversal and safe nested updates over mixed dict/list YAML config.
+- `examples/stackvm_tool_normalize_example/`: a StackVM flow that normalizes tool-derived YAML into shared state with safe helpers before producing the final answer.
+- `examples/stackvm_normalize_handoff_example/`: a StackVM flow that normalizes tool-derived YAML into shared state and then hands off to different delegates based on the normalized result.
+- `examples/stackvm_normalize_ask_example/`: a StackVM flow that normalizes tool-derived YAML into shared state and then surfaces a user question from the normalized result.
+- `examples/stackvm_normalize_confirm_example/`: a StackVM flow that normalizes tool-derived YAML, prompts for a bridged user reply, and continues to a final answer in the same VM turn.
+- `examples/stackvm_buttons_example/`: a StackVM flow that normalizes tool-derived YAML, presents structured button choices through the bridged interaction channel, and continues from the selected option.
+- `examples/stackvm_radio_example/`: a StackVM flow that normalizes tool-derived YAML, presents a radio-style structured choice through the bridged interaction channel, and continues from the selected mode.
+- `examples/stackvm_prompt_return_example/`: a StackVM caller/delegate pair where the delegate prompts for a structured choice and returns the resulting decision to the caller through the handoff stack.
+- `examples/stackvm_checklist_return_example/`: a StackVM caller/delegate pair where the delegate collects multiple checklist selections and returns the resulting decision to the caller through the handoff stack.
+- `examples/stackvm_structured_return_routing_example/`: a StackVM caller/delegate pair where the delegate returns a YAML decision string and the caller parses that returned value to choose the final downstream route.
+- `examples/stackvm_structured_return_finalize_example/`: a StackVM caller/delegate pair where the delegate returns a YAML decision string and the caller parses that returned value into the final answer directly.
+- `examples/stackvm_nested_structured_return_example/`: a StackVM caller/delegate pair where the delegate returns nested YAML and the caller uses `get-in?` with defaults before composing the final answer.
+- `examples/stackvm_nested_structured_return_routing_example/`: a StackVM caller/delegate pair where the delegate returns nested YAML and the caller uses `get-in?` to choose the final downstream route, with defaults for optional nested fields.
+- `examples/stackvm_checklist_handoff_example/`: a StackVM flow that normalizes tool-derived YAML, collects checklist actions, formats them with `join`, and hands off to different delegates based on the selected list.
+- `examples/stackvm_multistage_pipeline_example/`: a StackVM caller/delegate pair where the caller collects checklist actions, the delegate asks a second structured question, and the caller finalizes from both decisions after the delegate returns.
 
 ## Discovery Controls
 
@@ -81,13 +80,13 @@ Pocketcode supports two ways to make discovered resources unavailable without de
 
 `.disabled` behavior:
 
-- Works for plugins, workspace agents, modes, skills, prompts, tools, and plugin-local `agents/`, `prompts/`, `tools/`, and flow modules.
+- Works for resource roots, workspace agents, modes, skills, prompts, tools, and grouped `agents/`, `prompts/`, `tools/`, and flow modules.
 - If any parent folder contains `.disabled`, everything under it is skipped.
 
 `.pocketcodeignore` behavior:
 
 - Workspace-owned resources under `.pocketcode/` use: `<workspace>/.pocketcode/.pocketcodeignore`
-- Built-in `core` and external plugin roots use: `<workspace>/.pocketcodeignore`
+- Built-in `core` and configured namespace roots use: `<workspace>/.pocketcodeignore`
 - Supports blank lines, `#` comments, glob patterns, directory rules with trailing `/`, and `!` re-includes.
 
 Examples:
@@ -114,7 +113,7 @@ Key sections:
 - `llm.providers`: provider credentials/settings
 - `llm.profiles`: named LLM configs used by agents/internal flows
 - `llm.default_profile`: default profile name
-- `runtime`: flow defaults, internal runtime flow, plugin paths, and tool confirmation policy
+- `runtime`: flow defaults, internal runtime flow, workspace paths, and tool confirmation policy
 
 Supported providers:
 
@@ -262,7 +261,7 @@ Theme presets:
 
 Agent editing in the Textual UI:
 
-- plugin and synthesised agents are read-only until cloned to a workspace agent
+- resource-root and synthesised agents are read-only until cloned to a workspace agent
 - workspace-backed agents can edit `llm_profile`, tool allowlists, per-tool confirmation overrides, confirmation defaults, and `extra_prompts`
 - tool allowlists, tool policy overrides, and skills now use a three-step model: `Apply` saves a persisted last-used runtime selection, `Reset` clears the last-used override and falls back to defaults, and `Save as Default` writes the current state into the default config
 - last-used tool allowlists, tool policy overrides, and skill selections are reloaded automatically on startup
@@ -349,9 +348,9 @@ runtime:
       output_per_1k: 0.00030
 ```
 
-## Plugin + Workflow Authoring
+## Authoring
 
-See: `docs/plugin_architecture.md`
+See: `docs/architecture.md`, `docs/markdown_assets.md`, and `docs/pocketflow_agents.md`
 
 ## Quick Start
 
@@ -383,35 +382,33 @@ See: `docs/plugin_architecture.md`
   echo "Summarize the current workspace" | pocketcode
   ```
 
-## Plugin Authoring
+## Namespace Authoring
 
-Plugins follow the unified plugin model (003-unified-plugin-namespace):
+Current authoring is resource-root and namespace based:
 
-- Workspace plugins live in `.pocketcode/plugins/<name>/`.
-- The only package-owned plugin is `pocketcode/plugins/core/`.
-- Declare everything in `plugin.yaml` with `schema_version: 1`.
-- Tools are declared as `local_name: "tools/file.py:ClassName"`.
-- Flows are declared with `module:` + `entry_fn:` pointing to a zero-arg Python
-  factory that returns a PocketFlow `Flow`.
-- Top-level `prompts:` entries are loaded into the plugin prompt registry.
-- All resources are addressable as `plugin_name.resource_name`.
+- Workspace assets live under `.pocketcode/` and other discovered `.pocket*` resource roots.
+- Additional plain namespace roots can be configured through `runtime.workspace_paths`.
+- Flows use Markdown `*.md` assets or Python module factories referenced from Markdown.
+- Tools use `*.tool.py` or `*.tool.md`.
+- Agents use `*.agent.md` or `*.agent.yaml`.
+- All resources are addressable as `namespace.resource`.
 
-Quick example:
+Quick examples:
 
-```yaml
-# .pocketcode/plugins/my_plugin/plugin.yaml
-schema_version: 1
-name: my_plugin
-description: My custom plugin.
-
-tools:
-  my_tool: "tools/my_tool.py:MyTool"
-
-flows:
-  my_agent:
-    module: "flows/my_agent.py"
-    entry_fn: "create_flow"
-    tools: [my_tool]
+```text
+.pocketcode/
+├── my_namespace.worker.md
+├── my_namespace.system.prompt.md
+├── my_namespace.tool_name.tool.py
+└── my_namespace.safe.agent.md
 ```
 
-Full walkthrough: [`specs/003-unified-plugin-namespace/quickstart.md`](specs/003-unified-plugin-namespace/quickstart.md)
+```yaml
+# .pocketcode/my_namespace.worker.md
+module: worker.py
+entry_fn: create_flow
+tools:
+  - my_namespace.tool_name
+```
+
+Canonical details live in `docs/architecture.md`, `docs/configuration.md`, `docs/markdown_assets.md`, and `docs/pocketflow_agents.md`.

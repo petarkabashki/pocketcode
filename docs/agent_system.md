@@ -14,6 +14,8 @@ Use this document together with:
 
 An agent is a named configuration object that governs how a flow behaves during a session.
 
+The current codebase still uses `AgentProfile` and "profile" in some APIs and UI labels. In the canonical model, that term means a named agent overlay. The preferred authoring shape for new work is a self-contained Markdown agent that carries both prompt/personality and executable VM logic in one file.
+
 An authored agent can control:
 
 - which LLM profile to use
@@ -22,7 +24,7 @@ An authored agent can control:
 - which extra prompt files are appended to the flow prompt
 - which default and per-tool confirmation policies apply
 
-Every flow gets a synthesised default agent at load time. Workspace-authored agents can extend that default or any other agent.
+Every flow gets a synthesised default agent at load time. Authored agents can extend that default or any other agent.
 
 ## Agent Fields
 
@@ -32,7 +34,7 @@ Current fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | `str` | none | Unique profile identifier |
+| `name` | `str` | none | Unique agent identifier |
 | `flow` | `str` | none | Qualified target flow name; accepts canonical dotted ids and typed `flow:` or `agent:` forms |
 | `base_agent` | `str \| None` | `None` | Optional parent agent/profile name to inherit from; Markdown and YAML also accept `extends` |
 | `description` | `str` | `""` | Human-readable description |
@@ -42,13 +44,14 @@ Current fields:
 | `hooks` | `List[str] \| None` | `None` | Ordered hook refs mixed into the agent lifecycle; `None` means inherit |
 | `skills` | `List[str] \| None` | `None` | Default enabled skills; `None` means use global skill defaults |
 | `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` means inherit flow tool surface |
-| `commands` | `List[AgentCommand]` | `[]` | Declarative command aliases exported by the agent profile |
+| `commands` | `List[AgentCommand]` | `[]` | Declarative command aliases exported by the agent |
 | `tool_confirmation` | `dict` | `{}` | Confirmation defaults and per-tool overrides |
-| `source` | `str` | `"synthesised"` | One of `synthesised`, `namespace`, or `workspace` |
+| `source` | `str` | `"synthesised"` | One of `synthesised`, `namespace`, or `workspace`; `namespace` is the current compatibility label for non-workspace resource-root assets |
 | `source_path` | `Path \| None` | `None` | Source file path for workspace-backed agents |
 
 - `tools` entries resolve through the shared registry, so they accept canonical dotted ids and typed `tool:` references.
 - `hooks` entries resolve through the shared registry, so they accept canonical dotted ids and typed `hook:` references.
+- legacy `namespace::name` references are still normalized to canonical dotted ids on load and persistence
 
 Current `commands` entries are declarative aliases with these fields:
 
@@ -88,7 +91,7 @@ Agents are loaded through `AgentManager` with this effective precedence:
 
 On name collision, the higher-precedence source wins.
 
-Configured workspace namespace assets from `runtime.workspace_paths` are not part of this authored-agent search path. Their executable Markdown files register flows in `WorkspaceCatalog`; `AgentManager` then synthesizes default agents for those flows unless another agent overrides them. Matching `.tool.py` files in those configured namespace roots register tools, not agents.
+Configured namespace roots from `runtime.workspace_paths` are not part of this authored-agent search path. Their executable Markdown files register flows in `WorkspaceCatalog`; `AgentManager` then synthesizes default agents for those flows unless another agent overrides them. Matching `.tool.py` files in those configured roots register tools, not agents.
 
 ## Inheritance
 
@@ -141,7 +144,7 @@ Current confirmation resolution order is:
 
 ## Workspace File Locations
 
-The agent-profile system uses these workspace paths:
+The authored-agent system uses these workspace paths:
 
 - `<resource_root>/<name>.agent.md` and `<resource_root>/<name>.agent.yaml` for flat workspace agent profiles
 - `<resource_root>/agents/**/*.agent.md` and `<resource_root>/agents/**/*.agent.yaml` for recursive workspace agent collections
@@ -190,16 +193,16 @@ Workspace agents are loaded from all discovered flat agent files plus recursive 
 
 Markdown-backed agents use the same fields, with YAML front matter for structured keys and the Markdown body as `inline_prompt`.
 
-### Self-Contained Hybrid Agents
+### Self-Contained Markdown Agents
 
-Agent profiles in Markdown can also define their own executable flow logic directly in the same file. These are called **self-contained hybrid agents**.
+Markdown agents can also define their own executable flow logic directly in the same file. This is the canonical vm-first authoring path.
 
-If a Markdown agent profile includes any flow-definition fields (such as `vm_source`, `vm_entry`, or `module`), the system automatically:
+If a Markdown agent file includes any flow-definition fields (such as `vm_source`, `vm_entry`, or `module`), the system automatically:
 1.  Compiles an embedded `FlowDefinition` from those fields.
 2.  Registers it in the flow registry under `agents.<agent_name>` (unless an explicit `flow` is provided).
-3.  Configures the agent profile to target this embedded flow.
+3.  Configures the agent to target this embedded flow.
 
-This allows creating a fully functional agent—logic and personality—in a single `.md` file.
+This allows creating a fully functional agent in a single `.md` file.
 
 Example self-contained StackVM agent:
 
@@ -220,8 +223,8 @@ You are an echo bot.
 
 Notes:
 - Self-contained agents require at least one `vm_*` field or `module`/`entry_fn`.
-- The CLI command `/agent new self-md <name>` creates a scaffold for this kind of profile-scoped hybrid agent.
-- For new executable authoring that should be shared as a runtime asset rather than a profile overlay, prefer a Markdown VM file in a configured workspace namespace root or flat namespace-pack root instead.
+- The CLI command `/agent new self-md <name>` creates a scaffold for this kind of self-contained agent.
+- Overlay-only agents are still supported, but new executable authoring should prefer the self-contained Markdown form.
 
 Example YAML form:
 
@@ -338,7 +341,7 @@ Behavior notes:
 
 - `/agent list` shows named authored agents and excludes synthesised flow defaults.
 - `/agent show` defaults to the active agent when no name is supplied.
-- editing commands apply only to workspace-backed agents; plugin and synthesised defaults must be cloned first.
+- editing commands apply only to workspace-backed agents; built-in resource-root agents and synthesised defaults must be cloned first.
 
 Agent command shortcuts:
 
@@ -368,7 +371,7 @@ Current Textual agent-system controls include:
 - saving inspector skills writes `skills` in the active workspace agent profile file and clears any matching legacy Textual override state
 - saving inspector tools writes `tools` in the active workspace agent profile file and clears any matching legacy Textual override state
 - `Reset` clears the current session override and `Save as Default` writes the current selection into config
-- editing a plugin or synthesised profile from the Textual UI requires cloning it to a workspace-backed profile first
+- editing a built-in resource-root or synthesised agent from the Textual UI requires cloning it to a workspace-backed agent first
 
 Current skill fallback order is:
 
@@ -402,7 +405,7 @@ The intended command ownership split is:
 - active-agent providers can export agent-specific commands
 - subagents can define their own command surfaces privately or as delegated ACP actions, but they should only become user-facing slash commands when the parent or root provider explicitly re-exports them
 
-The current provider runtime does not yet add canonical new agent-profile fields for authored command definitions. The implemented hook is the engine/provider contract that later metadata-backed command exports will target.
+The current provider runtime does not yet add canonical new agent fields for authored command definitions. The implemented hook is the engine/provider contract that later metadata-backed command exports will target.
 
 The current root provider already behaves like a base global command host for two deterministic command families:
 

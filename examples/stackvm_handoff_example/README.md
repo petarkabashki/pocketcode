@@ -12,7 +12,7 @@ Layout:
 The example demonstrates:
 
 - a VM flow selecting another agent with `handoff`
-- mixed VM and PocketFlow flow backends in the same plugin
+- mixed VM and PocketFlow flow backends in the same namespace/example root
 - reuse of the standard `pending_handoff_agent` runtime path instead of a VM-only mechanism
 
 See also `../stackvm_resilient_example/` for a VM flow that branches on tool failure before handing off.

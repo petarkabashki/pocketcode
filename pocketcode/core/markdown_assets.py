@@ -63,7 +63,7 @@ def load_markdown_asset_document(
     *,
     fallback_dirs: Sequence[Path] = (),
     prompt_registry: Any | None = None,
-    context_plugin: str | None = None,
+    context_namespace: str | None = None,
 ) -> MarkdownAssetDocument:
     resolved_path = Path(path).resolve()
     expanded_text, sources = load_prompt_markdown(
@@ -71,7 +71,7 @@ def load_markdown_asset_document(
         prompt_file=str(resolved_path),
         fallback_dirs=fallback_dirs,
         prompt_registry=prompt_registry,
-        context_plugin=context_plugin,
+        context_namespace=context_namespace,
     )
 
     front_matter, body_with_blocks = _parse_front_matter(expanded_text)
@@ -94,7 +94,7 @@ def parse_markdown_asset_text_document(
     expand_includes: bool = False,
     fallback_dirs: Sequence[Path] = (),
     prompt_registry: Any | None = None,
-    context_plugin: str | None = None,
+    context_namespace: str | None = None,
 ) -> MarkdownAssetDocument:
     resolved_path = Path(source_path).resolve()
     expanded_text = markdown_text
@@ -106,7 +106,7 @@ def parse_markdown_asset_text_document(
             source_path=resolved_path,
             fallback_dirs=fallback_dirs,
             prompt_registry=prompt_registry,
-            context_plugin=context_plugin,
+            context_namespace=context_namespace,
         )
         resolved_sources = list(dict.fromkeys([*resolved_sources, *expanded_sources]))
     front_matter, body_with_blocks = _parse_front_matter(expanded_text)

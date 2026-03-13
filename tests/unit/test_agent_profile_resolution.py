@@ -91,13 +91,13 @@ class TestPromptReferenceResolution:
         prompts = NamespaceRegistry()
         prompts.register("resource_root.pocketcode", "review", "Review via prompt ref.")
 
-        plugins = SimpleNamespace(
+        catalog = SimpleNamespace(
             workspace_root=tmp_path,
             prompts=prompts,
             agents=NamespaceRegistry(),
         )
         runtime = AgentRuntime(
-            catalog=plugins,
+            catalog=catalog,
             llm_router=MagicMock(),
             tool_runtime=MagicMock(),
             runtime_config={},

@@ -104,15 +104,14 @@ class PocketCodeEngine:
 
         self._catalog = WorkspaceCatalog(config=config, workspace_root=self._workspace_root)
         self._catalog.load()
-        self._plugins = self._catalog
 
-        # T011: instantiate AgentManager after plugins are loaded.
-        self._agent_profile_manager = AgentManager(self._workspace_root, prompt_registry=self._plugins.prompts)
-        self._agent_profile_manager.load(dict(self._plugins.agents))
+        # T011: instantiate AgentManager after the catalog is loaded.
+        self._agent_profile_manager = AgentManager(self._workspace_root, prompt_registry=self._catalog.prompts)
+        self._agent_profile_manager.load(dict(self._catalog.agents))
         self._skill_manager = SkillManager(
             self._workspace_root,
-            tool_registry=self._plugins.tools,
-            prompt_registry=self._plugins.prompts,
+            tool_registry=self._catalog.tools,
+            prompt_registry=self._catalog.prompts,
         )
         self._skill_manager.load()
         self._session_manager = SessionManager(self._workspace_root, config=self._config)
@@ -124,10 +123,10 @@ class PocketCodeEngine:
         self.session_global_skills_override: List[str] | None = None
         self.enabled_skills = self._configured_enabled_skills()
 
-        self._llm_router = LlmRouter(config=config, plugin_llm_profiles=self._merged_llm_profiles())
+        self._llm_router = LlmRouter(config=config, resource_root_llm_profiles=self._merged_llm_profiles())
         self._tool_runtime = self._build_tool_runtime()
         self._agent_runtime = AgentRuntime(
-            catalog=self._plugins,
+            catalog=self._catalog,
             llm_router=self._llm_router,
             tool_runtime=self._tool_runtime,
             runtime_config=self._runtime_config,
@@ -1116,7 +1115,7 @@ class PocketCodeEngine:
                 name=script_path.stem,
                 description=f"StackVM script '{script_path.name}'",
                 execution_mode="vm",
-                tools=sorted(self._plugins.tools.keys()),
+                tools=sorted(self._catalog.tools.keys()),
                 vm_entry=script_entry,
                 vm_file=str(script_path),
                 metadata={
@@ -1157,7 +1156,7 @@ class PocketCodeEngine:
 
         if normalized_kind == "flow":
             assets: set[str] = set()
-            for _, flow_def in self._plugins.flows.items():
+            for _, flow_def in self._catalog.flows.items():
                 path = self._flow_markdown_path(flow_def)
                 if path is None or not self._is_workspace_asset_path(path):
                     continue
@@ -1166,7 +1165,7 @@ class PocketCodeEngine:
 
         if normalized_kind == "tool":
             assets: set[str] = set()
-            for qualified_name, tool_impl in self._plugins.tools.items():
+            for qualified_name, tool_impl in self._catalog.tools.items():
                 path = self._tool_markdown_path(tool_impl)
                 if path is None or not self._is_workspace_asset_path(path):
                     continue
@@ -1315,12 +1314,12 @@ class PocketCodeEngine:
         raise ValueError("Unsupported asset kind. Expected one of: agent, flow, tool.")
 
     def reload(self) -> None:
-        self._plugins.load()
-        # T014: reload APM after plugins reload.
-        self._agent_profile_manager.reload(dict(self._plugins.agents))
+        self._catalog.load()
+        # T014: reload APM after the catalog reloads.
+        self._agent_profile_manager.reload(dict(self._catalog.agents))
         self._skill_manager.set_registries(
-            tool_registry=self._plugins.tools,
-            prompt_registry=self._plugins.prompts,
+            tool_registry=self._catalog.tools,
+            prompt_registry=self._catalog.prompts,
         )
         self._skill_manager.load()
         self._workspace_llm_profile_manager.load()
@@ -1335,7 +1334,7 @@ class PocketCodeEngine:
                 self._activate_default_profile_for(self.current_agent)
             else:
                 self.active_agent_profile = None
-        self._llm_router = LlmRouter(config=self._config, plugin_llm_profiles=self._merged_llm_profiles())
+        self._llm_router = LlmRouter(config=self._config, resource_root_llm_profiles=self._merged_llm_profiles())
         self.config_llm_overrides = self._build_llm_overrides_config()
         self._tool_confirmation_config = self._build_tool_confirmation_config()
         self.enabled_skills = [name for name in self.enabled_skills if self._skill_manager.get(name) is not None]
@@ -1345,13 +1344,13 @@ class PocketCodeEngine:
         self._ensure_active_session()
 
     def _validate_current_selections(self) -> None:
-        if self.current_agent and self.current_agent not in self._plugins.agents:
+        if self.current_agent and self.current_agent not in self._catalog.agents:
             self.current_agent = None
 
         invalid_agent_overrides = [
             agent_name
             for agent_name in self.agent_llm_overrides.keys()
-            if agent_name not in self._plugins.agents
+            if agent_name not in self._catalog.agents
         ]
         for agent_name in invalid_agent_overrides:
             self.agent_llm_overrides.pop(agent_name, None)
@@ -1359,7 +1358,7 @@ class PocketCodeEngine:
         invalid_handoff_overrides = []
         for handoff_key in self.handoff_llm_overrides.keys():
             source, _, target = handoff_key.partition("->")
-            if source not in self._plugins.agents or target not in self._plugins.agents:
+            if source not in self._catalog.agents or target not in self._catalog.agents:
                 invalid_handoff_overrides.append(handoff_key)
         for handoff_key in invalid_handoff_overrides:
             self.handoff_llm_overrides.pop(handoff_key, None)
@@ -1378,6 +1377,8 @@ class PocketCodeEngine:
         profile_manager = getattr(self, "_agent_profile_manager", None)
         if profile_manager is None:
             return
+        catalog = self._runtime_catalog()
+        agents_registry = getattr(catalog, "agents", {})
 
         for raw_profile in list(profile_manager.list()):
             profile = profile_manager.resolve(raw_profile.name) if hasattr(profile_manager, "resolve") else raw_profile
@@ -1389,7 +1390,7 @@ class PocketCodeEngine:
                 self._drop_loaded_profile(raw_profile.name)
                 continue
             normalized_agent_name = self._normalize_agent_name(profile.agent)
-            if not normalized_agent_name or normalized_agent_name not in self._plugins.agents:
+            if not normalized_agent_name or normalized_agent_name not in agents_registry:
                 logger.warning(
                     "Agent profile '%s' targets unknown agent '%s'. Removing it from the loaded registry.",
                     profile.name,
@@ -1398,7 +1399,7 @@ class PocketCodeEngine:
                 self._drop_loaded_profile(profile.name)
                 continue
 
-            context_plugin = self._context_plugin_for_agent(normalized_agent_name)
+            context_namespace = self._context_namespace_for_agent(normalized_agent_name)
             profile.flow = normalized_agent_name
             if profile.tools is not None:
                 profile.tools = self._qualify_existing_tool_refs(
@@ -1412,13 +1413,13 @@ class PocketCodeEngine:
                     profile.hooks,
                     owner_name=profile.name,
                     field_name="hooks",
-                    context_plugin=context_plugin,
+                    context_namespace=context_namespace,
                 )
             profile.extra_prompts = self._filter_existing_prompt_refs(
                 profile.extra_prompts,
                 owner_name=profile.name,
                 field_name="extra_prompts",
-                context_plugin=context_plugin,
+                context_namespace=context_namespace,
                 allow_context_deferred=False,
             )
             self._store_loaded_profile(profile)
@@ -1442,7 +1443,7 @@ class PocketCodeEngine:
                     skill.extra_prompts,
                     owner_name=skill.name,
                     field_name="extra_prompts",
-                    context_plugin=None,
+                    context_namespace=None,
                     allow_context_deferred=True,
                 ),
             )
@@ -1507,7 +1508,7 @@ class PocketCodeEngine:
         *,
         owner_name: str,
         field_name: str,
-        context_plugin: str | None,
+        context_namespace: str | None,
     ) -> List[str]:
         qualified: List[str] = []
         for candidate in refs:
@@ -1525,7 +1526,7 @@ class PocketCodeEngine:
 
             target = normalized.as_registry_key()
             try:
-                qualified_name = self._plugins.hooks.qualify(target, context_plugin=context_plugin)
+                qualified_name = self._catalog.hooks.qualify(target, context_namespace=context_namespace)
             except RegistryError:
                 logger.warning(
                     "Dropping unknown %s reference '%s' from '%s'.",
@@ -1544,10 +1545,12 @@ class PocketCodeEngine:
         *,
         owner_name: str,
         field_name: str,
-        context_plugin: str | None,
+        context_namespace: str | None,
         allow_context_deferred: bool,
     ) -> List[str]:
         filtered: List[str] = []
+        catalog = self._runtime_catalog()
+        prompt_registry = getattr(catalog, "prompts", None)
         for ref in refs:
             candidate = str(ref or "").strip()
             if not candidate:
@@ -1567,15 +1570,15 @@ class PocketCodeEngine:
                     exc,
                 )
                 continue
-            if allow_context_deferred and context_plugin is None and not normalized_candidate.is_qualified:
+            if allow_context_deferred and context_namespace is None and not normalized_candidate.is_qualified:
                 filtered.append(candidate)
                 continue
 
             try:
                 _prompt_text, prompt_sources = resolve_prompt_reference(
                     candidate,
-                    prompt_registry=self._plugins.prompts,
-                    context_plugin=context_plugin,
+                    prompt_registry=prompt_registry,
+                    context_namespace=context_namespace,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -1595,10 +1598,14 @@ class PocketCodeEngine:
                 filtered.append(canonical_ref)
         return filtered
 
-    def _context_plugin_for_agent(self, agent_name: str | None) -> str | None:
+    def _context_namespace_for_agent(self, agent_name: str | None) -> str | None:
         if not agent_name:
             return None
-        agent_definition = self._plugins.agents.get(agent_name)
+        catalog = self._runtime_catalog()
+        agents_registry = getattr(catalog, "agents", None)
+        if agents_registry is None:
+            return None
+        agent_definition = agents_registry.get(agent_name)
         if agent_definition is None:
             return None
         return namespace_name_from_metadata(
@@ -1633,13 +1640,13 @@ class PocketCodeEngine:
 
     def list_agents(self) -> List[str]:
         """Backward-compatible alias for registered flow names."""
-        return sorted(self._plugins.agents.keys())
+        return sorted(self._catalog.agents.keys())
 
     def list_flows(self) -> List[str]:
         return self.list_agents()
 
     def list_prompts(self) -> List[str]:
-        return self._plugins.prompts.list_all()
+        return self._catalog.prompts.list_all()
 
     def list_llm_profiles(self) -> List[str]:
         return self._llm_router.list_profile_names()
@@ -1658,13 +1665,13 @@ class PocketCodeEngine:
                 "config": copy.deepcopy(workspace_entry.get("config", {})),
             }
 
-        plugin_profile = self._plugins.llm_profiles.get(target_name)
-        if isinstance(plugin_profile, dict):
+        resource_root_profile = self._catalog.llm_profiles.get(target_name)
+        if isinstance(resource_root_profile, dict):
             return {
                 "name": target_name,
-                "source": "plugin",
+                "source": "resource_root",
                 "source_path": None,
-                "config": copy.deepcopy(plugin_profile),
+                "config": copy.deepcopy(resource_root_profile),
             }
 
         configured_profiles = self._llm_config.get("profiles", {})
@@ -1692,6 +1699,9 @@ class PocketCodeEngine:
 
     def get_current_flow(self):
         return self.get_current_agent()
+
+    def _runtime_catalog(self) -> Any:
+        return getattr(self, "_catalog", None)
 
     def _normalize_textual_control_presentation(self, value: Any) -> str:
         text = str(value or "").strip().lower()
@@ -1751,8 +1761,10 @@ class PocketCodeEngine:
         user_input_popups: bool | None = None,
     ) -> Path:
         normalized_default_agent = self._normalize_agent_name(default_agent)
+        catalog = self._runtime_catalog()
+        agents_registry = getattr(catalog, "agents", {})
         if normalized_default_agent:
-            if normalized_default_agent not in self._plugins.agents:
+            if normalized_default_agent not in agents_registry:
                 raise KeyError(f"Unknown agent '{default_agent}'.")
         if default_llm_profile:
             self._llm_router.resolve_profile_config(default_llm_profile)
@@ -1819,7 +1831,7 @@ class PocketCodeEngine:
             self.enabled_skills = self._configured_enabled_skills()
             self._maybe_refresh_runtime_components()
             return
-        if normalized_agent_name not in self._plugins.agents:
+        if normalized_agent_name not in self._catalog.agents:
             raise KeyError(f"Unknown agent '{agent_name}'.")
         self.current_agent = normalized_agent_name
         # T012: auto-activate the agent's default profile.
@@ -1841,7 +1853,7 @@ class PocketCodeEngine:
                 f"Available: {available}"
             )
         normalized_profile_agent = self._normalize_agent_name(profile.agent)
-        if not normalized_profile_agent or normalized_profile_agent not in self._plugins.agents:
+        if not normalized_profile_agent or normalized_profile_agent not in self._catalog.agents:
             raise ValueError(
                 f"Agent profile '{name}' targets unknown agent '{profile.agent}'."
         )
@@ -1863,8 +1875,8 @@ class PocketCodeEngine:
             allowed_kinds={"agent", "flow"},
         )
 
-        plugins = getattr(self, "_plugins", None)
-        agents_registry = getattr(plugins, "agents", None)
+        catalog = getattr(self, "_catalog", None)
+        agents_registry = getattr(catalog, "agents", None)
         if agents_registry is None:
             return canonical_candidate
 
@@ -1885,7 +1897,7 @@ class PocketCodeEngine:
 
     def _require_known_agent_name(self, agent_name: str, *, label: str = "agent") -> str:
         normalized_agent_name = self._normalize_agent_name(agent_name)
-        if not normalized_agent_name or normalized_agent_name not in self._plugins.agents:
+        if not normalized_agent_name or normalized_agent_name not in self._catalog.agents:
             raise KeyError(f"Unknown {label} '{agent_name}'.")
         return normalized_agent_name
 
@@ -2361,7 +2373,7 @@ class PocketCodeEngine:
             normalized_flow = normalize_registry_reference(str(flow_name).strip(), allowed_kinds={"agent", "flow"})
             self._validate_live_registry_reference(
                 normalized_flow,
-                registry=self._plugins.flows,
+                registry=self._catalog.flows,
                 allowed_kinds={"agent", "flow"},
                 field_name=f"{target_path.name}: flow",
             )
@@ -2373,7 +2385,7 @@ class PocketCodeEngine:
             )
             normalized_base_agent = normalize_registry_reference(str(base_agent).strip(), allowed_kinds={"agent", "flow"})
             profile_manager = getattr(self, "_agent_profile_manager", None)
-            base_exists = normalized_base_agent in getattr(self._plugins, "agents", {})
+            base_exists = normalized_base_agent in getattr(self._catalog, "agents", {})
             if not base_exists and profile_manager is not None:
                 base_exists = profile_manager.get(normalized_base_agent) is not None
             if not base_exists:
@@ -2385,7 +2397,7 @@ class PocketCodeEngine:
                 raise ValueError(f"{target_path.name}: tools must be a list when provided.")
             self._validate_live_registry_reference_list(
                 tools_raw,
-                registry=self._plugins.tools,
+                registry=self._catalog.tools,
                 allowed_kinds={"tool"},
                 field_name_prefix=f"{target_path.name}: tools",
             )
@@ -2396,7 +2408,7 @@ class PocketCodeEngine:
                 raise ValueError(f"{target_path.name}: hooks must be a list when provided.")
             self._validate_live_registry_reference_list(
                 hooks_raw,
-                registry=self._plugins.hooks,
+                registry=self._catalog.hooks,
                 allowed_kinds={"hook"},
                 field_name_prefix=f"{target_path.name}: hooks",
             )
@@ -2431,27 +2443,27 @@ class PocketCodeEngine:
             files_key="prompt_files",
             default_files=[],
             fallback_dirs=self._workspace_prompt_fallback_dirs(),
-            prompt_registry=getattr(self._plugins, "prompts", None),
-            context_plugin="workspace",
+            prompt_registry=getattr(self._catalog, "prompts", None),
+            context_namespace="workspace",
         )
 
         self._validate_live_registry_reference_list(
             coerce_str_list(flow_definition.get("tools")),
-            registry=self._plugins.tools,
+            registry=self._catalog.tools,
             allowed_kinds={"tool"},
             field_name_prefix=f"{target_path.name}: tools",
         )
 
         self._validate_live_registry_reference_list(
             coerce_str_list(flow_definition.get("handoff_agents")),
-            registry=self._plugins.flows,
+            registry=self._catalog.flows,
             allowed_kinds={"agent", "flow"},
             field_name_prefix=f"{target_path.name}: handoff_agents",
         )
 
         self._validate_live_registry_reference_list(
             coerce_str_list(flow_definition.get("composite_agents")),
-            registry=self._plugins.flows,
+            registry=self._catalog.flows,
             allowed_kinds={"agent", "flow"},
             field_name_prefix=f"{target_path.name}: composite_agents",
         )
@@ -2475,8 +2487,8 @@ class PocketCodeEngine:
             source_path=target_path,
             expand_includes=True,
             fallback_dirs=self._workspace_prompt_fallback_dirs(),
-            prompt_registry=getattr(self._plugins, "prompts", None),
-            context_plugin="workspace",
+            prompt_registry=getattr(self._catalog, "prompts", None),
+            context_namespace="workspace",
         )
 
     def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
@@ -2495,7 +2507,7 @@ class PocketCodeEngine:
         self._qualify_registry_reference_or_raise(
             registry,
             normalized_reference,
-            context_plugin="workspace",
+            context_namespace="workspace",
             error_prefix=field_name,
         )
         return normalized_reference
@@ -2528,11 +2540,11 @@ class PocketCodeEngine:
         registry: Any,
         reference: str,
         *,
-        context_plugin: str | None,
+        context_namespace: str | None,
         error_prefix: str,
     ) -> str:
         try:
-            return registry.qualify(reference, context_plugin=context_plugin)
+            return registry.qualify(reference, context_namespace=context_namespace)
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"{error_prefix} could not be resolved: {reference} ({exc})") from exc
 
@@ -2541,8 +2553,8 @@ class PocketCodeEngine:
             try:
                 resolve_prompt_reference(
                     prompt_ref,
-                    prompt_registry=getattr(self._plugins, "prompts", None),
-                    context_plugin="workspace",
+                    prompt_registry=getattr(self._catalog, "prompts", None),
+                    context_namespace="workspace",
                 )
             except Exception as exc:  # noqa: BLE001
                 raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
@@ -2553,8 +2565,8 @@ class PocketCodeEngine:
                 base_dir=source_path.parent,
                 prompt_file=prompt_ref,
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
-                prompt_registry=getattr(self._plugins, "prompts", None),
-                context_plugin="workspace",
+                prompt_registry=getattr(self._catalog, "prompts", None),
+                context_namespace="workspace",
             )
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
@@ -2622,7 +2634,7 @@ class PocketCodeEngine:
 
     def _is_workspace_asset_path(self, path: Path) -> bool:
         resolved = Path(path).resolve()
-        resource_roots = getattr(getattr(self, "_plugins", None), "resource_roots", None)
+        resource_roots = getattr(getattr(self, "_catalog", None), "resource_roots", None)
         if not resource_roots:
             resource_roots = [primary_resource_root(self._workspace_root)]
         return any(self._path_is_within(resolved, resource_root.path) for resource_root in resource_roots)
@@ -2649,15 +2661,15 @@ class PocketCodeEngine:
 
     def _resolve_workspace_markdown_flow(self, name: str) -> tuple[Any, Path]:
         candidates: list[str] = []
-        if "." in name and name in self._plugins.flows:
+        if "." in name and name in self._catalog.flows:
             candidates.append(name)
         else:
-            candidates.extend(self._plugins.flows.owners_for(name))
+            candidates.extend(self._catalog.flows.owners_for(name))
 
         matches: list[tuple[Any, Path]] = []
         seen_paths: set[Path] = set()
         for qualified_name in candidates:
-            flow_def = self._plugins.flows.get(qualified_name)
+            flow_def = self._catalog.flows.get(qualified_name)
             if flow_def is None:
                 continue
             path = self._flow_markdown_path(flow_def)
@@ -2753,7 +2765,7 @@ class PocketCodeEngine:
 
     def _resolve_stackvm_flow_definition(self, name: str) -> tuple[str, FlowDefinition]:
         normalized_name = self._require_known_agent_name(name)
-        definition = self._plugins.agents.get(normalized_name)
+        definition = self._catalog.agents.get(normalized_name)
         if definition is None:
             raise ValueError(f"Unknown flow '{name}'.")
         if str(getattr(definition, "execution_mode", "")).strip().lower() != "vm":
@@ -2998,8 +3010,8 @@ class PocketCodeEngine:
         }
         active_profile.flow = qualified_name
 
-        self._plugins.agents.unregister_namespace(namespace)
-        self._plugins.agents.register(namespace, flow_name, definition)
+        self._catalog.agents.unregister_namespace(namespace)
+        self._catalog.agents.register(namespace, flow_name, definition)
         try:
             result = self._run_stackvm_flow_definition(
                 flow_name=qualified_name,
@@ -3011,7 +3023,7 @@ class PocketCodeEngine:
                 entry_override=definition.vm_entry,
             )
         finally:
-            self._plugins.agents.unregister_namespace(namespace)
+            self._catalog.agents.unregister_namespace(namespace)
 
         result["target_kind"] = "script"
         result["name"] = self._stackvm_script_display_name(script_path)
@@ -3021,15 +3033,15 @@ class PocketCodeEngine:
 
     def _resolve_workspace_markdown_tool(self, name: str) -> tuple[str, str, Any, Path]:
         candidates: list[str] = []
-        if "." in name and name in self._plugins.tools:
+        if "." in name and name in self._catalog.tools:
             candidates.append(name)
         else:
-            candidates.extend(self._plugins.tools.owners_for(name))
+            candidates.extend(self._catalog.tools.owners_for(name))
 
         matches: list[tuple[str, str, Any, Path]] = []
         seen_paths: set[Path] = set()
         for qualified_name in candidates:
-            tool_impl = self._plugins.tools.get(qualified_name)
+            tool_impl = self._catalog.tools.get(qualified_name)
             if tool_impl is None:
                 continue
             path = self._tool_markdown_path(tool_impl)
@@ -3100,6 +3112,8 @@ class PocketCodeEngine:
         skills: Any = _UNSET,
     ) -> Any:
         """Persist updates to a workspace-backed agent profile and refresh runtime state."""
+        catalog = self._runtime_catalog()
+        agents_registry = getattr(catalog, "agents", {})
         profile = self._base_agent_profile(name)
         if profile is None:
             raise ValueError(f"Unknown agent profile '{name}'.")
@@ -3144,7 +3158,7 @@ class PocketCodeEngine:
             tool_confirmation=confirmation,
         )
         self._agent_profile_manager.save(updated)
-        self._agent_profile_manager.reload(dict(self._plugins.agents))
+        self._agent_profile_manager.reload(dict(agents_registry))
         refreshed = self._resolved_agent_profile(name)
         if refreshed is not None and self.active_agent_profile and self.active_agent_profile.name == name:
             self.active_agent_profile = self._apply_session_profile_overrides(refreshed)
@@ -3282,7 +3296,7 @@ class PocketCodeEngine:
         if not apply_active_profile and normalized_agent_name in self._agent_tools_cache:
             return list(self._agent_tools_cache[normalized_agent_name])
 
-        tool_names = list(self._plugins.resolve_tools_for_agent(normalized_agent_name))
+        tool_names = list(self._catalog.resolve_tools_for_agent(normalized_agent_name))
         if apply_active_profile:
             active_profile = self.active_agent_profile
             if (
@@ -3323,7 +3337,7 @@ class PocketCodeEngine:
                 "tools": [],
             }
         normalized_target = self._require_known_agent_name(target)
-        definition = self._plugins.agents.get(normalized_target)
+        definition = self._catalog.agents.get(normalized_target)
         if definition is None:
             raise KeyError(f"Unknown agent '{target}'.")
         return {
@@ -3344,7 +3358,7 @@ class PocketCodeEngine:
         if not target:
             return []
         normalized_target = self._require_known_agent_name(target)
-        definition = self._plugins.agents.get(normalized_target)
+        definition = self._catalog.agents.get(normalized_target)
         if definition is None:
             raise KeyError(f"Unknown agent '{target}'.")
         return list(definition.prompt_sources)
@@ -3361,7 +3375,7 @@ class PocketCodeEngine:
         normalized_agent_name = self._normalize_agent_name(agent_name)
         if not normalized_agent_name:
             return None
-        defn = self._plugins.agents.get(normalized_agent_name)
+        defn = self._catalog.agents.get(normalized_agent_name)
         if defn is None:
             return None
         explicit = getattr(defn, "default_agent_profile", None)
@@ -3421,7 +3435,7 @@ class PocketCodeEngine:
 
     def describe_tools_for_agent(self, agent_name: str) -> List[Dict[str, Any]]:
         normalized_agent_name = self._require_known_agent_name(agent_name)
-        tool_names = self._plugins.resolve_tools_for_agent(normalized_agent_name)
+        tool_names = self._catalog.resolve_tools_for_agent(normalized_agent_name)
         active_profile = self.active_agent_profile
         if (
             active_profile is not None
@@ -4004,7 +4018,7 @@ class PocketCodeEngine:
         }
 
     def _build_tool_runtime(self) -> ToolRuntime:
-        merged_tools = dict(self._plugins.tools.items())
+        merged_tools = dict(self._catalog.tools.items())
         merged_tools.update(self._active_skill_provided_tools())
         return ToolRuntime(
             tools=merged_tools,
@@ -4042,13 +4056,19 @@ class PocketCodeEngine:
             return None
         if candidate.startswith("skill."):
             return candidate
-        context_plugin = None
-        if context_agent:
-            agent_definition = self._plugins.agents.get(context_agent)
+        catalog = self._runtime_catalog()
+        agents_registry = getattr(catalog, "agents", None)
+        tools_registry = getattr(catalog, "tools", None)
+        context_namespace = None
+        if context_agent and agents_registry is not None:
+            agent_definition = agents_registry.get(context_agent)
             if agent_definition is not None:
-                context_plugin = (agent_definition.metadata or {}).get("plugin")
+                metadata = agent_definition.metadata or {}
+                context_namespace = metadata.get("namespace")
         try:
-            return self._plugins.tools.qualify(candidate, context_plugin=context_plugin)
+            if tools_registry is None:
+                return candidate
+            return tools_registry.qualify(candidate, context_namespace=context_namespace)
         except RegistryError as exc:
             raise ValueError(str(exc)) from exc
 
@@ -4357,13 +4377,13 @@ class PocketCodeEngine:
         }
 
     def _merged_llm_profiles(self) -> Dict[str, Dict[str, Any]]:
-        merged = dict(self._plugins.llm_profiles)
+        merged = dict(self._catalog.llm_profiles)
         merged.update(self._workspace_llm_profile_manager.list_profiles())
         return merged
 
     def _reload_llm_runtime(self) -> None:
         self._workspace_llm_profile_manager.load()
-        self._llm_router = LlmRouter(config=self._config, plugin_llm_profiles=self._merged_llm_profiles())
+        self._llm_router = LlmRouter(config=self._config, resource_root_llm_profiles=self._merged_llm_profiles())
         self.default_llm_profile = (
             self._llm_config.get("default_profile")
             or self._llm_router.default_profile_name
@@ -4416,7 +4436,7 @@ class PocketCodeEngine:
         }
 
     def _maybe_refresh_runtime_components(self) -> None:
-        if not hasattr(self, "_plugins") or not hasattr(self._plugins, "tools"):
+        if not hasattr(self, "_catalog") or not hasattr(self._catalog, "tools"):
             return
         required_attrs = ("_runtime_config", "_tool_confirmation_config", "_llm_router")
         if not all(hasattr(self, attr_name) for attr_name in required_attrs):
@@ -4426,7 +4446,7 @@ class PocketCodeEngine:
     def _refresh_runtime_components(self) -> None:
         self._tool_runtime = self._build_tool_runtime()
         self._agent_runtime = AgentRuntime(
-            catalog=self._plugins,
+            catalog=self._catalog,
             llm_router=self._llm_router,
             tool_runtime=self._tool_runtime,
             runtime_config=self._runtime_config,

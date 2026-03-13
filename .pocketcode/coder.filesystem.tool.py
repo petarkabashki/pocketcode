@@ -1,4 +1,4 @@
-"""Compatibility re-export for coder plugin filesystem tools.
+"""Compatibility re-export for coder namespace filesystem tools.
 
 The canonical implementation lives in pocketcode.core_tools.filesystem.
 """

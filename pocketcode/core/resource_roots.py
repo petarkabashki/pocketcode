@@ -11,7 +11,6 @@ RESOURCE_ROOT_HINTS = frozenset(
         "skills",
         "prompts",
         "tools",
-        "plugins",
         "llm-profiles",
         "state",
         "workspace.yaml",

@@ -30,12 +30,11 @@ PocketCoder executes:
 ## Skill and workspace tool loading
 
 `markdown_profiles.py` loads skill-owned tools from `tools/*.py`.
-Workspace tools are loaded separately from `.pocketcode/*.tool.py or .pocketcode/*.tool.md` by the plugin/runtime stack.
+Workspace tools are loaded separately from `.pocketcode/*.tool.py or .pocketcode/*.tool.md` by the resource-root/catalog runtime.
 
 ## Editing rules
 
 1. Keep schemas small and concrete.
-2. Decide early whether the tool is plugin-local, workspace-shared, or skill-local.
+2. Decide early whether the tool is namespace-local, workspace-shared, or skill-local.
 3. Use managed subprocess only when in-process execution is unsuitable.
 4. Test the runtime path that will actually execute the tool.
-

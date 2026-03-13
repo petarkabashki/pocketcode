@@ -58,7 +58,7 @@ runtime:
       active_profile: my-react
       global_llm_profile: gemini-3-flash-preview
       skills:
-      - pocketcode-plugin-authoring
+      - pocketcode-namespace-authoring
       - pocketcode-profiles-prompts
       - pocketcode-tools-runtime
       - pocketcode-workspace-assets
@@ -67,7 +67,7 @@ runtime:
     theme_name: forest
     workspace_view: control_desk
     default_skills:
-    - pocketcode-plugin-authoring
+    - pocketcode-namespace-authoring
     - pocketcode-profiles-prompts
     - pocketcode-tools-runtime
     - pocketcode-workspace-assets

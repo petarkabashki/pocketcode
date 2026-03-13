@@ -56,9 +56,9 @@ Use `switch` when a routing decision is based on exact values such as intents, s
 ```text
 "user_intent" store-get
 [
-  "billing" [ "plugin.billing_route" handoff ]
-  "tech" [ "plugin.tech_route" handoff ]
-  "default" [ "plugin.general_route" handoff ]
+  "billing" [ "router.billing_route" handoff ]
+  "tech" [ "router.tech_route" handoff ]
+  "default" [ "router.general_route" handoff ]
 ]
 switch
 ```
@@ -71,9 +71,9 @@ Use `cond` when each route depends on a computed rule instead of a single exact-
 
 ```text
 [
-  [ "severity" store-get "critical" = ] [ "plugin.incident_route" handoff ]
-  [ "needs_human" store-get bool> ] [ "plugin.human_route" handoff ]
-  [ True ] [ "plugin.self_serve_route" handoff ]
+  [ "severity" store-get "critical" = ] [ "router.incident_route" handoff ]
+  [ "needs_human" store-get bool> ] [ "router.human_route" handoff ]
+  [ True ] [ "router.self_serve_route" handoff ]
 ]
 cond
 ```
@@ -136,9 +136,9 @@ Use `cond` after `reduce` when a numeric aggregate should determine which downst
 reduce
 dup "normalized.total" shared!? drop
 [
-  [ "normalized.total" shared@ 10 >= ] [ "plugin.high_route" handoff ]
-  [ "normalized.total" shared@ 5 >= ] [ "plugin.review_route" handoff ]
-  [ True ] [ "plugin.low_route" handoff ]
+  [ "normalized.total" shared@ 10 >= ] [ "router.high_route" handoff ]
+  [ "normalized.total" shared@ 5 >= ] [ "router.review_route" handoff ]
+  [ True ] [ "router.low_route" handoff ]
 ]
 cond
 ```
@@ -336,7 +336,7 @@ Use `pending_handoff_policy` with `return_to_caller: true` when the delegate sho
 ```text
 "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
 "pending_handoff_policy" store-set
-"plugin.delegate" handoff
+"router.delegate" handoff
 ```
 
 The caller can then read `last_delegated_result` on the next turn.
@@ -348,7 +348,7 @@ Use `delegate-return` when the caller should hand off with `return_to_caller` an
 ```text
 "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
 "pending_handoff_policy" store-set
-"plugin.delegate"
+"router.delegate"
 "last_delegated_result.answer"
 delegate-return
 ```
@@ -381,11 +381,11 @@ When the delegate should return a machine-readable decision, have it answer with
   swap "note" dict-get dup "normalized.delegate_note" shared!? drop
 
   "normalized.final_route" shared@ "approve" =
-  [ "plugin.approve_route" handoff ]
+  [ "router.approve_route" handoff ]
   [
     "normalized.final_route" shared@ "escalate" =
-    [ "plugin.escalate_route" handoff ]
-    [ "plugin.review_route" handoff ]
+    [ "router.escalate_route" handoff ]
+    [ "router.review_route" handoff ]
     if
   ]
   if
@@ -426,11 +426,11 @@ When the delegate should return a nested machine-readable decision, parse the YA
   drop
 
   "normalized.final_route" shared@ "approve" =
-  [ "plugin.approve_route" handoff ]
+  [ "router.approve_route" handoff ]
   [
     "normalized.final_route" shared@ "escalate" =
-    [ "plugin.escalate_route" handoff ]
-    [ "plugin.review_route" handoff ]
+    [ "router.escalate_route" handoff ]
+    [ "router.review_route" handoff ]
     if
   ]
   if
@@ -564,17 +564,17 @@ format-selected-actions
 over "delegate" contains?
 [
   swap drop drop
-  "plugin.delegate_route" handoff
+  "router.delegate_route" handoff
 ]
 [
   over "approve" contains?
   [
     swap drop drop
-    "plugin.approve_route" handoff
+    "router.approve_route" handoff
   ]
   [
     swap drop drop
-    "plugin.review_route" handoff
+    "router.review_route" handoff
   ]
   if
 ]
@@ -600,7 +600,7 @@ Use a caller flow for the first interaction, hand off with `return_to_caller`, l
   swap drop drop
   "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
   "pending_handoff_policy" store-set
-  "plugin.confirm_delegate" handoff
+  "router.confirm_delegate" handoff
 ]
 tool-once
 

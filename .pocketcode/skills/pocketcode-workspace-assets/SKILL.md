@@ -6,17 +6,16 @@ tools:
   - core.list_files
   - core.glob_files
 ---
-Use this skill for workspace-scoped assets that are not owned by a single plugin.
+Use this skill for workspace-scoped assets that are not owned by a single namespace.
 
 Read first:
 - `references/workspace-assets.md`
 
-Choose workspace scope when the asset is intentionally shared across plugins or sessions:
+Choose workspace scope when the asset is intentionally shared across namespaces or sessions:
 - `.pocketcode/*.tool.py or .pocketcode/*.tool.md`
 - `.pocketcode/prompts/`
 - `.pocketcode/skills/`
 - `.pocketcode/modes/`
 - `.pocketcode/*.agent.*`
 
-Prefer plugin scope when the asset is specific to one plugin.
-
+Prefer namespace scope when the asset is specific to one namespace.

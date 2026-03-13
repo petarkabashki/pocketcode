@@ -39,7 +39,7 @@ class NamespaceRegistry(Generic[T]):
         reg: NamespaceRegistry[MyType] = NamespaceRegistry()
         reg.register("core", "read_file", ReadFileTool)
         impl = reg.resolve("core.read_file")
-        impl = reg.resolve("read_file", context_plugin="core")  # local resolution
+        impl = reg.resolve("read_file", context_namespace="core")  # local namespace resolution
     """
 
     def __init__(self) -> None:
@@ -52,15 +52,15 @@ class NamespaceRegistry(Generic[T]):
 
     # ── Writing API ──────────────────────────────────────────────────────────
 
-    def register(self, plugin: str, name: str, impl: T) -> None:
+    def register(self, namespace: str, name: str, impl: T) -> None:
         """Register a resource. Raises RegistryError on qualified-name collision."""
-        qname = f"{plugin}.{name}"
+        qname = f"{namespace}.{name}"
         if qname in self._flat:
             raise RegistryError(
                 f"Qualified name collision: '{qname}' already registered. "
-                f"Cannot register from '{plugin}'."
+                f"Cannot register from '{namespace}'."
             )
-        self._ns.setdefault(plugin, {})[name] = impl
+        self._ns.setdefault(namespace, {})[name] = impl
         self._flat[qname] = impl
         self._bare[name].append(qname)
 
@@ -78,21 +78,21 @@ class NamespaceRegistry(Generic[T]):
 
     # ── Reading API ──────────────────────────────────────────────────────────
 
-    def resolve(self, ref: str, *, context_plugin: Optional[str] = None) -> T:
+    def resolve(self, ref: str, *, context_namespace: Optional[str] = None) -> T:
         """
         Resolve a qualified (``"namespace.name"``) or unqualified
         (``"name"``) reference.
 
         Resolution rules:
             - ``"namespace.name"`` → direct ``_flat`` lookup; ``RegistryError`` if missing.
-            - ``"name"`` with *context_plugin* → tries local plugin first, then global.
+            - ``"name"`` with *context_namespace* → tries the local namespace first, then global.
             - ``"name"`` (1 owner) → ``WARNING`` log; resolves.
             - ``"name"`` (2+ owners) → ``RegistryError``.
             - ``"name"`` (0 owners) → ``RegistryError``.
         """
-        return self._flat[self.qualify(ref, context_plugin=context_plugin)]
+        return self._flat[self.qualify(ref, context_namespace=context_namespace)]
 
-    def qualify(self, ref: str, *, context_plugin: Optional[str] = None) -> str:
+    def qualify(self, ref: str, *, context_namespace: Optional[str] = None) -> str:
         """Resolve *ref* to its qualified ``namespace.name`` form."""
         ref = self._normalize_ref(ref)
 
@@ -104,9 +104,9 @@ class NamespaceRegistry(Generic[T]):
                 raise RegistryError(f"Resource not found: '{ref}'")
             return ref
 
-        # FR-004: intra-plugin local resolution first
-        if context_plugin:
-            local_qname = f"{context_plugin}.{ref}"
+        # FR-004: intra-namespace local resolution first
+        if context_namespace:
+            local_qname = f"{context_namespace}.{ref}"
             if local_qname in self._flat:
                 return local_qname
 
@@ -128,9 +128,9 @@ class NamespaceRegistry(Generic[T]):
             + ". Use a qualified name."
         )
 
-    def has_local(self, plugin: str, name: str) -> bool:
-        """Return True when *plugin* owns *name*."""
-        return f"{plugin}.{name}" in self._flat
+    def has_local(self, namespace: str, name: str) -> bool:
+        """Return True when *namespace* owns *name*."""
+        return f"{namespace}.{name}" in self._flat
 
     def owners_for(self, name: str) -> List[str]:
         """Return qualified owners for an unqualified bare name."""
@@ -200,7 +200,7 @@ class NamespaceRegistry(Generic[T]):
         Pattern::
 
             new_reg = NamespaceRegistry()
-            for namespace, name, impl in load_all_plugins():
+            for namespace, name, impl in load_all_resources():
                 new_reg.register(namespace, name, impl)
             holder.swap(new_pm)          # atomic pointer swap
         """

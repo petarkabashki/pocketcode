@@ -24,7 +24,7 @@ Primary sources:
 
 ## PocketCoder-specific usage
 
-PocketCoder uses PocketFlow factories as plugin flows:
+PocketCoder uses PocketFlow factories as namespace-backed flows:
 - the factory must be zero-arg
 - it should return `Flow(start=...)`
 - a common single-node pattern is to return `llm_delegate` when `_llm_router` is present and `continue` otherwise
@@ -36,4 +36,3 @@ PocketCoder uses PocketFlow factories as plugin flows:
 3. Keep `prep`, `exec`, and `post` narrowly scoped.
 4. Wire the smallest graph that satisfies the task.
 5. Verify the transitions actually match the strings returned by `post()`.
-

@@ -2,13 +2,13 @@
 
 This document is the canonical reference for PocketCoder's Markdown-authored assets.
 
-PocketCoder does not run a second Markdown-specific runtime. Markdown files are authoring inputs that compile into the same prompt, tool, flow, agent-profile, and skill models used elsewhere in the system.
+PocketCoder does not run a second Markdown-specific runtime. Markdown files are authoring inputs that compile into the same prompt, tool, flow, agent, and skill models used elsewhere in the system.
 
 Use this document together with:
 
 - `architecture.md` for startup order and registry behavior
 - `configuration.md` for workspace and resource-root paths
-- `agent_system.md` for agent-profile semantics
+- `agent_system.md` for agent semantics and compatibility profile terminology
 - `modes_and_skills.md` for skill behavior and legacy mode migration notes
 - `cli.md` for `/asset` creation, editing, and cloning
 
@@ -21,7 +21,7 @@ PocketCoder currently uses Markdown for these asset surfaces:
 | Prompt | `<resource_root>/*.prompt.md`, `<resource_root>/prompts/**/*.md`, namespace `*.prompt.md`, path-based prompt includes | prompt text plus source tracking |
 | Tool | adjacent `*.tool.py` modules, `<resource_root>/*.tool.md`, `<resource_root>/tools/**/*.tool.md`, `<resource_root>/tools/**/*.tool.py`, `<resource_root>/tool.<group>/**/*.tool.md`, `<resource_root>/tool.<group>/**/*.tool.py` | wrapped executable tool metadata plus Python handler |
 | Flow | namespace `*.md`, `<resource_root>/*.md` | `FlowDefinition` with either a loaded PocketFlow factory or StackVM program source |
-| Agent profile | `<resource_root>/*.agent.md`, `<resource_root>/*.agent.yaml`, `<resource_root>/agents/**/*.agent.md`, `<resource_root>/agents/**/*.agent.yaml`, `<resource_root>/agent.<group>/**/*.agent.md`, `<resource_root>/agent.<group>/**/*.agent.yaml` | `CompositeAgent` / agent profile; may also include an embedded `FlowDefinition` for self-contained agents |
+| Agent | `<resource_root>/*.agent.md`, `<resource_root>/*.agent.yaml`, `<resource_root>/agents/**/*.agent.md`, `<resource_root>/agents/**/*.agent.yaml`, `<resource_root>/agent.<group>/**/*.agent.md`, `<resource_root>/agent.<group>/**/*.agent.yaml` | `CompositeAgent`; may also include an embedded `FlowDefinition` for self-contained agents |
 | Skill | `<resource_root>/skills/<name>/SKILL.md`, `<resource_root>/skill.<name>/SKILL.md` | `SkillDefinition` |
 
 Discovered resource roots accept both root-local assets such as `review.md` and flat namespace-pack files whose filenames carry the namespace prefix such as `coder.coder.md` and `coder.git.tool.py`. They also accept collection folders for prompts, tools, agents, and skills. The default workspace `.pocketcode/` root and the built-in package root `pocketcode/.pocketcore/` both use that discovery model. `runtime.workspace_paths` is reserved for additional plain namespace roots with executable `*.md` files plus adjacent `*.tool.py` and `*.prompt.md` siblings.
@@ -35,6 +35,8 @@ Collection-folder naming rules:
 - Python tool modules discovered in `tools/` or `tool.<group>/` still export the public tool names declared by the module itself
 
 Markdown-backed assets participate in the same registries and precedence rules as direct resource folders and Python factories referenced from Markdown.
+
+The current runtime still uses some internal `profile` naming for backward compatibility. In this document, `.agent.*` files are treated as authored agents, whether they are pure overlays or self-contained executable agents.
 
 ## Common Syntax
 
@@ -89,7 +91,7 @@ The meaning of the body depends on asset kind:
 - prompts: the whole file is prompt text
 - tools: description text when no explicit `description` field is set
 - flows: prompt text merged into the flow prompt bundle
-- agent profiles: `inline_prompt`
+- agents: `inline_prompt`
 - skills: inline skill guidance text
 
 ## Includes And Prompt Imports
@@ -244,7 +246,7 @@ The loader resolves those through the shared prompt bundle path and stores the r
 
 Markdown agents compile into the same `CompositeAgent` model used by YAML agent files.
 
-Current supported front matter keys mirror the agent profile schema:
+Current supported front matter keys mirror the agent schema:
 
 - `name`
 - `flow`
@@ -326,7 +328,7 @@ Current runtime enforcement updates:
 
 ### Self-Contained Hybrid Agents
 
-Markdown agent profiles can optionally include flow definition fields (like `vm_source`, `vm_entry`, or `module`) to create a self-contained hybrid agent. This allows logic and personality to coexist in a single file.
+Markdown agents can optionally include flow definition fields (like `vm_source`, `vm_entry`, or `module`) to create a self-contained executable agent. This allows logic and personality to coexist in a single file.
 
 If any flow-related fields are detected in the front matter or fenced blocks, the system synthesizes a matching `FlowDefinition` and registers it automatically.
 
@@ -347,10 +349,10 @@ You are an echo bot.
 
 Current load and save behavior:
 
-- workspace profiles load from both legacy flat `<resource_root>/*.agent.yaml` or `<resource_root>/*.agent.md` files and grouped `agent.<group>/` collections
-- new or cloned workspace agent profiles are written under `agent.<group>/...`, using the first name segment as the group directory
-- saving a Markdown-backed workspace profile preserves Markdown format instead of rewriting to YAML
-- cloning a Markdown-backed workspace profile preserves its Markdown naming convention, including `.agent.md`
+- workspace agents load from both legacy flat `<resource_root>/*.agent.yaml` or `<resource_root>/*.agent.md` files and grouped `agent.<group>/` collections
+- new or cloned workspace agents are written under `agent.<group>/...`, using the first name segment as the group directory
+- saving a Markdown-backed workspace agent preserves Markdown format instead of rewriting to YAML
+- cloning a Markdown-backed workspace agent preserves its Markdown naming convention, including `.agent.md`
 - when a Markdown-backed agent has `base_agent`, save writes it back as `extends`
 
 Current validation behavior:
@@ -435,7 +437,7 @@ The most relevant implementation files are:
 - `pocketcode/core/markdown_graph_flow.py`
 - `pocketcode/core/prompt_loader.py`
 - `pocketcode/core/workspace_catalog.py` for the canonical `WorkspaceCatalog` import surface
-- `pocketcode/core/plugin_manager.py` as the current implementation module behind `WorkspaceCatalog`
+- `pocketcode/core/workspace_catalog.py` as the current implementation module behind runtime resource discovery
 - `pocketcode/core/agent_profile_manager.py`
 - `pocketcode/core/markdown_profiles.py`
 - `pocketcode/core/engine.py`

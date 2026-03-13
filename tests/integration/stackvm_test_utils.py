@@ -14,24 +14,24 @@ def write_fixture(workspace_root: Path, filename: str, lines: list[str]) -> None
     (workspace_root / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_temp_stackvm_plugin(
+def write_temp_stackvm_namespace(
     workspace_root: Path,
     *,
-    plugin_dir_name: str,
-    plugin_name: str,
-    plugin_description: str,
+    namespace_dir_name: str,
+    namespace_name: str,
+    namespace_description: str,
     flow_name: str,
     flow_description: str,
     flow_body_lines: Sequence[str],
     vm_lines: Sequence[str],
 ) -> tuple[Path, str]:
-    plugin_root = workspace_root / plugin_name
-    vm_dir = plugin_root / "vm"
-    plugin_root.mkdir(parents=True)
+    namespace_root = workspace_root / namespace_name
+    vm_dir = namespace_root / "vm"
+    namespace_root.mkdir(parents=True)
     vm_dir.mkdir(parents=True)
 
     write_fixture(
-        plugin_root,
+        namespace_root,
         f"{flow_name}.md",
         [
             "---",
@@ -46,7 +46,7 @@ def write_temp_stackvm_plugin(
         ],
     )
     write_fixture(vm_dir, "router.vm", list(vm_lines))
-    return plugin_root, f"{plugin_name}.{flow_name}"
+    return namespace_root, f"{namespace_name}.{flow_name}"
 
 
 def make_example_engine(

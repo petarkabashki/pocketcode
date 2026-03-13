@@ -26,12 +26,12 @@ class PathBNode(Node):
         return "final_answer"
 
 def test_pocketflow_conditional_branching():
-    plugin_manager = MagicMock(spec=WorkspaceCatalog)
+    catalog = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
     tool_runtime = MagicMock(spec=ToolRuntime)
     
     runtime = AgentRuntime(
-        catalog=plugin_manager,
+        catalog=catalog,
         llm_router=llm_router,
         tool_runtime=tool_runtime,
         runtime_config={}
@@ -52,7 +52,7 @@ def test_pocketflow_conditional_branching():
         flow_instance=flow,
         metadata={}
     )
-    plugin_manager.agents = {"test-branch-agent": agent_def}
+    catalog.agents = {"test-branch-agent": agent_def}
     
     # Test Path A
     shared_a = {"active_agent": "test-branch-agent", "requested_path": "path_a"}

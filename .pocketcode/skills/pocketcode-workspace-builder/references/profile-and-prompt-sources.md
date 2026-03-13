@@ -27,13 +27,13 @@ Primary sources:
 ## Agent profile precedence
 
 `agent_profile_manager.py` loads agents in this order:
-1. plugin-declared default agent
-2. plugin-local `agents/*.yaml`
+1. namespace-declared default agent
+2. namespace-local `.agent.*`
 3. workspace `.pocketcode/*.agent.yaml`
 4. synthesized default profile from the flow definition
 
 Collision precedence is:
-- plugin
+- namespace
 - workspace
 - synthesized
 
@@ -77,9 +77,8 @@ Skill directories can also provide:
 ## Authoring checklist
 
 When editing profiles or prompts:
-1. Decide whether the change belongs in the flow definition, a plugin-local agent YAML, a workspace agent YAML, a mode, or a skill.
+1. Decide whether the change belongs in the flow definition, a namespace-local agent file, a workspace agent YAML, a mode, or a skill.
 2. Keep prompt files local to the asset when possible.
 3. Use `extra_prompts` for reusable overlays, not for the asset's primary prompt.
 4. Keep `tool_confirmation` precise; avoid broad overrides unless necessary.
 5. If the workspace may be portable, avoid prompt includes that depend on repo-only paths.
-

@@ -57,6 +57,11 @@ def parse_reference(
         if not target:
             raise ValueError(f"Typed reference '{kind}:' is missing a target.")
 
+    # Legacy compatibility: older configs and tests still use ``namespace::name``.
+    # The canonical registry key format is dotted ``namespace.name``.
+    if "::" in target:
+        target = target.replace("::", ".")
+
     if "#" in target:
         container, name = target.split("#", 1)
         container = container.strip()

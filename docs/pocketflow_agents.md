@@ -2,11 +2,11 @@
 
 This document describes the current relationship between executable flows and inheritable agents.
 
-For the canonical Markdown file formats for flows and profiles, see `markdown_assets.md`.
+For the canonical Markdown file formats for flows and agents, see `markdown_assets.md`.
 
 ## One Executable Model, Multiple Agent Layers
 
-PocketCoder executes flows. Agents do not replace flows; they configure how a selected flow runs.
+PocketCoder executes flows. Agents do not replace flows; they configure how a selected flow runs. For new work, the preferred shape is a self-contained Markdown agent that contains both the VM program and the authored agent metadata.
 
 The current stack is:
 
@@ -154,7 +154,7 @@ Markdown agents can also define their own flow logic directly in the same file. 
 
 This pattern is ideal for simple, portable agents where personality and control logic are tightly coupled.
 
-Do not confuse those profile files with configured namespace assets. In plain namespace folders and flat namespace-pack roots, plain executable `.md` files are treated as runtime flows, not as profile overlays.
+Do not confuse those `.agent.*` files with configured namespace assets. In plain namespace folders and flat namespace-pack roots, plain executable `.md` files are treated as runtime flows, not as agent overlays.
 
 ## Synthesised Defaults
 

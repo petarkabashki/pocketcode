@@ -901,7 +901,7 @@ Pocketcode Commands:
   /debug <request text>          Run one request under the interactive debugger.
   /prompts                       List registered prompts.
   /skill <cmd> [opts]            Inspect runtime skills. Run '/skill help'.
-  /reload                        Reload plugins and runtime catalogs.
+  /reload                        Reload resource roots and runtime catalogs.
   /stop, /cancel                 Request cancellation of the active run.
   /status [verbose|steps]        Show runtime status and optional step trace.
   /context <cmd> [opts]          Manage context. Run '/context help'.

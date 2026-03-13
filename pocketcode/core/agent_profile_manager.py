@@ -134,7 +134,7 @@ class CompositeAgentManager:
         self._resolved_agents: Dict[str, Any] = {}
         self._flow_definitions: Dict[str, Any] = {}
         self._resource_root_filters = self._build_resource_root_filters()
-        self._global_plugin_filter = DiscoveryFilter.from_root(
+        self._global_namespace_filter = DiscoveryFilter.from_root(
             self._workspace_root,
             ignore_dir=self._workspace_root,
         )
@@ -153,7 +153,7 @@ class CompositeAgentManager:
         self._resource_roots = discover_resource_roots(self._workspace_root)
         self._primary_resource_root = primary_resource_root(self._workspace_root, self._resource_roots)
         self._resource_root_filters = self._build_resource_root_filters()
-        self._global_plugin_filter = DiscoveryFilter.from_root(
+        self._global_namespace_filter = DiscoveryFilter.from_root(
             self._workspace_root,
             ignore_dir=self._workspace_root,
         )
@@ -164,7 +164,7 @@ class CompositeAgentManager:
                 or getattr(defn, "default_agent_profile", None)
             )
             if explicit is not None:
-                self._register(explicit, collision_source="plugin-declared")
+                self._register(explicit, collision_source="namespace-declared")
                 continue
 
             synth = Agent(
@@ -184,7 +184,7 @@ class CompositeAgentManager:
                 synth.tools = None
             self._register(synth, collision_source="synthesised")
 
-        self._load_plugin_files()
+        self._load_namespace_agent_files()
         self._load_workspace_files()
         self._resolved_agents = self._resolve_all_agents()
 
@@ -289,26 +289,26 @@ class CompositeAgentManager:
 
         self._agents[agent.name] = agent
 
-    def _load_plugin_files(self) -> None:
-        plugin_roots: dict[Path, str | None] = {}
+    def _load_namespace_agent_files(self) -> None:
+        namespace_roots: dict[Path, str | None] = {}
         for definition in self._flow_definitions.values():
             metadata = getattr(definition, "metadata", {}) or {}
-            plugin_root_value = metadata.get("namespace_root")
-            if not plugin_root_value:
+            namespace_root_value = metadata.get("namespace_root")
+            if not namespace_root_value:
                 continue
-            plugin_root = Path(str(plugin_root_value)).resolve()
-            if not plugin_root.is_dir():
+            namespace_root = Path(str(namespace_root_value)).resolve()
+            if not namespace_root.is_dir():
                 continue
-            plugin_roots.setdefault(plugin_root, self._plugin_context_for_root(plugin_root))
+            namespace_roots.setdefault(namespace_root, self._namespace_context_for_root(namespace_root))
 
-        for plugin_root in sorted(plugin_roots):
+        for namespace_root in sorted(namespace_roots):
             for agent_file in [
-                *sorted(plugin_root.glob("*.agent.yaml")),
-                *sorted(plugin_root.glob("*.agent.md")),
+                *sorted(namespace_root.glob("*.agent.yaml")),
+                *sorted(namespace_root.glob("*.agent.md")),
             ]:
-                if self._plugin_agent_file_is_ignored(plugin_root, agent_file):
+                if self._namespace_agent_file_is_ignored(namespace_root, agent_file):
                     continue
-                self._load_agent_file(agent_file, source="namespace", plugin_root=plugin_root)
+                self._load_agent_file(agent_file, source="namespace", namespace_root=namespace_root)
 
     def _load_workspace_files(self) -> None:
         for resource_root in self._resource_roots:
@@ -318,18 +318,18 @@ class CompositeAgentManager:
                     continue
                 self._load_agent_file(yaml_file, source="workspace", default_name=default_name)
 
-    def _plugin_agent_file_is_ignored(self, plugin_root: Path, yaml_file: Path) -> bool:
-        resolved_plugin_root = plugin_root.resolve()
+    def _namespace_agent_file_is_ignored(self, namespace_root: Path, yaml_file: Path) -> bool:
+        resolved_namespace_root = namespace_root.resolve()
         resolved_yaml = yaml_file.resolve()
-        containing_root = resource_root_for_path(resolved_plugin_root, self._resource_roots)
+        containing_root = resource_root_for_path(resolved_namespace_root, self._resource_roots)
         if containing_root is not None:
             return self._resource_root_filter(containing_root).ignores(resolved_yaml, is_dir=False)
         try:
-            relative = resolved_yaml.relative_to(resolved_plugin_root)
+            relative = resolved_yaml.relative_to(resolved_namespace_root)
         except ValueError:
             return False
-        return self._global_plugin_filter.ignores_relative(
-            Path(resolved_plugin_root.name) / relative,
+        return self._global_namespace_filter.ignores_relative(
+            Path(resolved_namespace_root.name) / relative,
             is_dir=False,
         )
 
@@ -435,8 +435,8 @@ class CompositeAgentManager:
         fallback_dirs.extend(resource_root.path for resource_root in self._resource_roots)
         return tuple(dict.fromkeys(fallback_dirs))
 
-    def _plugin_prompt_fallback_dirs(self, plugin_root: Path) -> tuple[Path, ...]:
-        resolved_root = Path(plugin_root).resolve()
+    def _namespace_prompt_fallback_dirs(self, namespace_root: Path) -> tuple[Path, ...]:
+        resolved_root = Path(namespace_root).resolve()
         return (resolved_root, *self._workspace_prompt_fallback_dirs())
 
     def _build_namespace_context_by_root(self, flow_definitions: Dict[str, Any]) -> Dict[Path, str]:
@@ -454,17 +454,17 @@ class CompositeAgentManager:
                 contexts[namespace_root] = cleaned_name
         return contexts
 
-    def _plugin_context_for_root(self, plugin_root: Path | None) -> str | None:
-        if plugin_root is None:
+    def _namespace_context_for_root(self, namespace_root: Path | None) -> str | None:
+        if namespace_root is None:
             return None
-        return self._namespace_context_by_root.get(Path(plugin_root).resolve())
+        return self._namespace_context_by_root.get(Path(namespace_root).resolve())
 
     def _load_agent_file(
         self,
         yaml_file: Path,
         *,
         source: str,
-        plugin_root: Path | None = None,
+        namespace_root: Path | None = None,
         default_name: str | None = None,
     ) -> None:
         from pocketcode.core.runtime_models import Agent  # noqa: PLC0415
@@ -475,14 +475,16 @@ class CompositeAgentManager:
                     markdown_kwargs = {
                         "fallback_dirs": self._workspace_prompt_fallback_dirs(),
                         "prompt_registry": self._prompt_registry,
-                        "context_plugin": WORKSPACE_NAMESPACE,
+                        "context_namespace": WORKSPACE_NAMESPACE,
                     }
                 elif self._prompt_registry is not None:
-                    context_plugin = self._plugin_context_for_root(plugin_root)
+                    context_namespace = self._namespace_context_for_root(namespace_root)
                     markdown_kwargs = {
-                        "fallback_dirs": self._plugin_prompt_fallback_dirs(plugin_root) if plugin_root is not None else (),
+                        "fallback_dirs": (
+                            self._namespace_prompt_fallback_dirs(namespace_root) if namespace_root is not None else ()
+                        ),
                         "prompt_registry": self._prompt_registry,
-                        "context_plugin": context_plugin,
+                        "context_namespace": context_namespace,
                     }
                 document = load_markdown_asset_document(yaml_file, **markdown_kwargs)
                 raw = compile_markdown_agent_definition(

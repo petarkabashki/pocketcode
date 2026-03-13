@@ -182,7 +182,7 @@ The current root provider now exports these command groups:
 - `/memory <show|trim [keep_last]|compact [keep_last]>`
 - `/checkpoint <list|save <name>|show <name>|restore <name>>`
 
-Only agent-profile commands declared with visibility `exported` participate in slash-command discovery. Agent-profile commands declared as `delegated` or `private` are available only through engine-level invocation paths used by parent agents or future ACP surfaces.
+Only agent commands declared with visibility `exported` participate in slash-command discovery. Agent commands declared as `delegated` or `private` are available only through engine-level invocation paths used by parent agents or future ACP surfaces.
 
 Even for slash-triggered commands, the runtime now builds an internal structured invocation envelope before control reaches active-agent command targets. The CLI still accepts plain slash syntax, but nested command delegation no longer depends only on raw strings once execution enters the engine/runtime layer.
 

@@ -258,10 +258,10 @@ class FileWatcher:
 
 
 # ---------------------------------------------------------------------------
-# Plugin Hot-Reload Support (FR-011)
+# Resource-Root Hot-Reload Support (FR-011)
 # ---------------------------------------------------------------------------
 
-class PluginHotReloadHandler(FileSystemEventHandler):
+class ResourceRootHotReloadHandler(FileSystemEventHandler):
     """
     Watches discovered resource-root and namespace directories for file changes and triggers a WorkspaceCatalog
     rebuild + atomic registry swap via ``RegistryHolder.swap()``.
@@ -311,7 +311,7 @@ class PluginHotReloadHandler(FileSystemEventHandler):
     def _trigger_rebuild(self) -> None:
         """Build a new WorkspaceCatalog snapshot and atomically swap the holder."""
         if self._rebuild_in_progress.is_set():
-            logger.debug("PluginHotReloadHandler: rebuild already in progress; skipping.")
+            logger.debug("ResourceRootHotReloadHandler: rebuild already in progress; skipping.")
             return
 
         self._rebuild_in_progress.set()
@@ -319,13 +319,13 @@ class PluginHotReloadHandler(FileSystemEventHandler):
             # Import lazily to avoid circular imports at module level
             from pocketcode.core.workspace_catalog import WorkspaceCatalog  # noqa: PLC0415
 
-            logger.info("PluginHotReloadHandler: rebuilding plugin registry…")
+            logger.info("ResourceRootHotReloadHandler: rebuilding resource-root registry…")
             new_pm = WorkspaceCatalog(config=self._config, workspace_root=self._workspace_root)
             new_pm.load()
             self._holder.swap(new_pm)
-            logger.info("PluginHotReloadHandler: registry swapped successfully.")
+            logger.info("ResourceRootHotReloadHandler: registry swapped successfully.")
         except Exception as exc:
-            logger.error("PluginHotReloadHandler: rebuild failed: %s", exc, exc_info=True)
+            logger.error("ResourceRootHotReloadHandler: rebuild failed: %s", exc, exc_info=True)
         finally:
             self._rebuild_in_progress.clear()
 
@@ -339,21 +339,22 @@ class PluginHotReloadHandler(FileSystemEventHandler):
         # Ignore hidden files, temp files, and compiled Python artefacts
         if basename.startswith(".") or "~" in filepath or basename.endswith(".pyc"):
             return
-        logger.debug("PluginHotReloadHandler: detected change in %s", filepath)
+        logger.debug("ResourceRootHotReloadHandler: detected change in %s", filepath)
         self._debounced_enqueue(filepath)
 
     on_created = on_modified  # type: ignore[assignment]
     on_deleted = on_modified  # type: ignore[assignment]
 
 
-class PluginWatcher:
+class ResourceRootWatcher:
     """
-    Manages a watchdog Observer that monitors all plugin directories and
-    triggers hot-reload via ``PluginHotReloadHandler`` on any file change.
+    Manages a watchdog Observer that monitors resource-root and namespace
+    directories and triggers hot-reload via ``ResourceRootHotReloadHandler``
+    on any file change.
 
     Usage::
 
-        pw = PluginWatcher(holder=registry_holder, config=cfg, workspace_root=root)
+        pw = ResourceRootWatcher(holder=registry_holder, config=cfg, workspace_root=root)
         pw.start()
         # … runtime …
         pw.stop()
@@ -364,19 +365,19 @@ class PluginWatcher:
         holder: "RegistryHolder",
         config: dict,
         workspace_root: "Path",
-        plugin_dirs: Optional[list] = None,
+        resource_dirs: Optional[list] = None,
         debounce_ms: int = 500,
     ) -> None:
         self._holder = holder
         self._config = config
         self._workspace_root = workspace_root
-        self._plugin_dirs: list[Path] = [Path(d) for d in (plugin_dirs or [])]
+        self._watch_dirs: list[Path] = [Path(d) for d in (resource_dirs or [])]
         self._debounce_ms = debounce_ms
         self._observer: Optional[Observer] = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-    def _default_plugin_dirs(self) -> list[Path]:
+    def _default_watch_dirs(self) -> list[Path]:
         """Resolve discovered package/workspace resource roots plus configured namespace roots."""
         from pocketcode.core.resource_roots import discover_resource_roots  # noqa: PLC0415
         from pocketcode.core.workspace_namespaces import discover_workspace_namespaces  # noqa: PLC0415
@@ -401,12 +402,12 @@ class PluginWatcher:
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
-            logger.info("PluginWatcher already running.")
+            logger.info("ResourceRootWatcher already running.")
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True, name="plugin-hot-reload")
+        self._thread = threading.Thread(target=self._run, daemon=True, name="resource-root-hot-reload")
         self._thread.start()
-        logger.info("PluginWatcher started.")
+        logger.info("ResourceRootWatcher started.")
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -414,23 +415,23 @@ class PluginWatcher:
             self._observer.stop()
         if self._thread:
             self._thread.join(timeout=5)
-        logger.info("PluginWatcher stopped.")
+        logger.info("ResourceRootWatcher stopped.")
 
     def _run(self) -> None:
-        handler = PluginHotReloadHandler(
+        handler = ResourceRootHotReloadHandler(
             holder=self._holder,
             config=self._config,
             workspace_root=self._workspace_root,
             debounce_ms=self._debounce_ms,
         )
         self._observer = Observer()
-        dirs_to_watch = self._plugin_dirs or self._default_plugin_dirs()
+        dirs_to_watch = self._watch_dirs or self._default_watch_dirs()
         for d in dirs_to_watch:
             if d.exists():
                 self._observer.schedule(handler, str(d), recursive=True)
-                logger.info("PluginWatcher monitoring: %s", d)
+                logger.info("ResourceRootWatcher monitoring: %s", d)
             else:
-                logger.warning("PluginWatcher: directory does not exist: %s", d)
+                logger.warning("ResourceRootWatcher: directory does not exist: %s", d)
 
         self._observer.start()
         try:

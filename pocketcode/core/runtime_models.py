@@ -46,9 +46,9 @@ class CompositeAgent:
     """A named configuration bundle that governs how a flow is invoked.
 
     Every flow has at least one agent: either explicitly declared in
-    flow metadata, loaded from a flat workspace ``*.agent.yaml`` file,
-    or synthesised from the flow's top-level fields by the composite agent
-    registry.
+    flow metadata, loaded from a workspace or package resource-root
+    ``*.agent.*`` file, or synthesised from the flow's top-level fields by
+    the composite agent registry.
 
     Fields
     ------
@@ -65,7 +65,7 @@ class CompositeAgent:
         LLM configuration profile name. ``None`` means inherit from lower tiers.
     inline_prompt : str
         Inline system prompt text appended before any ``extra_prompts`` content.
-        Used by agent profiles and other ephemeral runtime overlays.
+        Used by named agents and other ephemeral runtime overlays.
     extra_prompts : List[str]
         Ordered list of file paths whose contents are appended to the system
         prompt each turn. Default ``[]``.
@@ -77,15 +77,17 @@ class CompositeAgent:
     tools : List[str] | None
         Explicit tool allowlist (qualified names). ``None`` means inherit all.
     commands : List[AgentCommand]
-        Declarative command aliases exported by this agent profile.
+        Declarative command aliases exported by this agent.
     tool_confirmation : Dict[str, Any]
         ``{"default": str | None, "overrides": Dict[str, str]}``.
         Absent keys mean "no opinion at this tier". Default ``{}``.
     source : str
         Provenance: ``"synthesised"``, ``"namespace"``, or ``"workspace"``.
+        ``"namespace"`` is the current compatibility label for non-workspace
+        resource-root assets.
     source_path : Path | None
         Absolute path to the flat Markdown or YAML profile file. ``None`` for
-        synthesised and namespace-backed profiles.
+        synthesised and non-workspace resource-root-backed agents.
     """
 
     name: str

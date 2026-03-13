@@ -2,9 +2,9 @@
 
 Covers:
 - Synthesised default profile generation from agent definitions
-- Explicit plugin-declared default_agent_profile merging
+- Explicit namespace-declared default_agent_profile merging
 - Workspace YAML file loading with correct precedence
-- Collision handling (plugin > workspace > synthesised)
+- Collision handling (namespace > workspace > synthesised)
 - Malformed YAML graceful handling
 - get() / list() / clone() / save()
 - reload() clears and re-populates the registry
@@ -20,14 +20,14 @@ from pocketcode.core.runtime_models import AgentDefinition, AgentProfile
 
 
 def _make_agent_def(
-    plugin_name: str,
+    namespace_name: str,
     agent_name: str,
     *,
     llm_profile: str | None = None,
     default_agent_profile: AgentProfile | None = None,
 ) -> tuple[str, AgentDefinition]:
     """Return (qualified_name, AgentDefinition) for test fixtures."""
-    qname = f"{plugin_name}.{agent_name}"
+    qname = f"{namespace_name}.{agent_name}"
     defn = AgentDefinition(
         name=agent_name,
         llm_profile=llm_profile,
@@ -43,7 +43,7 @@ def _make_agent_def(
 
 class TestSynthesisedDefaults:
     def test_synthesised_profile_created_per_agent(self, tmp_path):
-        qname, defn = _make_agent_def("myplugin", "myagent")
+        qname, defn = _make_agent_def("sample_namespace", "myagent")
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
@@ -97,7 +97,7 @@ class TestNamespaceDeclaredProfile:
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
 
-        # Plugin-declared name must exist with the right LLM
+        # Namespace-declared name must exist with the right LLM
         plug = apm.get("p.a:custom")
         assert plug is not None
         assert plug.llm_profile == "gpt-4"
@@ -106,7 +106,7 @@ class TestNamespaceDeclaredProfile:
         assert apm.get(qname) is None
 
     def test_namespace_name_fallback_to_qualified(self, tmp_path):
-        qname, defn = _make_agent_def("myplugin", "myagent")
+        qname, defn = _make_agent_def("sample_namespace", "myagent")
         declared = AgentProfile(name=qname, flow=qname, source="namespace")
         defn.default_agent_profile = declared
 
@@ -119,9 +119,9 @@ class TestNamespaceDeclaredProfile:
     def test_namespace_local_agent_yaml_loads_without_copying_flow_defaults(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent", llm_profile="gemini_fast")
         defn.tools = ["tool.read", "tool.write"]
-        plugin_root = tmp_path / "plug"
-        plugin_root.mkdir(parents=True, exist_ok=True)
-        (plugin_root / "agent.agent.yaml").write_text(
+        namespace_root = tmp_path / "plug"
+        namespace_root.mkdir(parents=True, exist_ok=True)
+        (namespace_root / "agent.agent.yaml").write_text(
             yaml.safe_dump(
                 {
                     "name": "plug.agent",
@@ -132,7 +132,7 @@ class TestNamespaceDeclaredProfile:
             ),
             encoding="utf-8",
         )
-        defn.metadata = {"namespace_root": str(plugin_root)}
+        defn.metadata = {"namespace_root": str(namespace_root)}
 
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
@@ -146,9 +146,9 @@ class TestNamespaceDeclaredProfile:
 
     def test_namespace_local_agent_yaml_uses_dotted_flow_reference(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        plugin_root = tmp_path / "plug"
-        plugin_root.mkdir(parents=True, exist_ok=True)
-        (plugin_root / "agent.agent.yaml").write_text(
+        namespace_root = tmp_path / "plug"
+        namespace_root.mkdir(parents=True, exist_ok=True)
+        (namespace_root / "agent.agent.yaml").write_text(
             yaml.safe_dump(
                 {
                     "name": "plug.agent",
@@ -158,7 +158,7 @@ class TestNamespaceDeclaredProfile:
             ),
             encoding="utf-8",
         )
-        defn.metadata = {"namespace_root": str(plugin_root)}
+        defn.metadata = {"namespace_root": str(namespace_root)}
 
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
@@ -169,9 +169,9 @@ class TestNamespaceDeclaredProfile:
 
     def test_namespace_local_markdown_agent_resolves_prompt_imports_in_namespace_context(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        plugin_root = tmp_path / "plug"
-        plugin_root.mkdir(parents=True, exist_ok=True)
-        (plugin_root / "agent.agent.md").write_text(
+        namespace_root = tmp_path / "plug"
+        namespace_root.mkdir(parents=True, exist_ok=True)
+        (namespace_root / "agent.agent.md").write_text(
             """---
 name: plug.agent
 flow: plug.agent
@@ -180,31 +180,31 @@ flow: plug.agent
 """,
             encoding="utf-8",
         )
-        defn.metadata = {"namespace_root": str(plugin_root), "namespace": "plug"}
+        defn.metadata = {"namespace_root": str(namespace_root), "namespace": "plug"}
         prompts = NamespaceRegistry()
-        prompts.register("plug", "review", "Plugin-local imported prompt.")
+        prompts.register("plug", "review", "Namespace-local imported prompt.")
 
         apm = AgentProfileManager(tmp_path, prompt_registry=prompts)
         apm.load({qname: defn})
 
         profile = apm.get("plug.agent")
         assert profile is not None
-        assert profile.inline_prompt == "Plugin-local imported prompt."
+        assert profile.inline_prompt == "Namespace-local imported prompt."
 
     def test_namespace_agent_yaml_respects_ignore_rules(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
-        plugin_root = tmp_path / "plug"
-        plugin_root.mkdir(parents=True, exist_ok=True)
+        namespace_root = tmp_path / "plug"
+        namespace_root.mkdir(parents=True, exist_ok=True)
         (tmp_path / ".pocketcodeignore").write_text("plug/*.agent.yaml\n!plug/keep.agent.yaml\n", encoding="utf-8")
-        (plugin_root / "drop.agent.yaml").write_text(
+        (namespace_root / "drop.agent.yaml").write_text(
             yaml.safe_dump({"name": "drop", "flow": qname}, sort_keys=False),
             encoding="utf-8",
         )
-        (plugin_root / "keep.agent.yaml").write_text(
+        (namespace_root / "keep.agent.yaml").write_text(
             yaml.safe_dump({"name": "keep", "flow": qname}, sort_keys=False),
             encoding="utf-8",
         )
-        defn.metadata = {"namespace_root": str(plugin_root)}
+        defn.metadata = {"namespace_root": str(namespace_root)}
 
         apm = AgentProfileManager(tmp_path)
         apm.load({qname: defn})
@@ -598,7 +598,7 @@ Initial prompt.
         assert profile.source == "workspace"
         assert profile.llm_profile == "ws-llm"
 
-    def test_plugin_beats_workspace_same_name(self, tmp_path, caplog):
+    def test_namespace_beats_workspace_same_name(self, tmp_path, caplog):
         qname, defn = _make_agent_def("plug", "agent")
         declared = AgentProfile(name="shared", flow=qname, llm_profile="namespace-llm", source="namespace")
         defn.default_agent_profile = declared

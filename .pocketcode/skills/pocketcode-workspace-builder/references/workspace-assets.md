@@ -10,7 +10,7 @@ Primary sources:
 ## Workspace-owned locations
 
 Use these locations deliberately:
-- `.pocketcode/ flat namespace-pack files with the `<plugin>.` prefix` for plugin-scoped manifests, flows, prompts, tools, and plugin-local agent YAML
+- `.pocketcode/` flat namespace-pack files with the `<namespace>.` prefix for namespace-scoped flows, prompts, tools, and agent assets
 - `.pocketcode/*.agent.*` for workspace agent profiles
 - `.pocketcode/*.prompt.md` for shared prompt files
 - `.pocketcode/*.tool.py or .pocketcode/*.tool.md` for shared workspace tools
@@ -24,7 +24,7 @@ Assets can be skipped by:
 - ignore rules in `.pocketcode/.pocketcodeignore`
 
 Skill and mode discovery is implemented by `markdown_profiles.py`.
-Plugin and workspace resource discovery is implemented by `plugin_manager.py` and `discovery_rules.py`.
+Resource-root and workspace asset discovery is implemented by `resource_roots.py`, `workspace_catalog.py`, and `discovery_rules.py`.
 
 ## Portability rules
 
@@ -42,8 +42,7 @@ To keep a workspace self-contained:
 ## Authoring checklist
 
 When editing workspace-level assets:
-1. confirm the asset belongs at workspace scope, not plugin scope
+1. confirm the asset belongs at workspace scope, not namespace scope
 2. keep the directory layout conventional so discovery keeps working
 3. update any nearby docs or reference prompts that explain the asset
 4. verify discovery with the smallest relevant test or load path
-

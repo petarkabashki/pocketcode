@@ -13,7 +13,7 @@ class LlmRouter:
     def __init__(
         self,
         config: Dict[str, Any],
-        plugin_llm_profiles: Dict[str, Dict[str, Any]] | None = None,
+        resource_root_llm_profiles: Dict[str, Dict[str, Any]] | None = None,
     ):
         self._config = config
         llm_config = config.get("llm", {}) if isinstance(config, dict) else {}
@@ -32,8 +32,9 @@ class LlmRouter:
                 if isinstance(profile_config, dict):
                     self._profiles[str(profile_name)] = copy.deepcopy(profile_config)
 
-        if plugin_llm_profiles:
-            for profile_name, profile_config in plugin_llm_profiles.items():
+        merged_runtime_profiles = resource_root_llm_profiles
+        if merged_runtime_profiles:
+            for profile_name, profile_config in merged_runtime_profiles.items():
                 if isinstance(profile_config, dict):
                     self._profiles[str(profile_name)] = copy.deepcopy(profile_config)
 

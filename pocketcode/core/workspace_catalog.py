@@ -164,7 +164,7 @@ class WorkspaceCatalog:
         if not agent:
             return []
 
-        context_plugin = (agent.metadata or {}).get("namespace")
+        context_namespace = (agent.metadata or {}).get("namespace")
 
         if not agent.tools:
             return self.tools.list_all()  # all qualified names
@@ -182,8 +182,8 @@ class WorkspaceCatalog:
                     logger.warning("Agent '%s' references unknown tool '%s'.", normalized_agent_name, tool_ref)
                     continue
                 qname = tool_ref
-            elif context_plugin and self.tools.has_local(context_plugin, tool_ref):
-                qname = f"{context_plugin}.{tool_ref}"  # local plugin owns it
+            elif context_namespace and self.tools.has_local(context_namespace, tool_ref):
+                qname = f"{context_namespace}.{tool_ref}"  # local namespace owns it
             else:
                 owners = self.tools.owners_for(tool_ref)
                 if not owners:
@@ -421,7 +421,7 @@ class WorkspaceCatalog:
                         program_path,
                         fallback_dirs=self._workspace_namespace_prompt_fallback_dirs(namespace.path),
                         prompt_registry=self.prompts,
-                        context_plugin=namespace.name,
+                        context_namespace=namespace.name,
                     )
                     if not self._is_workspace_namespace_program_candidate(program_path, document):
                         continue
@@ -839,7 +839,7 @@ class WorkspaceCatalog:
                 flow_file,
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=self.prompts,
-                context_plugin=WORKSPACE_NAMESPACE,
+                context_namespace=WORKSPACE_NAMESPACE,
             )
             definition = compile_markdown_flow_definition(document, default_name=default_name)
             flow_name = str(definition.get("name") or default_name).strip() or default_name
@@ -869,7 +869,7 @@ class WorkspaceCatalog:
                 default_files=[],
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=self.prompts,
-                context_plugin=WORKSPACE_NAMESPACE,
+                context_namespace=WORKSPACE_NAMESPACE,
             )
 
             llm_profile = definition.get("llm_profile")
@@ -916,9 +916,9 @@ class WorkspaceCatalog:
                 flow_instance = self._load_agent_flow(
                     module_ref=definition.get("module"),
                     entry_fn_name=definition.get("entry_fn"),
-                    plugin_root=flow_file.parent,
+                    namespace_root=flow_file.parent,
                     agent_name=flow_name,
-                    plugin_name=WORKSPACE_NAMESPACE,
+                    namespace_name=WORKSPACE_NAMESPACE,
                 )
                 if flow_instance is None and any(definition.get(k) for k in ("nodes", "mermaid", "graph", "dot")):
                     raise ValueError("Graph flows no longer supported. Use StackVM instead.")
@@ -1028,24 +1028,24 @@ class WorkspaceCatalog:
     def _validate_loaded_flow_references(self) -> None:
         for qualified_flow_name, flow_def in self.flows.items():
             metadata = flow_def.metadata or {}
-            context_plugin = metadata.get("namespace") or metadata.get("plugin")
+            context_namespace = metadata.get("namespace")
             flow_def.tools = self._qualify_existing_tool_refs(
                 flow_def.tools,
                 owner_name=qualified_flow_name,
                 field_name="tools",
-                context_plugin=context_plugin,
+                context_namespace=context_namespace,
             )
             flow_def.handoff_agents = self._qualify_existing_flow_refs(
                 flow_def.handoff_agents,
                 owner_name=qualified_flow_name,
                 field_name="handoff_agents",
-                context_plugin=context_plugin,
+                context_namespace=context_namespace,
             )
             flow_def.composite_agents = self._qualify_existing_flow_refs(
                 flow_def.composite_agents,
                 owner_name=qualified_flow_name,
                 field_name="composite_agents",
-                context_plugin=context_plugin,
+                context_namespace=context_namespace,
             )
 
             default_agent = flow_def.default_agent_profile
@@ -1056,13 +1056,13 @@ class WorkspaceCatalog:
                     default_agent.tools,
                     owner_name=f"{qualified_flow_name}.default_agent",
                     field_name="tools",
-                    context_plugin=context_plugin,
+                    context_namespace=context_namespace,
                 )
             default_agent.extra_prompts = self._filter_existing_prompt_refs(
                 default_agent.extra_prompts,
                 owner_name=f"{qualified_flow_name}.default_agent",
                 field_name="extra_prompts",
-                context_plugin=context_plugin,
+                context_namespace=context_namespace,
             )
 
     def _qualify_existing_tool_refs(
@@ -1071,7 +1071,7 @@ class WorkspaceCatalog:
         *,
         owner_name: str,
         field_name: str,
-        context_plugin: str | None,
+        context_namespace: str | None,
     ) -> List[str]:
         qualified: List[str] = []
         for ref in refs:
@@ -1081,7 +1081,7 @@ class WorkspaceCatalog:
             if candidate == "*":
                 return ["*"]
             try:
-                resolved = self.tools.qualify(candidate, context_plugin=context_plugin)
+                resolved = self.tools.qualify(candidate, context_namespace=context_namespace)
             except RegistryError as exc:
                 logger.warning(
                     "Flow '%s' has invalid %s ref '%s': %s. Skipping it.",
@@ -1101,7 +1101,7 @@ class WorkspaceCatalog:
         *,
         owner_name: str,
         field_name: str,
-        context_plugin: str | None,
+        context_namespace: str | None,
     ) -> List[str]:
         qualified: List[str] = []
         for ref in refs:
@@ -1109,7 +1109,7 @@ class WorkspaceCatalog:
             if not candidate:
                 continue
             try:
-                resolved = self.flows.qualify(candidate, context_plugin=context_plugin)
+                resolved = self.flows.qualify(candidate, context_namespace=context_namespace)
             except RegistryError as exc:
                 logger.warning(
                     "Flow '%s' has invalid %s ref '%s': %s. Skipping it.",
@@ -1129,7 +1129,7 @@ class WorkspaceCatalog:
         *,
         owner_name: str,
         field_name: str,
-        context_plugin: str | None,
+        context_namespace: str | None,
     ) -> List[str]:
         filtered: List[str] = []
         for ref in refs:
@@ -1143,7 +1143,7 @@ class WorkspaceCatalog:
                 resolve_prompt_reference(
                     candidate,
                     prompt_registry=self.prompts,
-                    context_plugin=context_plugin,
+                    context_namespace=context_namespace,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -1419,7 +1419,7 @@ class WorkspaceCatalog:
             default_files=[],
             fallback_dirs=self._workspace_prompt_fallback_dirs(),
             prompt_registry=self.prompts,
-            context_plugin=namespace_name,
+            context_namespace=namespace_name,
         )
 
         pre_handlers = list(
@@ -1458,9 +1458,9 @@ class WorkspaceCatalog:
             flow_instance = self._load_agent_flow(
                 module_ref=definition.get("module"),
                 entry_fn_name=definition.get("entry_fn"),
-                plugin_root=namespace_root,
+                namespace_root=namespace_root,
                 agent_name=flow_name,
-                plugin_name=namespace_name,
+                namespace_name=namespace_name,
             )
             if flow_instance is None and any(definition.get(k) for k in ("nodes", "mermaid", "graph", "dot")):
                 raise ValueError("Graph flows no longer supported. Use StackVM instead.")
@@ -1572,7 +1572,7 @@ class WorkspaceCatalog:
                 markdown_path,
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=self.prompts,
-                context_plugin=namespace_name,
+                context_namespace=namespace_name,
             )
             compiled = compile_markdown_flow_definition(document, default_name=flow_name)
         except Exception as exc:
@@ -1611,9 +1611,9 @@ class WorkspaceCatalog:
         *,
         module_ref: str | None,
         entry_fn_name: str | None,
-        plugin_root: Path,
+        namespace_root: Path,
         agent_name: str,
-        plugin_name: str,
+        namespace_name: str,
     ) -> Any:
         """Load a PocketFlow Flow from a Markdown module+entry_fn declaration.
 
@@ -1624,13 +1624,13 @@ class WorkspaceCatalog:
         if not module_ref or not entry_fn_name:
             return None
         try:
-            file_path = (plugin_root / module_ref).resolve()
+            file_path = (namespace_root / module_ref).resolve()
             module = self._load_module_from_file(file_path)
             factory = getattr(module, entry_fn_name, None)
             if not callable(factory):
                 logger.error(
-                    "Plugin '%s' agent '%s': entry_fn '%s' not found or not callable in '%s'.",
-                    plugin_name,
+                    "Namespace '%s' agent '%s': entry_fn '%s' not found or not callable in '%s'.",
+                    namespace_name,
                     agent_name,
                     entry_fn_name,
                     file_path,
@@ -1638,8 +1638,8 @@ class WorkspaceCatalog:
                 return None
             flow = factory()
             logger.debug(
-                "Plugin '%s' agent '%s': flow_instance loaded from '%s:%s'.",
-                plugin_name,
+                "Namespace '%s' agent '%s': flow_instance loaded from '%s:%s'.",
+                namespace_name,
                 agent_name,
                 module_ref,
                 entry_fn_name,
@@ -1647,8 +1647,8 @@ class WorkspaceCatalog:
             return flow
         except Exception as exc:
             logger.error(
-                "Plugin '%s' agent '%s': failed to load flow from '%s:%s': %s",
-                plugin_name,
+                "Namespace '%s' agent '%s': failed to load flow from '%s:%s': %s",
+                namespace_name,
                 agent_name,
                 module_ref,
                 entry_fn_name,
@@ -1670,7 +1670,7 @@ class WorkspaceCatalog:
     def _reference_is_ignored(
         self,
         reference: Any,
-        plugin_root: Path,
+        namespace_root: Path,
     ) -> bool:
         if not isinstance(reference, str):
             return False
@@ -1680,24 +1680,24 @@ class WorkspaceCatalog:
             return False
 
         path_part, _ = candidate.split(":", 1)
-        file_path = (plugin_root / path_part).resolve()
-        return self._catalog_resource_is_ignored(plugin_root, file_path)
+        file_path = (namespace_root / path_part).resolve()
+        return self._catalog_resource_is_ignored(namespace_root, file_path)
 
     def _flow_definition_is_ignored(
         self,
         definition: Dict[str, Any],
-        plugin_root: Path,
+        namespace_root: Path,
     ) -> bool:
         module_ref = definition.get("module")
         if isinstance(module_ref, str) and module_ref.strip():
-            module_path = (plugin_root / module_ref).resolve()
-            if self._catalog_resource_is_ignored(plugin_root, module_path):
+            module_path = (namespace_root / module_ref).resolve()
+            if self._catalog_resource_is_ignored(namespace_root, module_path):
                 return True
 
         prompt_file = definition.get("prompt_file") or definition.get("system_prompt_file")
         if isinstance(prompt_file, str) and prompt_file.strip():
-            prompt_path = (plugin_root / prompt_file).resolve()
-            if self._catalog_resource_is_ignored(plugin_root, prompt_path):
+            prompt_path = (namespace_root / prompt_file).resolve()
+            if self._catalog_resource_is_ignored(namespace_root, prompt_path):
                 return True
 
         prompt_files = definition.get("prompt_files")
@@ -1707,34 +1707,34 @@ class WorkspaceCatalog:
             for prompt_ref in prompt_files:
                 if not isinstance(prompt_ref, str) or not prompt_ref.strip():
                     continue
-                prompt_path = (plugin_root / prompt_ref).resolve()
-                if self._catalog_resource_is_ignored(plugin_root, prompt_path):
+                prompt_path = (namespace_root / prompt_ref).resolve()
+                if self._catalog_resource_is_ignored(namespace_root, prompt_path):
                     return True
 
         return False
 
-    def _catalog_root_is_ignored(self, plugin_root: Path) -> bool:
-        resolved = plugin_root.resolve()
+    def _catalog_root_is_ignored(self, namespace_root: Path) -> bool:
+        resolved = namespace_root.resolve()
         containing_root = resource_root_for_path(resolved, self._resource_roots)
         if containing_root is not None:
             return self._resource_root_filter(containing_root).ignores(resolved, is_dir=True)
         return self._global_catalog_filter.ignores_relative(Path(resolved.name), is_dir=True)
 
-    def _catalog_resource_is_ignored(self, plugin_root: Path, resource_path: Path) -> bool:
-        resolved_plugin_root = plugin_root.resolve()
+    def _catalog_resource_is_ignored(self, namespace_root: Path, resource_path: Path) -> bool:
+        resolved_namespace_root = namespace_root.resolve()
         resolved_resource = resource_path.resolve()
-        containing_root = resource_root_for_path(resolved_plugin_root, self._resource_roots)
+        containing_root = resource_root_for_path(resolved_namespace_root, self._resource_roots)
         if containing_root is not None:
             return self._resource_root_filter(containing_root).ignores(
                 resolved_resource,
                 is_dir=resolved_resource.is_dir(),
             )
         try:
-            relative = resolved_resource.relative_to(resolved_plugin_root)
+            relative = resolved_resource.relative_to(resolved_namespace_root)
         except ValueError:
             return False
         return self._global_catalog_filter.ignores_relative(
-            Path(resolved_plugin_root.name) / relative,
+            Path(resolved_namespace_root.name) / relative,
             is_dir=resolved_resource.is_dir(),
         )
 
@@ -1769,7 +1769,7 @@ class WorkspaceCatalog:
             return False
         return name.count(".") >= 2
 
-    def _load_reference(self, reference: Any, plugin_root: Path) -> Any:
+    def _load_reference(self, reference: Any, namespace_root: Path) -> Any:
         if not isinstance(reference, str):
             return reference
 
@@ -1779,7 +1779,7 @@ class WorkspaceCatalog:
 
         if ":" in candidate:
             path_part, object_name = candidate.split(":", 1)
-            file_path = (plugin_root / path_part).resolve()
+            file_path = (namespace_root / path_part).resolve()
             if file_path.is_file():
                 return self._load_from_file(file_path, object_name)
             else:
@@ -1809,7 +1809,7 @@ class WorkspaceCatalog:
     def _build_dynamic_module_name(self, file_path: Path) -> str:
         content_hash = hash(file_path.read_bytes())
         token = f"{file_path.resolve()}:{content_hash}"
-        return f"pocketcode_dynamic_plugin_{abs(hash(token))}"
+        return f"pocketcode_dynamic_resource_{abs(hash(token))}"
 
     def _execute_module_from_file(self, file_path: Path, module_name: str) -> types.ModuleType:
         module = types.ModuleType(module_name)
