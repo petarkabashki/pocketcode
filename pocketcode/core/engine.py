@@ -4,8 +4,11 @@ import dataclasses
 import logging
 import copy
 import importlib
+import json
 import sys
+import shlex
 import types
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -49,6 +52,7 @@ from pocketcode.core.runtime_observability import (
 from pocketcode.core.runtime_models import AgentProfile, FlowDefinition
 from pocketcode.core.resource_roots import primary_resource_root
 from pocketcode.core.runtime_storage import load_entry_history, normalize_entry_history, save_entry_history
+from pocketcode.core.runtime_storage import checkpoint_storage_dir
 from pocketcode.core.session_manager import SessionManager
 from pocketcode.core.stackvm_expander import expand_stackvm_ast
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
@@ -63,9 +67,29 @@ from pocketcode.core.markdown_assets import (
     parse_markdown_asset_text_document,
 )
 from pocketcode.cli.debugger_commands import build_debugger_predicate_from_label
+from pocketcode.core.command_runtime import (
+    CommandContext,
+    CommandInvocation,
+    CommandProvider,
+    CommandResult,
+    CommandSpec,
+    StaticCommandProvider,
+    build_command_invocation,
+)
+from pocketcode.core.command_validation import validate_command_payload, validate_command_result_data
 
 logger = logging.getLogger(__name__)
 _UNSET = object()
+DEFAULT_ROOT_COMMAND_CAPABILITIES = frozenset(
+    {
+        "memory.read",
+        "memory.trim",
+        "memory.compact",
+        "checkpoint.read",
+        "checkpoint.write",
+        "checkpoint.restore",
+    }
+)
 
 
 class PocketCodeEngine:
@@ -146,6 +170,665 @@ class PocketCodeEngine:
         self._validate_current_selections()
         self._restore_textual_selection_state()
         self._ensure_active_session()
+
+    def build_command_context(
+        self,
+        cli_context: Dict[str, Any] | None = None,
+        *,
+        caller_agent: str | None = None,
+        capabilities: set[str] | None = None,
+    ) -> CommandContext:
+        active_agent = self.active_agent_profile.name if self.active_agent_profile is not None else None
+        cleaned_caller = str(caller_agent).strip() or None if caller_agent is not None else None
+        resolved_capabilities = (
+            set(capabilities)
+            if capabilities is not None
+            else (set(DEFAULT_ROOT_COMMAND_CAPABILITIES) if cleaned_caller is None else set())
+        )
+        return CommandContext(
+            engine=self,
+            cli_context=dict(cli_context or {}),
+            caller_agent=cleaned_caller,
+            active_agent=active_agent,
+            session_id=getattr(self, "active_session_id", None),
+            capabilities=resolved_capabilities,
+        )
+
+    def get_root_command_provider(self) -> CommandProvider | None:
+        commands = [
+            CommandSpec(
+                name="memory",
+                acp_action="memory.command",
+                owner="root",
+                visibility="exported",
+                description="Manage active-session memory state.",
+            ),
+            CommandSpec(
+                name="checkpoint",
+                acp_action="checkpoint.command",
+                owner="root",
+                visibility="exported",
+                description="Manage named runtime checkpoints.",
+            ),
+        ]
+        return StaticCommandProvider(commands=commands, handler=self._invoke_root_command)
+
+    def get_active_agent_command_provider(self) -> CommandProvider | None:
+        exported_specs = self.list_active_agent_command_specs(visibility="exported")
+        if not exported_specs:
+            return None
+        return StaticCommandProvider(commands=exported_specs, handler=self._invoke_active_agent_command)
+
+    def get_active_agent_local_command_handlers(self, profile: Any | None = None) -> Dict[str, Any]:
+        return {}
+
+    def list_active_agent_command_specs(self, *, visibility: str | None = None) -> list[CommandSpec]:
+        profile = getattr(self, "active_agent_profile", None)
+        if profile is None:
+            return []
+        requested_visibility = str(visibility or "").strip().lower() or None
+        commands = list(getattr(profile, "commands", []) or [])
+        specs: list[CommandSpec] = []
+        for command in commands:
+            name = str(getattr(command, "name", "") or "").strip()
+            target = str(getattr(command, "target", "") or "").strip()
+            command_visibility = str(getattr(command, "visibility", "exported") or "exported").strip().lower() or "exported"
+            if not name or not target:
+                continue
+            if requested_visibility is not None and command_visibility != requested_visibility:
+                continue
+            specs.append(
+                CommandSpec(
+                    name=name,
+                    acp_action=f"agent.command.{name}",
+                    owner=str(getattr(profile, "name", "active-agent") or "active-agent"),
+                    visibility=command_visibility,
+                    description=str(getattr(command, "description", "") or "").strip(),
+                    required_capabilities=(),
+                    payload_schema=dict(getattr(command, "payload_schema", {}) or {}),
+                    result_schema=dict(getattr(command, "result_schema", {}) or {}),
+                    policy=dict(getattr(command, "policy", {}) or {}),
+                )
+            )
+        return specs
+
+    def get_command_providers(self) -> list[CommandProvider]:
+        providers: list[CommandProvider] = []
+        active_provider = self.get_active_agent_command_provider()
+        root_provider = self.get_root_command_provider()
+        if active_provider is not None:
+            providers.append(active_provider)
+        if root_provider is not None and root_provider is not active_provider:
+            providers.append(root_provider)
+        return providers
+
+    def authorize_command(self, spec: CommandSpec, ctx: CommandContext) -> None:
+        required = {str(item).strip() for item in getattr(spec, "required_capabilities", ()) if str(item).strip()}
+        if not required:
+            return
+        if required.issubset(set(ctx.capabilities)):
+            return
+        missing = sorted(required - set(ctx.capabilities))
+        raise PermissionError(
+            f"Command '{spec.name}' requires capabilities not available in this context: {', '.join(missing)}."
+        )
+
+    def invoke_registered_command(
+        self,
+        command_name: str,
+        args: list[str],
+        *,
+        cli_context: Dict[str, Any] | None = None,
+        caller_agent: str | None = None,
+        capabilities: set[str] | None = None,
+    ) -> CommandResult | None:
+        normalized = str(command_name or "").strip().lstrip("/")
+        if not normalized:
+            return None
+        ctx = self.build_command_context(cli_context, caller_agent=caller_agent, capabilities=capabilities)
+        for provider in self.get_command_providers():
+            commands = provider.list_commands(visibility="exported")
+            spec = next((item for item in commands if item.name == normalized), None)
+            if spec is None:
+                continue
+            self.authorize_command(spec, ctx)
+            result = provider.invoke(normalized, list(args), ctx)
+            return result if isinstance(result, CommandResult) else None
+        return None
+
+    def build_command_invocation(
+        self,
+        command_name: str,
+        args: list[str],
+        *,
+        caller_agent: str | None = None,
+        capabilities: set[str] | None = None,
+        visibility: str | None = None,
+        payload: Dict[str, Any] | None = None,
+        metadata: Dict[str, Any] | None = None,
+    ) -> CommandInvocation:
+        active_agent = self.active_agent_profile.name if self.active_agent_profile is not None else None
+        session_id = getattr(self, "active_session_id", None)
+        resolved_capabilities = (
+            set(capabilities)
+            if capabilities is not None
+            else (set(DEFAULT_ROOT_COMMAND_CAPABILITIES) if not str(caller_agent or "").strip() else set())
+        )
+        return build_command_invocation(
+            command_name,
+            args=args,
+            caller_agent=caller_agent,
+            active_agent=active_agent,
+            session_id=session_id,
+            visibility=visibility,
+            capabilities=resolved_capabilities,
+            payload=payload,
+            metadata=metadata,
+        )
+
+    def _invoke_root_command(self, name: str, args: list[str], ctx: CommandContext) -> CommandResult:
+        if name == "memory":
+            return self._invoke_memory_command(args, ctx)
+        if name == "checkpoint":
+            return self._invoke_checkpoint_command(args, ctx)
+        return CommandResult(handled=False)
+
+    def _invoke_active_agent_command(self, name: str, args: list[str], ctx: CommandContext) -> CommandResult:
+        return self.invoke_active_agent_command(
+            name,
+            args,
+            cli_context=ctx.cli_context,
+            caller_agent=ctx.caller_agent,
+            capabilities=set(ctx.capabilities),
+            visibility="exported",
+        ) or CommandResult(handled=False)
+
+    def invoke_active_agent_command(
+        self,
+        command_name: str,
+        args: list[str],
+        *,
+        cli_context: Dict[str, Any] | None = None,
+        caller_agent: str | None = None,
+        capabilities: set[str] | None = None,
+        visibility: str | None = None,
+        payload: Dict[str, Any] | None = None,
+        invocation: CommandInvocation | None = None,
+    ) -> CommandResult | None:
+        profile = getattr(self, "active_agent_profile", None)
+        if profile is None:
+            return None
+        active_invocation = invocation or self.build_command_invocation(
+            command_name,
+            list(args),
+            caller_agent=caller_agent,
+            capabilities=capabilities,
+            visibility=visibility,
+            payload=payload,
+        )
+        normalized_name = str(active_invocation.command_name or "").strip().lstrip("/")
+        if not normalized_name:
+            return None
+        ctx = self.build_command_context(
+            cli_context,
+            caller_agent=active_invocation.caller_agent,
+            capabilities=set(active_invocation.capabilities),
+        )
+        requested_visibility = str(active_invocation.visibility or "").strip().lower() or None
+        declaration = next(
+            (
+                command
+                for command in list(getattr(profile, "commands", []) or [])
+                if str(getattr(command, "name", "") or "").strip() == normalized_name
+                and (
+                    requested_visibility is None
+                    or str(getattr(command, "visibility", "exported") or "exported").strip().lower() == requested_visibility
+                )
+            ),
+            None,
+        )
+        if declaration is None:
+            return None
+        payload_schema = dict(getattr(declaration, "payload_schema", {}) or {})
+        result_schema = dict(getattr(declaration, "result_schema", {}) or {})
+        validate_command_payload(active_invocation.payload, payload_schema)
+        target = str(getattr(declaration, "target", "") or "").strip()
+        target_kind = str(getattr(declaration, "target_kind", "command") or "command").strip().lower() or "command"
+        delegated_capabilities = set(ctx.capabilities)
+        delegated_capabilities.update(
+            str(item).strip() for item in list(getattr(declaration, "capabilities", []) or []) if str(item).strip()
+        )
+        if target_kind == "command":
+            if not target:
+                return None
+            target_parts = shlex.split(target)
+            if not target_parts:
+                return None
+            target_name = str(target_parts[0]).lstrip("/")
+            if target_name == normalized_name:
+                raise ValueError(f"Agent command '{normalized_name}' cannot target itself.")
+            result = self.invoke_registered_command(
+                f"/{target_name}",
+                [*target_parts[1:], *list(args)],
+                cli_context=ctx.cli_context,
+                caller_agent=str(getattr(profile, "name", "") or "").strip() or "active-agent",
+                capabilities=delegated_capabilities,
+            )
+            if isinstance(result, CommandResult):
+                validate_command_result_data(result.data, result_schema)
+                return result
+            return CommandResult(handled=False)
+        if target_kind == "agent_command":
+            target_agent = str(getattr(declaration, "target_agent", "") or "").strip()
+            target_visibility = str(getattr(declaration, "target_visibility", "") or "").strip().lower() or "delegated"
+            if not target_agent or not target:
+                return None
+            if target_agent == str(getattr(profile, "name", "") or "").strip() and target == normalized_name:
+                raise ValueError(f"Agent command '{normalized_name}' cannot target itself.")
+            result = self.invoke_named_agent_command(
+                target_agent,
+                target,
+                list(args),
+                cli_context=ctx.cli_context,
+                caller_agent=str(getattr(profile, "name", "") or "").strip() or "active-agent",
+                capabilities=delegated_capabilities,
+                visibility=target_visibility,
+                payload=dict(active_invocation.payload),
+                invocation=self.build_command_invocation(
+                    target,
+                    list(args),
+                    caller_agent=str(getattr(profile, "name", "") or "").strip() or "active-agent",
+                    capabilities=delegated_capabilities,
+                    visibility=target_visibility,
+                    payload=dict(active_invocation.payload),
+                    metadata={
+                        "source_agent_command": normalized_name,
+                        "source_agent_profile": str(getattr(profile, "name", "") or "").strip() or None,
+                    },
+                ),
+            )
+            if isinstance(result, CommandResult):
+                validate_command_result_data(result.data, result_schema)
+                return result
+            return CommandResult(handled=False)
+        if target_kind == "local_handler":
+            target_handler = str(getattr(declaration, "target_handler", "") or "").strip()
+            if not target_handler:
+                return None
+            handlers = self.get_active_agent_local_command_handlers(profile)
+            handler = handlers.get(target_handler) if isinstance(handlers, dict) else None
+            if not callable(handler):
+                raise ValueError(
+                    f"Active agent command '{normalized_name}' references unknown local handler '{target_handler}'."
+                )
+            result = handler(
+                list(args),
+                ctx,
+                declaration,
+                active_invocation,
+            )
+            if isinstance(result, CommandResult):
+                validate_command_result_data(result.data, result_schema)
+                return result
+            return CommandResult(handled=False)
+        raise ValueError(f"Unsupported agent command target kind '{target_kind}'.")
+
+    def invoke_named_agent_command(
+        self,
+        agent_name: str,
+        command_name: str,
+        args: list[str],
+        *,
+        cli_context: Dict[str, Any] | None = None,
+        caller_agent: str | None = None,
+        capabilities: set[str] | None = None,
+        visibility: str | None = None,
+        payload: Dict[str, Any] | None = None,
+        invocation: CommandInvocation | None = None,
+    ) -> CommandResult | None:
+        target_name = str(agent_name or "").strip()
+        if not target_name:
+            return None
+        getter = getattr(self, "get_agent_profile", None)
+        if not callable(getter):
+            return None
+        target_profile = getter(target_name)
+        if target_profile is None:
+            return None
+        original_profile = getattr(self, "active_agent_profile", None)
+        try:
+            self.active_agent_profile = target_profile
+            return self.invoke_active_agent_command(
+                command_name,
+                args,
+                cli_context=cli_context,
+                caller_agent=caller_agent,
+                capabilities=capabilities,
+                visibility=visibility,
+                payload=payload,
+                invocation=invocation,
+            )
+        finally:
+            self.active_agent_profile = original_profile
+
+    def _invoke_memory_command(self, args: list[str], ctx: CommandContext) -> CommandResult:
+        subcommand = str(args[0] if args else "show").strip().lower()
+        if subcommand in {"show", "status"}:
+            self._require_command_capability(ctx, "memory.read", command_name="memory show")
+            info = self.get_active_session_info()
+            details = self.get_saved_session_details(info.get("session_id"))
+            return CommandResult(
+                handled=True,
+                output=(
+                    "Memory:\n"
+                    f"  Session: {details.get('session_id')}\n"
+                    f"  Transcript Entries: {details.get('transcript_entries', 0)}"
+                ),
+            )
+        if subcommand == "trim":
+            self._require_command_capability(ctx, "memory.trim", command_name="memory trim")
+            keep_last = self._parse_positive_int_arg(args[1] if len(args) > 1 else None, default=20)
+            result = self.trim_session_memory(keep_last=keep_last)
+            return CommandResult(
+                handled=True,
+                output=(
+                    "Memory trimmed:\n"
+                    f"  Session: {result['session_id']}\n"
+                    f"  Kept: {result['kept']}\n"
+                    f"  Removed: {result['removed']}"
+                ),
+                metadata=result,
+            )
+        if subcommand == "compact":
+            self._require_command_capability(ctx, "memory.compact", command_name="memory compact")
+            keep_last = self._parse_positive_int_arg(args[1] if len(args) > 1 else None, default=20)
+            result = self.compact_session_memory(keep_last=keep_last)
+            return CommandResult(
+                handled=True,
+                output=(
+                    "Memory compacted:\n"
+                    f"  Session: {result['session_id']}\n"
+                    f"  Kept Tail: {result['kept_tail']}\n"
+                    f"  Compacted: {result['compacted_entries']}"
+                ),
+                metadata=result,
+            )
+        return CommandResult(
+            handled=True,
+            output="Usage: /memory <show|trim [keep_last]|compact [keep_last]>",
+        )
+
+    def _invoke_checkpoint_command(self, args: list[str], ctx: CommandContext) -> CommandResult:
+        if not args:
+            return CommandResult(
+                handled=True,
+                output="Usage: /checkpoint <list|save <name>|restore <name>|show <name>>",
+            )
+        subcommand = str(args[0]).strip().lower()
+        if subcommand == "list":
+            self._require_command_capability(ctx, "checkpoint.read", command_name="checkpoint list")
+            items = self.list_checkpoints()
+            lines = ["Checkpoints:"]
+            if not items:
+                lines.append("  (none)")
+            else:
+                for item in items:
+                    lines.append(
+                        f"  - {item['name']} | {item.get('created_at') or '-'} | "
+                        f"session={item.get('session_id') or '-'} | transcript={item.get('transcript_entries', 0)}"
+                    )
+            return CommandResult(handled=True, output="\n".join(lines), metadata={"checkpoints": items})
+        if subcommand == "save":
+            self._require_command_capability(ctx, "checkpoint.write", command_name="checkpoint save")
+            if len(args) < 2:
+                return CommandResult(handled=True, output="Usage: /checkpoint save <name>")
+            result = self.save_checkpoint(args[1])
+            return CommandResult(
+                handled=True,
+                output=(
+                    "Checkpoint saved:\n"
+                    f"  Name: {result['name']}\n"
+                    f"  Session: {result['session_id']}\n"
+                    f"  Path: {result['path']}"
+                ),
+                metadata=result,
+            )
+        if subcommand == "restore":
+            self._require_command_capability(ctx, "checkpoint.restore", command_name="checkpoint restore")
+            if len(args) < 2:
+                return CommandResult(handled=True, output="Usage: /checkpoint restore <name>")
+            result = self.restore_checkpoint(args[1])
+            return CommandResult(
+                handled=True,
+                output=(
+                    "Checkpoint restored:\n"
+                    f"  Name: {result['name']}\n"
+                    f"  Session: {result['session_id']}\n"
+                    f"  Restored Transcript Entries: {result['transcript_entries']}"
+                ),
+                metadata=result,
+            )
+        if subcommand == "show":
+            self._require_command_capability(ctx, "checkpoint.read", command_name="checkpoint show")
+            if len(args) < 2:
+                return CommandResult(handled=True, output="Usage: /checkpoint show <name>")
+            result = self.get_checkpoint_details(args[1])
+            return CommandResult(
+                handled=True,
+                output=(
+                    "Checkpoint:\n"
+                    f"  Name: {result['name']}\n"
+                    f"  Created: {result['created_at']}\n"
+                    f"  Session: {result['session_id']}\n"
+                    f"  Transcript Entries: {result['transcript_entries']}"
+                ),
+                metadata=result,
+            )
+        return CommandResult(
+            handled=True,
+            output="Usage: /checkpoint <list|save <name>|restore <name>|show <name>>",
+        )
+
+    def _parse_positive_int_arg(self, raw: Any, *, default: int) -> int:
+        if raw in {None, ""}:
+            return default
+        value = int(raw)
+        if value < 0:
+            raise ValueError("Expected a non-negative integer.")
+        return value
+
+    def _require_command_capability(self, ctx: CommandContext, capability: str, *, command_name: str) -> None:
+        available = set(getattr(ctx, "capabilities", set()) or set())
+        if capability in available:
+            return
+        raise PermissionError(
+            f"Command '{command_name}' requires capability '{capability}', which is not available in this context."
+        )
+
+    def _checkpoint_dir(self) -> Path:
+        return checkpoint_storage_dir(self._workspace_root, self._config)
+
+    def _checkpoint_path(self, name: str) -> Path:
+        cleaned = str(name or "").strip().replace("\\", "_").replace("/", "_")
+        if not cleaned:
+            raise ValueError("Checkpoint name is required.")
+        return self._checkpoint_dir() / f"{cleaned}.json"
+
+    def _utc_now_iso(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _serialize_transcript_entries(self, entries: list[Any]) -> list[dict[str, Any]]:
+        serialized: list[dict[str, Any]] = []
+        for entry in entries or []:
+            as_dict = getattr(entry, "as_dict", None)
+            if callable(as_dict):
+                serialized.append(dict(as_dict()))
+            elif isinstance(entry, dict):
+                serialized.append(dict(entry))
+        return serialized
+
+    def _load_active_session_record(self) -> Any:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        self._ensure_active_session()
+        session_id = getattr(self, "active_session_id", None)
+        if not session_id:
+            raise RuntimeError("No active session.")
+        self._update_active_session_snapshot()
+        return session_manager.load_session(session_id)
+
+    def trim_session_memory(self, *, keep_last: int = 20) -> Dict[str, Any]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        record = self._load_active_session_record()
+        transcript = list(getattr(record, "transcript", []) or [])
+        kept_entries = transcript[-keep_last:] if keep_last > 0 else []
+        removed = max(len(transcript) - len(kept_entries), 0)
+        updated = session_manager.update_session(record.session_id, transcript=kept_entries)
+        return {
+            "session_id": updated.session_id,
+            "kept": len(updated.transcript),
+            "removed": removed,
+        }
+
+    def compact_session_memory(self, *, keep_last: int = 20) -> Dict[str, Any]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        record = self._load_active_session_record()
+        transcript = list(getattr(record, "transcript", []) or [])
+        compacted_entries = transcript[:-keep_last] if keep_last > 0 else transcript
+        kept_tail = transcript[-keep_last:] if keep_last > 0 else []
+        if not compacted_entries:
+            return {
+                "session_id": record.session_id,
+                "kept_tail": len(kept_tail),
+                "compacted_entries": 0,
+                "summary_entry": None,
+            }
+        preview = " | ".join(
+            str(getattr(entry, "content", "")).strip().replace("\n", " ")[:80]
+            for entry in compacted_entries[:3]
+            if str(getattr(entry, "content", "")).strip()
+        )
+        summary_entry = {
+            "entry_id": uuid4().hex,
+            "timestamp": self._utc_now_iso(),
+            "role": "system",
+            "content": (
+                f"[compacted {len(compacted_entries)} earlier transcript entries]"
+                + (f" {preview}" if preview else "")
+            ),
+            "run_id": None,
+            "metadata": {"kind": "memory_compaction", "compacted_entries": len(compacted_entries)},
+        }
+        updated = session_manager.update_session(record.session_id, transcript=[summary_entry, *kept_tail])
+        return {
+            "session_id": updated.session_id,
+            "kept_tail": len(kept_tail),
+            "compacted_entries": len(compacted_entries),
+            "summary_entry": summary_entry["content"],
+        }
+
+    def save_checkpoint(self, name: str) -> Dict[str, Any]:
+        record = self._load_active_session_record()
+        payload = {
+            "name": str(name).strip(),
+            "created_at": self._utc_now_iso(),
+            "session_id": record.session_id,
+            "session_title": getattr(record, "title", None),
+            "state": self._session_state_payload(),
+            "transcript": self._serialize_transcript_entries(list(getattr(record, "transcript", []) or [])),
+        }
+        path = self._checkpoint_path(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=False), encoding="utf-8")
+        return {
+            "name": payload["name"],
+            "path": str(path),
+            "created_at": payload["created_at"],
+            "session_id": payload["session_id"],
+            "transcript_entries": len(payload["transcript"]),
+        }
+
+    def _load_checkpoint_payload(self, name: str) -> Dict[str, Any]:
+        path = self._checkpoint_path(name)
+        if not path.exists():
+            raise ValueError(f"Unknown checkpoint '{name}'.")
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError(f"Checkpoint '{name}' is invalid.")
+        return raw
+
+    def list_checkpoints(self) -> List[Dict[str, Any]]:
+        checkpoint_dir = self._checkpoint_dir()
+        if not checkpoint_dir.exists():
+            return []
+        items: list[Dict[str, Any]] = []
+        for path in sorted(checkpoint_dir.glob("*.json")):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(raw, dict):
+                continue
+            items.append(
+                {
+                    "name": str(raw.get("name") or path.stem),
+                    "created_at": str(raw.get("created_at") or ""),
+                    "session_id": str(raw.get("session_id") or ""),
+                    "transcript_entries": len(raw.get("transcript") or []),
+                    "path": str(path),
+                }
+            )
+        items.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+        return items
+
+    def get_checkpoint_details(self, name: str) -> Dict[str, Any]:
+        raw = self._load_checkpoint_payload(name)
+        return {
+            "name": str(raw.get("name") or name),
+            "created_at": str(raw.get("created_at") or ""),
+            "session_id": str(raw.get("session_id") or ""),
+            "transcript_entries": len(raw.get("transcript") or []),
+            "state": dict(raw.get("state") or {}),
+        }
+
+    def restore_checkpoint(self, name: str) -> Dict[str, Any]:
+        session_manager = getattr(self, "_session_manager", None)
+        if session_manager is None:
+            raise RuntimeError("Session persistence is not available.")
+        raw = self._load_checkpoint_payload(name)
+        state = dict(raw.get("state") or {})
+        active_session_id = getattr(self, "active_session_id", None)
+        if not active_session_id:
+            raise RuntimeError("No active session.")
+        current_record = session_manager.load_session(active_session_id)
+        transcript = list(raw.get("transcript") or [])
+        updated = session_manager.update_session(
+            current_record.session_id,
+            active_agent=state.get("active_agent"),
+            active_profile=state.get("active_profile"),
+            enabled_skills=list(state.get("enabled_skills") or []),
+            global_llm_profile=state.get("global_llm_profile"),
+            session_global_skills_override=list(state.get("session_global_skills_override") or []),
+            session_profile_overrides=dict(state.get("session_profile_overrides") or {}),
+            session_confirmation_overrides=dict(state.get("session_confirmation_overrides") or {}),
+            debugger_breakpoints=list(state.get("debugger_breakpoints") or []),
+            transcript=transcript,
+        )
+        self._restore_saved_session(updated)
+        self.active_session_id = updated.session_id
+        self.active_session_title = updated.title
+        self.active_session_loaded_from_history = True
+        self._update_active_session_snapshot()
+        return {
+            "name": str(raw.get("name") or name),
+            "session_id": updated.session_id,
+            "transcript_entries": len(updated.transcript),
+        }
 
     def create_markdown_asset(self, asset_kind: str, name: str) -> Dict[str, Any]:
         normalized_kind = str(asset_kind or "").strip().lower()
@@ -2856,6 +3539,7 @@ class PocketCodeEngine:
             "initial_request": user_input,
             "workspace_root": str(self._workspace_root),
             "filesystem_root": str(self._workspace_root),
+            "_session_manager": getattr(self, "_session_manager", None),
             "cli_context": self._copy_cli_context(cli_context),
             "formatted_cli_context": self._format_cli_context(cli_context),
             "active_flow": initial_agent,

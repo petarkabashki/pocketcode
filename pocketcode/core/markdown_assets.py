@@ -370,6 +370,43 @@ def serialize_markdown_agent_definition(agent: Any) -> str:
         front_matter["skills"] = list(agent.skills)
     if getattr(agent, "tools", None) is not None:
         front_matter["tools"] = list(agent.tools)
+    if getattr(agent, "commands", None):
+        front_matter["commands"] = [
+            {
+                "name": str(command.name),
+                "target": (
+                    str(command.target)
+                    if str(getattr(command, "target_kind", "command") or "command").strip().lower() == "command"
+                    else {
+                        "kind": str(getattr(command, "target_kind", "command") or "command"),
+                        **(
+                            {"agent": str(getattr(command, "target_agent", "") or "")}
+                            if str(getattr(command, "target_agent", "") or "").strip()
+                            else {}
+                        ),
+                        **(
+                            {"handler": str(getattr(command, "target_handler", "") or "")}
+                            if str(getattr(command, "target_handler", "") or "").strip()
+                            else {}
+                        ),
+                        "command": str(getattr(command, "target", "") or ""),
+                        **(
+                            {"visibility": str(getattr(command, "target_visibility", "") or "")}
+                            if str(getattr(command, "target_visibility", "") or "").strip()
+                            else {}
+                        ),
+                    }
+                ),
+                **({"visibility": str(command.visibility)} if str(getattr(command, "visibility", "") or "").strip() else {}),
+                **({"description": str(command.description)} if str(getattr(command, "description", "") or "").strip() else {}),
+                **({"capabilities": list(command.capabilities)} if getattr(command, "capabilities", None) else {}),
+                **({"payload_schema": dict(command.payload_schema)} if getattr(command, "payload_schema", None) else {}),
+                **({"result_schema": dict(command.result_schema)} if getattr(command, "result_schema", None) else {}),
+                **({"policy": dict(command.policy)} if getattr(command, "policy", None) else {}),
+            }
+            for command in list(agent.commands)
+            if str(getattr(command, "name", "") or "").strip() and str(getattr(command, "target", "") or "").strip()
+        ]
     if getattr(agent, "extra_prompts", None):
         front_matter["extra_prompts"] = list(agent.extra_prompts)
     if getattr(agent, "tool_confirmation", None):

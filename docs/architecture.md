@@ -90,6 +90,86 @@ Markdown flow definitions may also declare `tool_files`. Each entry is resolved 
 
 StackVM-backed flows execute against the same shared-store contract used by handwritten PocketFlow flows, including `_tool_runtime`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, `results`, and other runtime-managed keys.
 
+## Command Runtime Layers
+
+Slash-command parsing still starts in `pocketcode/cli/command_handler.py`, but the runtime now also exposes a small command-provider abstraction for non-shell commands.
+
+Implemented command-runtime pieces:
+
+- `pocketcode/core/command_runtime.py` defines `CommandSpec`, `CommandContext`, `CommandResult`, and the `CommandProvider` protocol
+- `PocketCodeEngine.build_command_context(...)` builds the command invocation context from the active engine/session state plus the current CLI context
+- `PocketCodeEngine.get_active_agent_command_provider()` and `PocketCodeEngine.get_root_command_provider()` are the current extension points for agent-scoped and root-scoped command providers
+- `PocketCodeEngine.invoke_registered_command(...)` enforces provider precedence and capability checks before invoking a registered provider command
+
+Current non-shell provider precedence is:
+
+1. active-agent provider
+2. root provider
+
+Shell/app commands such as `/help`, `/quit`, `/reload`, `/debug`, `/stop`, and `/cancel` remain direct CLI concerns and are not modeled as agent commands.
+
+This split is intentional:
+
+- shell commands control the application surface
+- provider-backed commands are the extensible path for future root-agent, active-agent, and delegated subagent command surfaces
+- capability enforcement remains inside the engine/service boundary rather than inside the CLI parser
+
+The currently implemented root provider exposes deterministic session-state operations:
+
+- `memory`: inspect, trim, or compact the active saved-session transcript
+- `checkpoint`: save, list, inspect, and restore named snapshots of the active session state plus transcript
+
+These root-provider commands are implemented directly against engine/session services rather than through an LLM-backed agent. That keeps mutation deterministic while still using the same provider dispatch path that future active-agent and subagent command exports will use.
+
+The active-agent provider path is also implemented for declarative command aliases stored on the resolved active agent profile:
+
+- agent-profile `commands` metadata is loaded through the normal YAML and Markdown agent loaders
+- inheritance merges command declarations by command name, with child declarations replacing parent declarations of the same name
+- the active-agent provider currently exposes only declarations whose visibility is `exported`
+- exported declarations delegate through the same engine/provider runtime used by root commands
+- a declaration target may be another command path, another named agent profile's declared command, or an active-agent local handler supplied by the engine
+
+Non-exported agent commands now have a separate invocation path:
+
+- `invoke_active_agent_command(..., visibility="delegated")` resolves delegated declarations without making them slash-visible
+- `invoke_active_agent_command(..., visibility="private")` resolves private declarations only for explicit private lookups
+
+This keeps slash-command discovery limited to exported commands while still giving parent agents or future ACP layers a concrete way to call delegated or private agent-local command surfaces.
+
+Under the hood, command dispatch now also builds a small ACP-style invocation envelope for internal use:
+
+- `CommandInvocation` carries the normalized command name, positional args, caller agent, active agent, session id, requested visibility, delegated capabilities, and arbitrary metadata
+- `CommandInvocation` also carries a structured `payload` mapping for typed command input
+- active-agent command dispatch passes that envelope through command-path, named-agent-command, and local-handler target execution
+- local handlers therefore receive both the existing command context and the structured invocation payload
+
+Command results now also support a structured `data` mapping alongside plain-text `output`.
+
+Authored agent command metadata now also flows through runtime command specs:
+
+- `payload_schema`
+- `result_schema`
+- `policy`
+
+These fields are descriptive contract metadata at the moment. They are loaded, inherited, serialized, and exposed on runtime command specs, but the current runtime does not yet reject invocations that fail those schemas.
+
+The current enforced fields are:
+
+- `payload_schema`: validated against the structured invocation payload before invoking the target command path, named-agent command, or local handler
+- `result_schema`: validated against `CommandResult.data` after the target returns
+
+`policy` is still descriptive metadata only.
+
+This is still an internal runtime model rather than an external wire protocol, but it gives the command system an explicit contract for future ACP transport, tracing, policy decisions, and typed command payload/result flows. The shared CLI has correspondingly been narrowed to a smaller inspection/control shell surface; mutable authoring flows are expected to move through provider commands or direct workspace file edits rather than bespoke shell handlers.
+
+Current command capabilities are also enforced at the engine boundary:
+
+- interactive/root command invocations receive a default root capability set
+- delegated or subagent invocations receive no implicit capabilities unless the caller passes them explicitly
+- individual root-provider subcommands perform their own finer-grained checks such as `memory.read`, `memory.trim`, `memory.compact`, `checkpoint.read`, `checkpoint.write`, and `checkpoint.restore`
+
+This means a subagent can only invoke the more destructive root-provider operations when its parent explicitly grants the matching capability in the command context.
+
 ## Key Runtime Types
 
 ### `FlowDefinition`

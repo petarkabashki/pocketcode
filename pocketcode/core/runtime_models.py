@@ -16,6 +16,22 @@ HOOK_PHASES = (
 
 
 @dataclass
+class AgentCommand:
+    name: str
+    target: str
+    target_kind: str = "command"
+    target_agent: str | None = None
+    target_visibility: str | None = None
+    target_handler: str | None = None
+    visibility: str = "exported"
+    description: str = ""
+    capabilities: List[str] = field(default_factory=list)
+    payload_schema: Dict[str, Any] = field(default_factory=dict)
+    result_schema: Dict[str, Any] = field(default_factory=dict)
+    policy: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class HookDefinition:
     name: str
     description: str = ""
@@ -60,6 +76,8 @@ class CompositeAgent:
         to global Textual skill defaults.
     tools : List[str] | None
         Explicit tool allowlist (qualified names). ``None`` means inherit all.
+    commands : List[AgentCommand]
+        Declarative command aliases exported by this agent profile.
     tool_confirmation : Dict[str, Any]
         ``{"default": str | None, "overrides": Dict[str, str]}``.
         Absent keys mean "no opinion at this tier". Default ``{}``.
@@ -80,6 +98,7 @@ class CompositeAgent:
     hooks: Optional[List[str]] = None
     skills: Optional[List[str]] = None
     tools: Optional[List[str]] = None
+    commands: List[AgentCommand] = field(default_factory=list)
     tool_confirmation: Dict[str, Any] = field(default_factory=dict)
     source: str = "synthesised"
     source_path: Optional[Path] = None

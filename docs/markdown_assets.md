@@ -253,6 +253,7 @@ Current supported front matter keys mirror the agent profile schema:
 - `llm_profile`
 - `skills`
 - `tools`
+- `commands`
 - `extra_prompts`
 - `tool_confirmation`
 
@@ -266,7 +267,62 @@ Current inheritance behavior:
 - `extends` is normalized into `base_agent`
 - `flow` may be omitted when `extends` is present
 - omitted `llm_profile`, `skills`, and `tools` stay unset in the stored agent and inherit later at runtime
+- `commands` are preserved as declarative agent-command alias metadata and merge by `name` during agent inheritance
 - parent `inline_prompt` / `extra_prompts` are prepended to the child during effective-agent resolution
+
+Current `commands` target forms are:
+
+- plain string target such as `memory compact 1`
+- structured target mapping such as:
+
+```yaml
+commands:
+  - name: compact-via-review
+    target:
+      kind: agent_command
+      agent: review.worker
+      command: trim-delegated
+      visibility: delegated
+```
+
+- local-handler target mapping such as:
+
+```yaml
+commands:
+  - name: local-review
+    target:
+      kind: local_handler
+      handler: review_local
+```
+
+Command entries may also declare descriptive schema/policy metadata:
+
+```yaml
+commands:
+  - name: compact-now
+    target: memory compact 1
+    payload_schema:
+      type: object
+      properties:
+        mode:
+          type: string
+    result_schema:
+      type: object
+      properties:
+        summary:
+          type: string
+    policy:
+      confirmation: confirm
+```
+
+Those fields are preserved by Markdown and YAML agent loading and are exposed through runtime command specs, but they are not yet enforced as hard schema-validation rules.
+
+Current runtime enforcement updates:
+
+- `payload_schema` is now validated when a command is invoked through the structured active-agent command runtime with a payload mapping
+- `result_schema` is now validated against the structured `data` field returned by the command result
+- the implemented validator currently supports `type`, `properties`, `required`, plus primitive property types such as `string`, `integer`, `number`, `boolean`, `object`, and `array`
+- `policy` remains descriptive metadata for now
 
 ### Self-Contained Hybrid Agents
 

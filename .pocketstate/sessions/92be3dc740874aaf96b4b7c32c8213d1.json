@@ -1,0 +1,98 @@
+{
+  "session_id": "92be3dc740874aaf96b4b7c32c8213d1",
+  "title": "Session 2026-03-13 01:23 UTC",
+  "created_at": "2026-03-13T01:23:20.479783+00:00",
+  "updated_at": "2026-03-13T01:25:05.700084+00:00",
+  "workspace_root": "/media/mu6mula/Data1/AI-Stuff/PocketCoder",
+  "active_agent": "core.react",
+  "active_profile": "my-react",
+  "enabled_skills": [
+    "pocketcode-plugin-authoring",
+    "pocketcode-profiles-prompts",
+    "pocketcode-tools-runtime",
+    "pocketcode-workspace-assets",
+    "pocketcode-workspace-builder"
+  ],
+  "global_llm_profile": "gemini-3-flash-preview",
+  "session_global_skills_override": [],
+  "session_profile_overrides": {},
+  "session_confirmation_overrides": {
+    "default_policy": null,
+    "tool_policies": {
+      "core.ask_user_radio_group": "allow"
+    },
+    "agent_policies": {}
+  },
+  "debugger_breakpoints": [],
+  "transcript": [
+    {
+      "entry_id": "247bfb1a7c2f4ca982668b5f4d868ba4",
+      "timestamp": "2026-03-13T01:25:05.699623+00:00",
+      "role": "user",
+      "content": "create a survey of 3 questions and run it",
+      "run_id": "f3bc7d2054a84fb4bb37879253c801b2",
+      "metadata": {
+        "agent": "core.react"
+      }
+    },
+    {
+      "entry_id": "cbc917f433834aeaae0760f632e47023",
+      "timestamp": "2026-03-13T01:25:05.700071+00:00",
+      "role": "assistant",
+      "content": "The 3-question survey has been completed. Here are the results:\n\n1. **Favorite programming language:** Python\n2. **Primary operating system:** Windows\n3. **Years of experience:** 0-1 years",
+      "run_id": "f3bc7d2054a84fb4bb37879253c801b2",
+      "metadata": {
+        "summary": {
+          "agent_path": [
+            "core.react"
+          ],
+          "current_agent": "core.react",
+          "active_skills": [
+            "pocketcode-plugin-authoring",
+            "pocketcode-profiles-prompts",
+            "pocketcode-tools-runtime",
+            "pocketcode-workspace-assets",
+            "pocketcode-workspace-builder"
+          ],
+          "current_llm_profile": null,
+          "current_llm_model": null,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_cost_usd": 0.0,
+          "vm_validation_warnings": [],
+          "vm_validation_warning_count": 0,
+          "context_stats": {
+            "files": 0,
+            "folders": 0,
+            "urls": 0,
+            "snippets": 0,
+            "snippet_chars": 0
+          },
+          "runtime_event_count": 4,
+          "step_count": 1,
+          "steps": [
+            {
+              "index": 1,
+              "kind": "agent_turn",
+              "label": "Agent turn: core.react",
+              "status": "completed",
+              "parent_step_index": null,
+              "duration_ms": 23674.988,
+              "summary": "Transition: final_answer",
+              "details": {
+                "agent": "core.react",
+                "execution_mode": "llm",
+                "outcome": {
+                  "transition": "final_answer"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

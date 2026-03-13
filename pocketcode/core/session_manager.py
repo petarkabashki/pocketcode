@@ -214,6 +214,14 @@ class SessionManager:
         for field_name, value in updates.items():
             if not hasattr(record, field_name):
                 continue
+            if field_name == "transcript" and isinstance(value, list):
+                value = [
+                    item
+                    if isinstance(item, SessionTranscriptEntry)
+                    else SessionTranscriptEntry.from_raw(item)
+                    for item in value
+                    if isinstance(item, (SessionTranscriptEntry, dict))
+                ]
             setattr(record, field_name, value)
         return self.save_session(record)
 

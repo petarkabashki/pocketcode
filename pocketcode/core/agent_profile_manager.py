@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +30,95 @@ from pocketcode.core.resource_roots import (
 
 logger = logging.getLogger(__name__)
 WORKSPACE_NAMESPACE = "workspace"
+
+
+def _normalize_agent_commands(raw_commands: Any, *, field_name: str) -> list[Any]:
+    from pocketcode.core.runtime_models import AgentCommand  # noqa: PLC0415
+
+    if raw_commands is None:
+        return []
+    if not isinstance(raw_commands, list):
+        raise ValueError(f"{field_name}: commands must be a list when provided.")
+    commands: list[AgentCommand] = []
+    for index, raw in enumerate(raw_commands):
+        if not isinstance(raw, dict):
+            raise ValueError(f"{field_name}: commands[{index}] must be a mapping.")
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            raise ValueError(f"{field_name}: commands[{index}].name is required.")
+        raw_target = raw.get("target")
+        target_kind = "command"
+        target = ""
+        target_agent = None
+        target_visibility = None
+        target_handler = None
+        if isinstance(raw_target, str):
+            target = raw_target.strip()
+            if not target:
+                raise ValueError(f"{field_name}: commands[{index}].target is required.")
+            try:
+                shlex.split(target)
+            except ValueError as exc:
+                raise ValueError(f"{field_name}: commands[{index}].target is invalid: {exc}") from exc
+        elif isinstance(raw_target, dict):
+            target_kind = str(raw_target.get("kind") or "command").strip().lower() or "command"
+            if target_kind == "command":
+                target = str(raw_target.get("command") or raw_target.get("value") or "").strip()
+                if not target:
+                    raise ValueError(f"{field_name}: commands[{index}].target.command is required.")
+                try:
+                    shlex.split(target)
+                except ValueError as exc:
+                    raise ValueError(f"{field_name}: commands[{index}].target.command is invalid: {exc}") from exc
+            elif target_kind == "agent_command":
+                target_agent = str(raw_target.get("agent") or "").strip()
+                target = str(raw_target.get("command") or "").strip()
+                target_visibility = str(raw_target.get("visibility") or "").strip().lower() or None
+                if not target_agent:
+                    raise ValueError(f"{field_name}: commands[{index}].target.agent is required.")
+                if not target:
+                    raise ValueError(f"{field_name}: commands[{index}].target.command is required.")
+                if target_visibility is not None and target_visibility not in {"private", "delegated", "exported"}:
+                    raise ValueError(
+                        f"{field_name}: commands[{index}].target.visibility must be one of private, delegated, exported."
+                    )
+            elif target_kind == "local_handler":
+                target_handler = str(raw_target.get("handler") or "").strip()
+                target = str(raw_target.get("command") or target_handler or "").strip()
+                if not target_handler:
+                    raise ValueError(f"{field_name}: commands[{index}].target.handler is required.")
+            else:
+                raise ValueError(
+                    f"{field_name}: commands[{index}].target.kind must be 'command', 'agent_command', or 'local_handler'."
+                )
+        else:
+            raise ValueError(f"{field_name}: commands[{index}].target must be a string or mapping.")
+        visibility = str(raw.get("visibility") or "exported").strip().lower() or "exported"
+        if visibility not in {"private", "delegated", "exported"}:
+            raise ValueError(
+                f"{field_name}: commands[{index}].visibility must be one of private, delegated, exported."
+            )
+        capabilities = [str(item).strip() for item in raw.get("capabilities", []) if str(item).strip()]
+        payload_schema = dict(raw.get("payload_schema") or {}) if isinstance(raw.get("payload_schema"), dict) else {}
+        result_schema = dict(raw.get("result_schema") or {}) if isinstance(raw.get("result_schema"), dict) else {}
+        policy = dict(raw.get("policy") or {}) if isinstance(raw.get("policy"), dict) else {}
+        commands.append(
+            AgentCommand(
+                name=name,
+                target=target,
+                target_kind=target_kind,
+                target_agent=target_agent,
+                target_visibility=target_visibility,
+                target_handler=target_handler,
+                visibility=visibility,
+                description=str(raw.get("description") or "").strip(),
+                capabilities=capabilities,
+                payload_schema=payload_schema,
+                result_schema=result_schema,
+                policy=policy,
+            )
+        )
+    return commands
 
 
 class CompositeAgentManager:
@@ -538,6 +628,7 @@ class CompositeAgentManager:
             for index, prompt_ref in enumerate(extra_prompts):
                 validate_prompt_source(prompt_ref, field_name=f"{yaml_file.name}: extra_prompts[{index}]")
             extra_prompts = [normalize_prompt_source(prompt_ref) for prompt_ref in extra_prompts]
+            commands = _normalize_agent_commands(raw.get("commands"), field_name=yaml_file.name)
 
             normalized_tools = None
             if has_tools_key and tools_raw is not None:
@@ -568,6 +659,7 @@ class CompositeAgentManager:
                 ),
                 inline_prompt=str(raw.get("inline_prompt") or raw.get("prompt") or "").strip(),
                 tools=normalized_tools if has_tools_key and normalized_tools is not None else None,
+                commands=commands,
                 tool_confirmation={
                     "default": str(tool_confirmation_raw["default"])
                     if tool_confirmation_raw.get("default")
@@ -632,6 +724,39 @@ class CompositeAgentManager:
                 normalize_prompt_source(str(prompt_ref))
                 for prompt_ref in agent.extra_prompts
                 if str(prompt_ref).strip()
+            ]
+        if getattr(agent, "commands", None):
+            data["commands"] = [
+                {
+                    "name": str(command.name),
+                    "target": (
+                        str(command.target)
+                        if str(getattr(command, "target_kind", "command") or "command").strip().lower() == "command"
+                        else {
+                            "kind": str(getattr(command, "target_kind", "command") or "command"),
+                            "agent": str(getattr(command, "target_agent", "") or ""),
+                            **(
+                                {"handler": str(getattr(command, "target_handler", "") or "")}
+                                if str(getattr(command, "target_handler", "") or "").strip()
+                                else {}
+                            ),
+                            "command": str(getattr(command, "target", "") or ""),
+                            **(
+                                {"visibility": str(getattr(command, "target_visibility", "") or "")}
+                                if str(getattr(command, "target_visibility", "") or "").strip()
+                                else {}
+                            ),
+                        }
+                    ),
+                    **({"visibility": str(command.visibility)} if str(getattr(command, "visibility", "") or "").strip() else {}),
+                    **({"description": str(command.description)} if str(getattr(command, "description", "") or "").strip() else {}),
+                    **({"capabilities": list(command.capabilities)} if getattr(command, "capabilities", None) else {}),
+                    **({"payload_schema": dict(command.payload_schema)} if getattr(command, "payload_schema", None) else {}),
+                    **({"result_schema": dict(command.result_schema)} if getattr(command, "result_schema", None) else {}),
+                    **({"policy": dict(command.policy)} if getattr(command, "policy", None) else {}),
+                }
+                for command in list(agent.commands)
+                if str(getattr(command, "name", "") or "").strip() and str(getattr(command, "target", "") or "").strip()
             ]
         if tool_confirmation:
             data["tool_confirmation"] = tool_confirmation
@@ -708,6 +833,7 @@ class CompositeAgentManager:
                 hooks=None if agent.hooks is None else list(agent.hooks),
                 skills=None if agent.skills is None else list(agent.skills),
                 tools=None if agent.tools is None else list(agent.tools),
+                commands=list(agent.commands),
                 tool_confirmation={
                     "default": (agent.tool_confirmation or {}).get("default"),
                     "overrides": dict((agent.tool_confirmation or {}).get("overrides") or {}),
@@ -729,6 +855,15 @@ class CompositeAgentManager:
             merged_confirmation.pop("overrides", None)
         if merged_confirmation.get("default") is None and "default" in merged_confirmation:
             merged_confirmation.pop("default", None)
+        merged_commands: dict[str, Any] = {
+            str(command.name): command
+            for command in list(getattr(base_agent, "commands", []) or [])
+            if str(getattr(command, "name", "") or "").strip()
+        }
+        for command in list(getattr(agent, "commands", []) or []):
+            command_name = str(getattr(command, "name", "") or "").strip()
+            if command_name:
+                merged_commands[command_name] = command
 
         return Agent(
             name=agent.name,
@@ -741,6 +876,7 @@ class CompositeAgentManager:
             hooks=list(agent.hooks) if agent.hooks is not None else (list(base_agent.hooks) if base_agent.hooks is not None else None),
             skills=list(agent.skills) if agent.skills is not None else (list(base_agent.skills) if base_agent.skills is not None else None),
             tools=list(agent.tools) if agent.tools is not None else (list(base_agent.tools) if base_agent.tools is not None else None),
+            commands=list(merged_commands.values()),
             tool_confirmation=merged_confirmation,
             source=agent.source,
             source_path=agent.source_path,

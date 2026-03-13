@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SESSION_STATE_DIR = ".pocketstate"
 DEFAULT_ENTRY_HISTORY_DIR = ".pockethist"
+DEFAULT_CHECKPOINT_DIRNAME = "checkpoints"
 ENTRY_HISTORY_FILENAME = "textual_entry_history.json"
 MAX_ENTRY_HISTORY = 100
 
@@ -32,6 +33,16 @@ def entry_history_file_path(workspace_root: str | Path, config: dict[str, Any] |
         default_dir=DEFAULT_ENTRY_HISTORY_DIR,
     )
     return root / ENTRY_HISTORY_FILENAME
+
+
+def checkpoint_storage_dir(workspace_root: str | Path, config: dict[str, Any] | None = None) -> Path:
+    root = _runtime_storage_root(
+        workspace_root,
+        config,
+        key="session_state_dir",
+        default_dir=DEFAULT_SESSION_STATE_DIR,
+    )
+    return root / DEFAULT_CHECKPOINT_DIRNAME
 
 
 def normalize_entry_history(entries: list[str] | tuple[str, ...] | None) -> list[str]:

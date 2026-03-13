@@ -143,6 +143,116 @@ Use a stricter review bar.
     assert compiled["inline_prompt"] == "Use a stricter review bar."
 
 
+def test_compile_markdown_agent_definition_preserves_commands(tmp_path: Path):
+    agent_file = tmp_path / "review.agent.md"
+    agent_file.write_text(
+        """---
+name: review.safe
+flow: core.review
+commands:
+  - name: compact-now
+    target: memory compact 1
+    visibility: exported
+    capabilities:
+      - memory.compact
+    payload_schema:
+      type: object
+    result_schema:
+      type: object
+    policy:
+      confirmation: confirm
+---
+Use a stricter review bar.
+""",
+        encoding="utf-8",
+    )
+
+    document = load_markdown_asset_document(agent_file)
+    compiled = compile_markdown_agent_definition(document, default_name="review.safe")
+
+    assert compiled["commands"] == [
+        {
+            "name": "compact-now",
+            "target": "memory compact 1",
+            "visibility": "exported",
+            "capabilities": ["memory.compact"],
+            "payload_schema": {"type": "object"},
+            "result_schema": {"type": "object"},
+            "policy": {"confirmation": "confirm"},
+        }
+    ]
+
+
+def test_compile_markdown_agent_definition_preserves_structured_command_targets(tmp_path: Path):
+    agent_file = tmp_path / "review.agent.md"
+    agent_file.write_text(
+        """---
+name: review.safe
+flow: core.review
+commands:
+  - name: compact-via-review
+    target:
+      kind: agent_command
+      agent: review.worker
+      command: trim-delegated
+      visibility: delegated
+    visibility: exported
+---
+Use a stricter review bar.
+""",
+        encoding="utf-8",
+    )
+
+    document = load_markdown_asset_document(agent_file)
+    compiled = compile_markdown_agent_definition(document, default_name="review.safe")
+
+    assert compiled["commands"] == [
+        {
+            "name": "compact-via-review",
+            "target": {
+                "kind": "agent_command",
+                "agent": "review.worker",
+                "command": "trim-delegated",
+                "visibility": "delegated",
+            },
+            "visibility": "exported",
+        }
+    ]
+
+
+def test_compile_markdown_agent_definition_preserves_local_handler_targets(tmp_path: Path):
+    agent_file = tmp_path / "review.agent.md"
+    agent_file.write_text(
+        """---
+name: review.safe
+flow: core.review
+commands:
+  - name: local-review
+    target:
+      kind: local_handler
+      handler: review_local
+    visibility: exported
+---
+Use a stricter review bar.
+""",
+        encoding="utf-8",
+    )
+
+    document = load_markdown_asset_document(agent_file)
+    compiled = compile_markdown_agent_definition(document, default_name="review.safe")
+
+    assert compiled["commands"] == [
+        {
+            "name": "local-review",
+            "target": {
+                "kind": "local_handler",
+                "handler": "review_local",
+            },
+            "visibility": "exported",
+        }
+    ]
+
+
 def test_serialize_markdown_agent_definition_writes_extends(tmp_path: Path):
     agent = type(
         "Agent",
@@ -155,6 +265,7 @@ def test_serialize_markdown_agent_definition_writes_extends(tmp_path: Path):
             "llm_profile": None,
             "skills": None,
             "tools": None,
+            "commands": [],
             "extra_prompts": [],
             "tool_confirmation": {},
             "inline_prompt": "Use a stricter review bar.",
@@ -164,3 +275,46 @@ def test_serialize_markdown_agent_definition_writes_extends(tmp_path: Path):
     serialized = serialize_markdown_agent_definition(agent)
 
     assert "extends: core.review" in serialized
+
+
+def test_serialize_markdown_agent_definition_writes_commands(tmp_path: Path):
+    command = type(
+        "AgentCommand",
+        (),
+        {
+            "name": "compact-now",
+            "target": "memory compact 1",
+            "visibility": "exported",
+            "description": "Compact the current session memory.",
+            "capabilities": ["memory.compact"],
+            "payload_schema": {"type": "object"},
+            "result_schema": {"type": "object"},
+            "policy": {"confirmation": "confirm"},
+        },
+    )()
+    agent = type(
+        "Agent",
+        (),
+        {
+            "name": "review.safe",
+            "flow": "core.review",
+            "base_agent": None,
+            "description": "",
+            "llm_profile": None,
+            "skills": None,
+            "tools": None,
+            "commands": [command],
+            "extra_prompts": [],
+            "tool_confirmation": {},
+            "inline_prompt": "",
+        },
+    )()
+
+    serialized = serialize_markdown_agent_definition(agent)
+
+    assert "commands:" in serialized
+    assert "name: compact-now" in serialized
+    assert "target: memory compact 1" in serialized
+    assert "payload_schema:" in serialized
+    assert "result_schema:" in serialized
+    assert "policy:" in serialized

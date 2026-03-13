@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import shlex
 from typing import Any, Dict, Optional
 
 from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.cli.stackvm_commands import handle_stackvm_command, print_stackvm_help
+from pocketcode.core.command_runtime import CommandResult
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ BASE_COMMAND_SUGGESTIONS = [
     "/skill",
     "/agents",
     "/agent",
-    "/asset",
     "/llms",
     "/llm",
     "/llm-flow",
@@ -61,34 +60,8 @@ BASE_COMMAND_SUGGESTIONS = [
     "/agent list",
     "/agent show",
     "/agent switch",
-    "/agent clone",
-    "/agent edit",
-    "/agent edit llm",
-    "/agent edit prompts",
-    "/agent tools",
-    "/agent policy",
-    "/asset create",
-    "/asset create agent",
-    "/asset create flow",
-    "/asset create tool",
-    "/asset clone",
-    "/asset clone agent",
-    "/asset clone flow",
-    "/asset clone tool",
-    "/asset edit",
-    "/asset edit agent",
-    "/asset edit flow",
-    "/asset edit tool",
-    "/asset delete",
-    "/asset delete agent",
-    "/asset delete flow",
-    "/asset delete tool",
-    "/asset list",
-    "/asset show",
     "/skill list",
     "/skill show",
-    "/skill enable",
-    "/skill disable",
     "/exit",
     "/quit",
     "/ls",
@@ -255,6 +228,13 @@ def list_command_suggestions(engine: PocketCodeEngine, interface_name: str | Non
     suggestions = list(BASE_COMMAND_SUGGESTIONS)
     if str(interface_name or "").strip().lower() == "textual":
         suggestions += TEXTUAL_COMMAND_SUGGESTIONS
+    provider_commands: list[str] = []
+    if hasattr(engine, "get_command_providers"):
+        for provider in engine.get_command_providers():
+            try:
+                provider_commands.extend(f"/{spec.name}" for spec in provider.list_commands(visibility="exported"))
+            except Exception:
+                continue
     return sorted(
         set(
             suggestions
@@ -262,6 +242,7 @@ def list_command_suggestions(engine: PocketCodeEngine, interface_name: str | Non
             + agent_names
             + (engine.list_skills() if hasattr(engine, "list_skills") else [])
             + engine.list_llm_profiles()
+            + provider_commands
         )
     )
 
@@ -388,11 +369,17 @@ def handle_command(
     if command == "/agent":
         return _handle_agent_command(args, engine)
 
-    if command == "/asset":
-        return _handle_asset_command(args, engine)
-
     if command == "/skill":
         return _handle_skill_command(args, engine)
+
+    provider_result, provider_handled = _handle_provider_command(
+        command=command,
+        args=args,
+        engine=engine,
+        cli_context=cli_context,
+    )
+    if provider_handled:
+        return provider_result
 
     print(f"Unknown command: {command}")
     print_help()
@@ -824,6 +811,32 @@ def _handle_stop_command(active_run: Any) -> Optional[str]:
     return None
 
 
+def _handle_provider_command(
+    *,
+    command: str,
+    args: list[str],
+    engine: PocketCodeEngine,
+    cli_context: Dict[str, Any],
+) -> tuple[Optional[str], bool]:
+    if not hasattr(engine, "invoke_registered_command"):
+        return None, False
+    try:
+        result = engine.invoke_registered_command(command, args, cli_context=cli_context)
+    except PermissionError as exc:
+        print(f"Permission denied: {exc}")
+        return None, True
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return None, True
+    if not isinstance(result, CommandResult) or not result.handled:
+        return None, False
+    if result.output:
+        print(result.output)
+    if result.exit_requested:
+        return "__exit__", True
+    return None, True
+
+
 def _handle_skill_command(
     args: list[str],
     engine: PocketCodeEngine,
@@ -863,23 +876,11 @@ def _handle_skill_command(
             print(f"  Path     : {skill.source_path}")
         return None
 
-    if subcommand == "enable":
-        if not sub_args:
-            print("Usage: /skill enable <skill_name>")
-            return None
-        try:
-            engine.enable_skill(sub_args[0])
-            print(f"Skill enabled: {sub_args[0]}")
-        except ValueError as exc:
-            print(f"Error: {exc}")
-        return None
-
-    if subcommand == "disable":
-        if not sub_args:
-            print("Usage: /skill disable <skill_name>")
-            return None
-        engine.disable_skill(sub_args[0])
-        print(f"Skill disabled: {sub_args[0]}")
+    if subcommand in {"enable", "disable"}:
+        print(
+            "Skill mutation commands were removed from the CLI. "
+            "Use ACP/provider commands or configure them through the active agent/runtime."
+        )
         return None
 
     print(f"Unknown /skill subcommand: {subcommand}")
@@ -899,16 +900,15 @@ Pocketcode Commands:
                                  Optional: --agent <agent_name>
   /debug <request text>          Run one request under the interactive debugger.
   /prompts                       List registered prompts.
-  /skill <cmd> [opts]            Manage runtime skills. Run '/skill help'.
+  /skill <cmd> [opts]            Inspect runtime skills. Run '/skill help'.
   /reload                        Reload plugins and runtime catalogs.
   /stop, /cancel                 Request cancellation of the active run.
   /status [verbose|steps]        Show runtime status and optional step trace.
   /context <cmd> [opts]          Manage context. Run '/context help'.
     /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
     /session <cmd> [opts]          Manage saved sessions. Run '/session help'.
-  /agent <cmd> [opts]            Manage agents. Run '/agent help'.
+  /agent <cmd> [opts]            Inspect or switch agents. Run '/agent help'.
   /stackvm <cmd> [opts]          Manage StackVM flows, scripts, and agents. Run '/stackvm help'.
-    /asset <cmd> [opts]            Create workspace markdown assets. Run '/asset help'.
   /exit, /quit                   Exit Pocketcode.
 
 Compatibility aliases:
@@ -1320,437 +1320,18 @@ def _handle_agent_command(
             print(f"Error: {exc}")
         return None
 
-    if subcommand == "clone":
-        if len(sub_args) < 2:
-            print("Usage: /agent clone <source_agent> <new_agent_name>")
-            return None
-        src, new_name = sub_args[0], sub_args[1]
-        try:
-            cloner = engine.clone_agent if hasattr(engine, "clone_agent") else engine.clone_agent_profile
-            cloned = cloner(src, new_name)
-            target_path = getattr(cloned, "source_path", None)
-            if target_path:
-                print(f"Cloned agent '{src}' \u2192 '{new_name}' at {target_path}.")
-            else:
-                print(f"Cloned agent '{src}' \u2192 '{new_name}'.")
-        except (KeyError, ValueError) as exc:
-            print(f"Error: {exc}")
+    if subcommand in {"clone", "new", "edit", "tools", "policy"}:
+        print(
+            "Agent mutation commands were removed from the CLI. "
+            "Use ACP/provider commands or edit workspace files directly."
+        )
         return None
-
-    if subcommand == "new":
-        if len(sub_args) < 2 or sub_args[0] != "self-md":
-            print("Usage: /agent new self-md <name>")
-            return None
-        name = sub_args[1]
-        try:
-            # We use engine.create_markdown_asset with a special template for self-contained
-            # But create_markdown_asset uses a generic scaffold.
-            # We can use a custom scaffold if we add a method to engine or handle it here.
-            # For now, let's use the scaffold from the template file if it exists.
-            resource_root = engine._workspace_root / ".pocketcode" / "agents"
-            template_path = resource_root / "template-self.md"
-            
-            if not template_path.exists():
-                # Fallback scaffold
-                scaffold = (
-                    "---\n"
-                    f"name: {name}\n"
-                    "description: Self-contained agent.\n"
-                    "execution_mode: vm\n"
-                    "vm_entry: main\n"
-                    "---\n\n"
-                    "Describe the agent's role here.\n\n"
-                    "```vm\n"
-                    f"[ \"Self-contained agent {name} ready.\" answer ] \"main\" define\n"
-                    "```\n"
-                )
-            else:
-                scaffold = template_path.read_text(encoding="utf-8").replace("{{name}}", name)
-            
-            # Use engine.create_markdown_asset to create the file and reload
-            created = engine.create_markdown_asset("agent", name)
-            asset_path = Path(created["path"])
-            asset_path.write_text(scaffold, encoding="utf-8")
-            engine.reload()
-            print(f"Created self-contained agent '{name}' at {asset_path}.")
-        except Exception as exc:
-            print(f"Error: {exc}")
-        return None
-
-    if subcommand == "edit":
-        return _handle_agent_edit_command(sub_args, engine)
-
-    if subcommand == "tools":
-        return _handle_agent_tools_command(sub_args, engine)
-
-    if subcommand == "policy":
-        return _handle_agent_policy_command(sub_args, engine)
 
     print(f"Unknown /agent subcommand: {subcommand}")
     print_agent_help()
     return None
 
 
-def _handle_asset_command(
-    args: list[str],
-    engine: PocketCodeEngine,
-) -> Optional[str]:
-    if not args:
-        print_asset_help()
-        return None
-
-    subcommand = args[0].lower()
-    sub_args = args[1:]
-
-    if subcommand == "help":
-        print_asset_help()
-        return None
-
-    if subcommand == "list":
-        if len(sub_args) != 1:
-            print("Usage: /asset list <agent|flow|tool>")
-            return None
-        try:
-            assets = engine.list_markdown_assets(sub_args[0])
-        except Exception as exc:
-            print(f"Error: {exc}")
-            return None
-        print(f"Workspace markdown {sub_args[0].lower()} assets:")
-        if not assets:
-            print("  (none)")
-            return None
-        for asset_name in assets:
-            print(f"  {asset_name}")
-        return None
-
-    if subcommand == "show":
-        if len(sub_args) != 2:
-            print("Usage: /asset show <agent|flow|tool> <name>")
-            return None
-        try:
-            asset = engine.get_markdown_asset(sub_args[0], sub_args[1])
-        except Exception as exc:
-            print(f"Error: {exc}")
-            return None
-        print(f"Asset: {asset['kind']} {asset['name']}")
-        print(f"  Path     : {asset['path']}")
-        if asset.get("companion_path"):
-            print(f"  Companion: {asset['companion_path']}")
-        print("")
-        print(asset["text"].rstrip())
-        return None
-
-    if subcommand == "clone":
-        if len(sub_args) != 3:
-            print("Usage: /asset clone <agent|flow|tool> <source_name> <new_name>")
-            return None
-        try:
-            cloned = engine.clone_markdown_asset(sub_args[0], sub_args[1], sub_args[2])
-        except Exception as exc:
-            print(f"Error: {exc}")
-            return None
-        print(
-            f"Cloned {cloned['kind']} markdown asset '{sub_args[1]}' -> '{cloned['name']}' at {cloned['path']}."
-        )
-        if cloned.get("companion_path"):
-            print(f"Cloned companion handler at {cloned['companion_path']}.")
-        print("Reloaded runtime registries.")
-        return None
-
-    if subcommand == "edit":
-        if len(sub_args) != 3:
-            print("Usage: /asset edit <agent|flow|tool> <name> <markdown_file>")
-            return None
-        markdown_path = Path(sub_args[2]).expanduser()
-        if not markdown_path.is_absolute():
-            markdown_path = Path.cwd() / markdown_path
-        if not markdown_path.is_file():
-            print(f"Error: markdown file not found: {markdown_path}")
-            return None
-        try:
-            updated = engine.update_markdown_asset(
-                sub_args[0],
-                sub_args[1],
-                markdown_text=markdown_path.read_text(encoding="utf-8"),
-            )
-        except Exception as exc:
-            print(f"Error: {exc}")
-            return None
-        print(
-            f"Updated {updated['kind']} markdown asset '{updated['name']}' from {markdown_path} into {updated['path']}."
-        )
-        print("Reloaded runtime registries.")
-        return None
-
-    if subcommand == "delete":
-        if len(sub_args) != 3 or sub_args[2] != "--yes":
-            print("Usage: /asset delete <agent|flow|tool> <name> --yes")
-            return None
-        try:
-            deleted = engine.delete_markdown_asset(sub_args[0], sub_args[1])
-        except Exception as exc:
-            print(f"Error: {exc}")
-            return None
-        print(f"Deleted {deleted['kind']} markdown asset '{deleted['name']}' from {deleted['path']}.")
-        if deleted.get("companion_path") and not deleted.get("companion_deleted"):
-            print(f"Left companion handler in place at {deleted['companion_path']}.")
-        print("Reloaded runtime registries.")
-        return None
-
-    if subcommand != "create":
-        print(f"Unknown /asset subcommand: {subcommand}")
-        print_asset_help()
-        return None
-
-    if len(sub_args) != 2:
-        print("Usage: /asset create <agent|flow|tool> <name>")
-        return None
-
-    asset_kind, name = sub_args[0].lower(), sub_args[1]
-    try:
-        created = engine.create_markdown_asset(asset_kind, name)
-    except Exception as exc:
-        print(f"Error: {exc}")
-        return None
-
-    print(
-        f"Created {created['kind']} markdown asset '{created['name']}' at {created['path']}."
-    )
-    if created.get("companion_path"):
-        print(f"Created companion handler at {created['companion_path']}.")
-    print("Reloaded runtime registries.")
-    return None
-
-
-def _handle_agent_tools_command(
-    args: list[str],
-    engine: PocketCodeEngine,
-) -> Optional[str]:
-    if len(args) < 2:
-        print("Usage: /agent tools <agent_name> <all|none|set> [tool_name ...]")
-        return None
-
-    profile_name = args[0]
-    action = args[1].lower()
-    profile = _get_editable_agent_profile(engine, profile_name)
-    if profile is None:
-        return None
-
-    available_tools = set(engine.list_tools_for_agent(profile.agent))
-    updated_tools: list[str] | None
-    if action == "all":
-        updated_tools = None
-    elif action == "none":
-        updated_tools = []
-    elif action == "set":
-        if len(args) < 3:
-            print("Usage: /agent tools <agent_name> set <tool_name ...>")
-            return None
-        requested_tools = sorted(set(args[2:]))
-        unknown_tools = sorted(tool_name for tool_name in requested_tools if tool_name not in available_tools)
-        if unknown_tools:
-            print(
-                f"Error: unknown tool(s) for agent '{profile.agent}': {', '.join(unknown_tools)}"
-            )
-            return None
-        updated_tools = requested_tools
-    else:
-        print("Usage: /agent tools <agent_name> <all|none|set> [tool_name ...]")
-        return None
-
-    try:
-        updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
-        updater(
-            profile.name,
-            llm_profile=profile.llm_profile,
-            tools=updated_tools,
-            extra_prompts=list(profile.extra_prompts),
-            tool_confirmation_default=_get_profile_confirmation_default(profile),
-            tool_confirmation_overrides=_get_profile_confirmation_overrides(profile),
-        )
-        if updated_tools is None:
-            print(f"Agent '{profile.name}' now allows all tools for flow '{profile.agent}'.")
-        else:
-            print(
-                f"Agent '{profile.name}' allowed tools updated: "
-                f"{', '.join(updated_tools) if updated_tools else '(none)'}"
-            )
-    except Exception as exc:
-        print(f"Error: {exc}")
-    return None
-
-
-def _handle_agent_edit_command(
-    args: list[str],
-    engine: PocketCodeEngine,
-) -> Optional[str]:
-    if len(args) < 3:
-        print("Usage: /agent edit <llm|prompts> <agent_name> <value...>")
-        return None
-
-    target = args[0].lower()
-    profile_name = args[1]
-    profile = _get_editable_agent_profile(engine, profile_name)
-    if profile is None:
-        return None
-
-    try:
-        updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
-        if target == "llm":
-            llm_profile = None if args[2].lower() in {"inherit", "none", "reset", "auto"} else args[2]
-            updater(
-                profile.name,
-                llm_profile=llm_profile,
-                tools=list(profile.tools) if profile.tools is not None else None,
-                extra_prompts=list(profile.extra_prompts),
-                tool_confirmation_default=_get_profile_confirmation_default(profile),
-                tool_confirmation_overrides=_get_profile_confirmation_overrides(profile),
-            )
-            print(f"Agent '{profile.name}' LLM updated: {llm_profile or 'inherit'}")
-            return None
-
-        if target == "prompts":
-            raw_prompt_args = args[2:]
-            if len(raw_prompt_args) == 1 and raw_prompt_args[0].lower() in {"none", "clear", "reset"}:
-                prompt_paths: list[str] = []
-            else:
-                prompt_paths = [prompt for prompt in raw_prompt_args if prompt.strip()]
-            updater(
-                profile.name,
-                llm_profile=profile.llm_profile,
-                tools=list(profile.tools) if profile.tools is not None else None,
-                extra_prompts=prompt_paths,
-                tool_confirmation_default=_get_profile_confirmation_default(profile),
-                tool_confirmation_overrides=_get_profile_confirmation_overrides(profile),
-            )
-            print(
-                f"Agent '{profile.name}' prompt paths updated: "
-                f"{', '.join(prompt_paths) if prompt_paths else '(none)'}"
-            )
-            return None
-    except Exception as exc:
-        print(f"Error: {exc}")
-        return None
-
-    print("Usage: /agent edit <llm|prompts> <agent_name> <value...>")
-    return None
-
-
-def _handle_agent_policy_command(
-    args: list[str],
-    engine: PocketCodeEngine,
-) -> Optional[str]:
-    if len(args) < 3:
-        print(
-            "Usage: /agent policy <default|tool> <agent_name> "
-            "<policy|tool_name policy>"
-        )
-        return None
-
-    target = args[0].lower()
-    profile_name = args[1]
-    profile = _get_editable_agent_profile(engine, profile_name)
-    if profile is None:
-        return None
-
-    current_default = _get_profile_confirmation_default(profile)
-    current_overrides = _get_profile_confirmation_overrides(profile)
-
-    try:
-        if target == "default":
-            if len(args) != 3:
-                print("Usage: /agent policy default <agent_name> <allow|confirm|deny|reset>")
-                return None
-            policy = _parse_policy_or_reset(args[2])
-            updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
-            updater(
-                profile.name,
-                llm_profile=profile.llm_profile,
-                tools=list(profile.tools) if profile.tools is not None else None,
-                extra_prompts=list(profile.extra_prompts),
-                tool_confirmation_default=policy,
-                tool_confirmation_overrides=current_overrides,
-            )
-            print(
-                f"Agent '{profile.name}' default tool policy set to: "
-                f"{policy or 'inherit'}"
-            )
-            return None
-
-        if target == "tool":
-            if len(args) != 4:
-                print(
-                    "Usage: /agent policy tool <agent_name> "
-                    "<tool_name> <allow|confirm|deny|reset>"
-                )
-                return None
-            tool_name = args[2]
-            policy = _parse_policy_or_reset(args[3])
-            available_tools = set(engine.list_tools_for_agent(profile.agent))
-            if tool_name not in available_tools:
-                print(f"Error: unknown tool '{tool_name}' for agent '{profile.agent}'.")
-                return None
-            if policy is None:
-                current_overrides.pop(tool_name, None)
-            else:
-                current_overrides[tool_name] = policy
-            updater = engine.update_agent if hasattr(engine, "update_agent") else engine.update_agent_profile
-            updater(
-                profile.name,
-                llm_profile=profile.llm_profile,
-                tools=list(profile.tools) if profile.tools is not None else None,
-                extra_prompts=list(profile.extra_prompts),
-                tool_confirmation_default=current_default,
-                tool_confirmation_overrides=current_overrides,
-            )
-            print(
-                f"Agent '{profile.name}' tool policy updated: "
-                f"{tool_name} -> {policy or 'inherit'}"
-            )
-            return None
-    except Exception as exc:
-        print(f"Error: {exc}")
-        return None
-
-    print(
-        "Usage: /agent policy <default|tool> <agent_name> "
-        "<policy|tool_name policy>"
-    )
-    return None
-
-
-def _get_editable_agent_profile(
-    engine: PocketCodeEngine,
-    profile_name: str,
-) -> Any:
-    profile = engine.get_agent(profile_name) if hasattr(engine, "get_agent") else engine.get_agent_profile(profile_name)
-    if profile is None:
-        print(f"Error: agent not found: {profile_name}")
-        return None
-    if profile.source != "workspace" or profile.source_path is None:
-        print(
-            f"Error: agent '{profile_name}' is not workspace-backed. Clone it before editing."
-        )
-        return None
-    return profile
-
-
-def _get_profile_confirmation_default(profile: Any) -> str | None:
-    tool_confirmation = profile.tool_confirmation if isinstance(profile.tool_confirmation, dict) else {}
-    default_policy = tool_confirmation.get("default")
-    return str(default_policy) if default_policy else None
-
-
-def _get_profile_confirmation_overrides(profile: Any) -> dict[str, str]:
-    tool_confirmation = profile.tool_confirmation if isinstance(profile.tool_confirmation, dict) else {}
-    overrides = tool_confirmation.get("overrides", {})
-    if not isinstance(overrides, dict):
-        return {}
-    return {
-        str(tool_name): str(policy)
-        for tool_name, policy in overrides.items()
-        if tool_name and policy
-    }
 
 
 def print_agent_help() -> None:
@@ -1759,23 +1340,14 @@ def print_agent_help() -> None:
   /agent list                                 List all named agents (excludes synthesised flow defaults).
   /agent show [agent_name]                    Show details of an agent (default: active).
   /agent switch <agent_name>                  Activate an agent.
-  /agent new self-md <name>                   Create a new self-contained markdown agent.
-  /agent clone <source> <new_name>            Clone an agent to a new workspace agent.
-    /agent edit llm <agent> <profile|inherit>   Set or clear the agent LLM override.
-    /agent edit prompts <agent> <paths...>      Replace extra prompt paths.
-    /agent edit prompts <agent> clear           Clear extra prompt paths.
-  /agent tools <agent> all                    Allow all tools for a workspace agent.
-  /agent tools <agent> none                   Deny all tools for a workspace agent.
-  /agent tools <agent> set <tools...>
-                                              Set the allowed tool list for a workspace agent.
-  /agent policy default <agent> <allow|confirm|deny|reset>
-                                              Set the agent default confirmation policy.
-  /agent policy tool <agent> <tool> <allow|confirm|deny|reset>
-                                              Set or clear a per-tool confirmation policy.
   /agent help                                 Show this help message.
 
 Usage with /flow:
   /flow <flow_name> [--agent <agent_name>]
+
+Notes:
+  Agent mutation commands are no longer exposed through the CLI.
+  Use ACP/provider commands or edit workspace files directly.
 
 Compatibility:
     Agent shortcuts only: /ag and /ap map to /agent.
@@ -1783,35 +1355,11 @@ Compatibility:
     print(text)
 
 
-def print_asset_help() -> None:
-        text = """
-/asset Commands:
-    /asset list <agent|flow|tool>             List workspace markdown assets by kind.
-    /asset show <agent|flow|tool> <name>      Print the asset path and markdown source.
-    /asset create agent <name>                Create a workspace markdown agent scaffold.
-    /asset create flow <name>                 Create a workspace markdown flow scaffold.
-    /asset create tool <name>                 Create a workspace markdown tool scaffold and Python handler.
-    /asset clone <kind> <source> <new_name>   Clone a workspace markdown asset.
-    /asset edit <kind> <name> <file>          Replace a workspace markdown asset from a markdown file.
-    /asset delete <kind> <name> --yes         Delete a workspace markdown asset.
-    /asset help                               Show this help message.
-
-Notes:
-    Asset names may contain letters, numbers, dot, underscore, and hyphen.
-    Assets are created in the primary workspace resource root using flat conventions
-    such as <name>.md, <name>.tool.md, <name>.tool.py, and <name>.agent.md, then trigger a reload.
-    Delete leaves any sibling tool handler file in place unless a future explicit option removes it.
-"""
-        print(text)
-
-
 def print_skill_help() -> None:
     text = """
 /skill Commands:
   /skill list                                List all available skills grouped by top-level name prefix.
   /skill show <skill_name>                   Show details of a skill.
-  /skill enable <skill_name>                 Enable a skill for the current session.
-  /skill disable <skill_name>                Disable a skill for the current session.
   /skill help                                Show this help message.
 """
     print(text)

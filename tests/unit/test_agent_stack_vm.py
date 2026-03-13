@@ -8,6 +8,7 @@ from pocketcode.core.agent_stack_vm import (
     StackVmExecutionResult,
     StackVmHostContext,
 )
+from pocketcode.core.session_manager import SessionManager
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
 
 
@@ -210,6 +211,47 @@ def test_agent_stack_vm_join_word_formats_list_values():
 
     assert vm.store["joined_values"] == "git, search, context"
     assert vm.store["raw_values"] == ["git", "search", "context"]
+
+
+def test_agent_stack_vm_active_session_transcript_words(tmp_path: Path):
+    session_manager = SessionManager(tmp_path, config={})
+    record = session_manager.create_session(
+        title="Memory Test",
+        state={
+            "transcript": [
+                {"role": "user", "content": "First question"},
+                {"role": "assistant", "content": "First answer"},
+                {"role": "user", "content": "Second\nquestion"},
+            ]
+        },
+    )
+    vm = AgentStackVM(
+        shared_store={
+            "_session_manager": session_manager,
+            "active_session_id": record.session_id,
+        }
+    )
+    vm.register_host_words(
+        host_context=StackVmHostContext(
+            agent_name="vm-test",
+            llm_router=None,
+            tool_runtime=None,
+            llm_profile=None,
+            system_prompt="",
+            tool_definitions=[],
+        ),
+        result=StackVmExecutionResult(),
+    )
+
+    asyncio.run(
+        vm.eval(
+            '2 active-session-transcript-text "memory_text" store-set '
+            'active-session-transcript len "entry_count" store-set'
+        )
+    )
+
+    assert vm.store["entry_count"] == 3
+    assert vm.store["memory_text"] == "Assistant: First answer\nUser: Second question"
 
 
 def test_agent_stack_vm_join_word_rejects_scalar_values():

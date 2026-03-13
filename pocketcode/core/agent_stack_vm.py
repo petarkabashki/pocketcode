@@ -341,6 +341,8 @@ class AgentStackVM:
         self.register_word("last-tool-result", lambda: self.stack.append(self.store.get("last_tool_result")))
         self.register_word("last-tool-route", lambda: self.stack.append(self.store.get("last_tool_route")))
         self.register_word("results", lambda: self.stack.append(self.store.get("results", {})))
+        self.register_word("active-session-transcript", self._active_session_transcript)
+        self.register_word("active-session-transcript-text", self._active_session_transcript_text)
 
     async def _call_word(self, func: Callable[..., Any]) -> None:
         if inspect.iscoroutinefunction(func):
@@ -676,6 +678,48 @@ class AgentStackVM:
             self.stack.append(None)
             return
         self.stack.append(self.store)
+
+    def _load_active_session_transcript(self) -> list[dict[str, Any]]:
+        session_manager = self.store.get("_session_manager")
+        session_id = str(self.store.get("active_session_id") or "").strip()
+        if session_manager is None or not session_id:
+            return []
+        try:
+            record = session_manager.load_session(session_id)
+        except Exception:
+            return []
+
+        entries: list[dict[str, Any]] = []
+        for item in list(getattr(record, "transcript", []) or []):
+            if hasattr(item, "as_dict"):
+                entries.append(dict(item.as_dict()))
+            elif isinstance(item, dict):
+                entries.append(dict(item))
+        return entries
+
+    def _active_session_transcript(self) -> None:
+        self.stack.append(self._load_active_session_transcript())
+
+    def _active_session_transcript_text(self) -> None:
+        keep_last = int(self.stack.pop()) if self.stack else 0
+        entries = self._load_active_session_transcript()
+        if keep_last > 0:
+            entries = entries[-keep_last:]
+
+        lines: list[str] = []
+        for entry in entries:
+            role = str(entry.get("role") or "system").strip().lower()
+            content = " ".join(str(entry.get("content") or "").split())
+            if not content:
+                continue
+            if role == "user":
+                label = "User"
+            elif role == "assistant":
+                label = "Assistant"
+            else:
+                label = "System"
+            lines.append(f"{label}: {content}")
+        self.stack.append("\n".join(lines))
 
     async def _builtin_call(self) -> None:
         quotation_ast = self.stack.pop()

@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pocketcode.cli.command_handler import handle_command, list_command_suggestions
+from pocketcode.core.command_runtime import CommandResult, CommandSpec
 
 
 class _EngineStub:
@@ -25,6 +26,9 @@ class _EngineStub:
     def get_active_skills(self):
         return []
 
+    def get_command_providers(self):
+        return []
+
 
 class _ViewCommandRecorder:
     def __init__(self):
@@ -41,6 +45,45 @@ class _ViewCommandRecorder:
 
     def get_view(self):
         return self.current_view
+
+
+class _ProviderStub:
+    def __init__(self, *commands, result=None):
+        self._commands = list(commands)
+        self.calls: list[tuple[str, list[str], object]] = []
+        self.result = result or CommandResult(handled=True, output="provider handled")
+
+    def list_commands(self, *, visibility="exported"):
+        return [command for command in self._commands if getattr(command, "visibility", "exported") == visibility]
+
+    def invoke(self, name, args, ctx):
+        self.calls.append((name, list(args), ctx))
+        return self.result
+
+
+class _ProviderCommandEngineStub(_EngineStub):
+    def __init__(self, provider=None, permission_error=None):
+        self.provider = provider
+        self.permission_error = permission_error
+
+    def get_command_providers(self):
+        return [self.provider] if self.provider is not None else []
+
+    def invoke_registered_command(self, command_name, args, *, cli_context=None, caller_agent=None, capabilities=None):
+        if self.permission_error is not None:
+            raise self.permission_error
+        normalized = str(command_name).lstrip("/")
+        if self.provider is None:
+            return None
+        for spec in self.provider.list_commands(visibility="exported"):
+            if spec.name == normalized:
+                ctx = SimpleNamespace(
+                    cli_context=dict(cli_context or {}),
+                    caller_agent=caller_agent,
+                    capabilities=set(capabilities or ()),
+                )
+                return self.provider.invoke(normalized, args, ctx)
+        return None
 
 
 class _SessionCommandEngineStub(_EngineStub):
@@ -616,7 +659,6 @@ class TestCommandHandlerParsing:
 
         assert "/help" in suggestions
         assert "/agent" in suggestions
-        assert "/asset" in suggestions
         assert "/stackvm" in suggestions
         assert "/copy" not in suggestions
         assert "/copy-all" not in suggestions
@@ -627,6 +669,22 @@ class TestCommandHandlerParsing:
 
         assert "/view" in suggestions
         assert "/view switch run" in suggestions
+
+    def test_command_suggestions_include_exported_provider_commands(self):
+        engine = _ProviderCommandEngineStub(
+            provider=_ProviderStub(
+                CommandSpec(
+                    name="memory.compact",
+                    acp_action="memory.compact",
+                    owner="root",
+                    visibility="exported",
+                )
+            )
+        )
+
+        suggestions = list_command_suggestions(engine)
+
+        assert "/memory.compact" in suggestions
 
     def test_universal_help_excludes_textual_only_commands(self, capsys):
         cli_context = {
@@ -668,177 +726,57 @@ class TestCommandHandlerParsing:
         assert "/copy-all" in captured.out
         assert "/view" in captured.out
 
-    def test_asset_help_lists_create_commands(self, capsys):
-        cli_context = {
-            "files": set(),
-            "folders": set(),
-            "urls": set(),
-            "snippets": {},
-        }
-
-        handle_command("/asset help", engine=_EngineStub(), cli_context=cli_context)
-
-        captured = capsys.readouterr()
-        assert "/asset create agent <name>" in captured.out
-        assert "/asset create flow <name>" in captured.out
-        assert "/asset create tool <name>" in captured.out
-        assert "/asset clone <kind> <source> <new_name>" in captured.out
-        assert "/asset edit <kind> <name> <file>" in captured.out
-        assert "/asset delete <kind> <name> --yes" in captured.out
-
-    def test_asset_list_prints_workspace_markdown_assets(self, tmp_path, capsys):
-        cli_context = {
-            "files": set(),
-            "folders": set(),
-            "urls": set(),
-            "snippets": {},
-        }
-        engine = _AssetCommandEngineStub(tmp_path)
-
-        handle_command("/asset list flow", engine=engine, cli_context=cli_context)
-
-        captured = capsys.readouterr()
-        assert engine.list_calls == ["flow"]
-        assert "Workspace markdown flow assets:" in captured.out
-        assert "flow.one" in captured.out
-        assert "flow.two" in captured.out
-
-    def test_asset_show_prints_path_and_markdown_source(self, tmp_path, capsys):
-        cli_context = {
-            "files": set(),
-            "folders": set(),
-            "urls": set(),
-            "snippets": {},
-        }
-        engine = _AssetCommandEngineStub(tmp_path)
-
-        handle_command("/asset show tool sample_tool", engine=engine, cli_context=cli_context)
-
-        captured = capsys.readouterr()
-        assert engine.show_calls == [("tool", "sample_tool")]
-        assert "Asset: tool sample_tool" in captured.out
-        assert ".pocketcode/sample_tool.tool.md" in captured.out
-        assert "name: sample_tool" in captured.out
-
-    def test_asset_create_tool_creates_markdown_and_handler(self, tmp_path, capsys):
-        cli_context = {
-            "files": set(),
-            "folders": set(),
-            "urls": set(),
-            "snippets": {},
-        }
-        engine = _AssetCommandEngineStub(tmp_path)
-
-        handle_command("/asset create tool sample_tool", engine=engine, cli_context=cli_context)
-
-        captured = capsys.readouterr()
-        asset_path = tmp_path / ".pocketcode" / "sample_tool.tool.md"
-        handler_path = tmp_path / ".pocketcode" / "sample_tool.tool.py"
-        assert engine.created_calls == [("tool", "sample_tool")]
-        assert asset_path.is_file()
-        assert handler_path.is_file()
-        assert "Created tool markdown asset 'sample_tool'" in captured.out
-        assert "Created companion handler" in captured.out
-        assert "Reloaded runtime registries." in captured.out
-
-    def test_asset_clone_tool_creates_markdown_and_handler_copy(self, tmp_path, capsys):
-        cli_context = {
-            "files": set(),
-            "folders": set(),
-            "urls": set(),
-            "snippets": {},
-        }
-        engine = _AssetCommandEngineStub(tmp_path)
-
-        handle_command(
-            "/asset clone tool sample_tool sample_tool_copy",
-            engine=engine,
-            cli_context=cli_context,
+    def test_unknown_command_falls_through_to_provider_dispatch(self, capsys):
+        engine = _ProviderCommandEngineStub(
+            provider=_ProviderStub(
+                CommandSpec(
+                    name="memory.compact",
+                    acp_action="memory.compact",
+                    owner="root",
+                    visibility="exported",
+                ),
+                result=CommandResult(handled=True, output="memory compacted"),
+            )
         )
-
-        captured = capsys.readouterr()
-        assert engine.clone_calls == [("tool", "sample_tool", "sample_tool_copy")]
-        assert "Cloned tool markdown asset 'sample_tool' -> 'sample_tool_copy'" in captured.out
-        assert "Cloned companion handler" in captured.out
-        assert "Reloaded runtime registries." in captured.out
-
-    def test_asset_edit_updates_markdown_from_file(self, tmp_path, capsys):
         cli_context = {
             "files": set(),
             "folders": set(),
             "urls": set(),
             "snippets": {},
         }
-        engine = _AssetCommandEngineStub(tmp_path)
-        source_file = tmp_path / "edited-flow.md"
-        source_file.write_text("---\nname: sample_flow\n---\nupdated\n", encoding="utf-8")
 
-        handle_command(
-            f"/asset edit flow sample_flow {source_file}",
-            engine=engine,
-            cli_context=cli_context,
-        )
+        handle_command("/memory.compact now", engine=engine, cli_context=cli_context)
 
         captured = capsys.readouterr()
-        assert engine.edit_calls == [("flow", "sample_flow", "---\nname: sample_flow\n---\nupdated\n")]
-        assert "Updated flow markdown asset 'sample_flow'" in captured.out
-        assert "Reloaded runtime registries." in captured.out
+        assert "memory compacted" in captured.out
+        assert "Unknown command" not in captured.out
 
-    def test_asset_edit_reports_tool_handler_validation_errors(self, tmp_path, capsys):
+    def test_provider_permission_error_is_reported(self, capsys):
+        engine = _ProviderCommandEngineStub(permission_error=PermissionError("missing capability"))
         cli_context = {
             "files": set(),
             "folders": set(),
             "urls": set(),
             "snippets": {},
         }
-        engine = _FailingAssetEditEngineStub(tmp_path)
-        source_file = tmp_path / "bad-tool.md"
-        source_file.write_text("---\nname: bad-tool\n---\nbody\n", encoding="utf-8")
 
-        handle_command(
-            f"/asset edit tool bad-tool {source_file}",
-            engine=engine,
-            cli_context=cli_context,
-        )
+        handle_command("/memory.compact", engine=engine, cli_context=cli_context)
 
         captured = capsys.readouterr()
-        assert "Tool handler file not found" in captured.out
+        assert "Permission denied: missing capability" in captured.out
 
-    def test_asset_delete_requires_yes(self, tmp_path, capsys):
+    def test_removed_asset_commands_report_unknown_command(self, tmp_path, capsys):
         cli_context = {
             "files": set(),
             "folders": set(),
             "urls": set(),
             "snippets": {},
         }
-        engine = _AssetCommandEngineStub(tmp_path)
 
-        handle_command("/asset delete tool sample_tool", engine=engine, cli_context=cli_context)
-
-        captured = capsys.readouterr()
-        assert engine.delete_calls == []
-        assert "Usage: /asset delete <agent|flow|tool> <name> --yes" in captured.out
-
-    def test_asset_delete_tool_removes_markdown_and_leaves_handler(self, tmp_path, capsys):
-        cli_context = {
-            "files": set(),
-            "folders": set(),
-            "urls": set(),
-            "snippets": {},
-        }
-        engine = _AssetCommandEngineStub(tmp_path)
-
-        handle_command(
-            "/asset delete tool sample_tool --yes",
-            engine=engine,
-            cli_context=cli_context,
-        )
+        handle_command("/asset list flow", engine=_EngineStub(), cli_context=cli_context)
 
         captured = capsys.readouterr()
-        assert engine.delete_calls == [("tool", "sample_tool")]
-        assert "Deleted tool markdown asset 'sample_tool'" in captured.out
-        assert "Left companion handler in place" in captured.out
-        assert "Reloaded runtime registries." in captured.out
+        assert "Unknown command: /asset" in captured.out
 
     def test_textual_only_command_reports_interface_scope_outside_textual(self, capsys):
         cli_context = {
@@ -1327,7 +1265,7 @@ class TestCommandHandlerParsing:
         assert "Unknown command: /fl" in captured.out
 
 
-class TestAgentEditingCommands:
+class TestAgentCommands:
     def test_agent_list_hides_synthesised_flow_defaults(self, capsys):
         engine = _AgentListingEngineStub()
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -1357,40 +1295,17 @@ class TestAgentEditingCommands:
         assert captured.out.count("coder.safe") == 1
         assert captured.out.count("review.safe") == 1
 
-    def test_agent_clone_reports_workspace_path(self, capsys):
-        engine = _EditableProfileEngineStub()
+    def test_agent_mutation_commands_are_removed(self, capsys):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
 
         handle_command(
             "/agent clone coder.safe coder.clone",
-            engine=engine,
+            engine=_EditableProfileEngineStub(),
             cli_context=cli_context,
         )
 
-        assert engine.cloned_calls == [("coder.safe", "coder.clone")]
         captured = capsys.readouterr()
-        assert "/tmp/coder.clone.yaml" in captured.out
-
-    def test_agent_tools_set_updates_allowed_tools(self, capsys):
-        engine = _EditableProfileEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command(
-            "/agent tools coder.safe set tool.read tool.search",
-            engine=engine,
-            cli_context=cli_context,
-        )
-
-        assert engine.updated_calls == [
-            {
-                "name": "coder.safe",
-                "llm_profile": "fast",
-                "tools": ["tool.read", "tool.search"],
-                "extra_prompts": ["prompts/base.md"],
-                "tool_confirmation_default": "confirm",
-                "tool_confirmation_overrides": {"tool.write": "deny"},
-            }
-        ]
+        assert "Agent mutation commands were removed from the CLI" in captured.out
 
 
 class TestModeAndSkillCommands:
@@ -1418,15 +1333,14 @@ class TestModeAndSkillCommands:
         assert "  azure:" in captured.out
         assert "  python:" in captured.out
 
-    def test_skill_enable_updates_session(self, capsys):
+    def test_skill_enable_reports_removed_cli_mutation(self, capsys):
         engine = _ModeSkillEngineStub()
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
 
         handle_command("/skill enable python-testing", engine=engine, cli_context=cli_context)
 
-        assert engine.skill_enabled == ["python-testing"]
         captured = capsys.readouterr()
-        assert "Skill enabled: python-testing" in captured.out
+        assert "Skill mutation commands were removed from the CLI" in captured.out
 
     def test_skill_show_prints_provided_tools(self, capsys):
         engine = _ModeSkillEngineStub()
@@ -1438,151 +1352,17 @@ class TestModeAndSkillCommands:
         assert "Skill: python-testing" in captured.out
         assert "skill.python_testing.run_pytest" in captured.out
 
-    def test_agent_tools_all_clears_allowlist(self, capsys):
-        engine = _EditableProfileEngineStub()
+    def test_agent_tools_reports_removed_cli_mutation(self, capsys):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
 
         handle_command(
             "/agent tools coder.safe all",
-            engine=engine,
+            engine=_EditableProfileEngineStub(),
             cli_context=cli_context,
         )
 
-        assert engine.updated_calls[0]["tools"] is None
         captured = capsys.readouterr()
-        assert "now allows all tools" in captured.out
-
-    def test_agent_policy_default_updates_profile_default(self, capsys):
-        engine = _EditableProfileEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command(
-            "/agent policy default coder.safe allow",
-            engine=engine,
-            cli_context=cli_context,
-        )
-
-        assert engine.updated_calls == [
-            {
-                "name": "coder.safe",
-                "llm_profile": "fast",
-                "tools": ["tool.read"],
-                "extra_prompts": ["prompts/base.md"],
-                "tool_confirmation_default": "allow",
-                "tool_confirmation_overrides": {"tool.write": "deny"},
-            }
-        ]
-        captured = capsys.readouterr()
-        assert "default tool policy set to: allow" in captured.out
-
-    def test_agent_policy_tool_updates_per_tool_override(self, capsys):
-        engine = _EditableProfileEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command(
-            "/agent policy tool coder.safe tool.search confirm",
-            engine=engine,
-            cli_context=cli_context,
-        )
-
-        assert engine.updated_calls == [
-            {
-                "name": "coder.safe",
-                "llm_profile": "fast",
-                "tools": ["tool.read"],
-                "extra_prompts": ["prompts/base.md"],
-                "tool_confirmation_default": "confirm",
-                "tool_confirmation_overrides": {
-                    "tool.write": "deny",
-                    "tool.search": "confirm",
-                },
-            }
-        ]
-        captured = capsys.readouterr()
-        assert "tool.search -> confirm" in captured.out
-
-    def test_agent_policy_tool_reset_removes_override(self, capsys):
-        engine = _EditableProfileEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command(
-            "/agent policy tool coder.safe tool.write reset",
-            engine=engine,
-            cli_context=cli_context,
-        )
-
-        assert engine.updated_calls == [
-            {
-                "name": "coder.safe",
-                "llm_profile": "fast",
-                "tools": ["tool.read"],
-                "extra_prompts": ["prompts/base.md"],
-                "tool_confirmation_default": "confirm",
-                "tool_confirmation_overrides": {},
-            }
-        ]
-        captured = capsys.readouterr()
-        assert "tool.write -> inherit" in captured.out
-
-    def test_agent_tools_rejects_unknown_tool_name(self, capsys):
-        engine = _EditableProfileEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command(
-            "/agent tools coder.safe set tool.read tool.ghost",
-            engine=engine,
-            cli_context=cli_context,
-        )
-
-        assert engine.updated_calls == []
-        captured = capsys.readouterr()
-        assert "unknown tool(s)" in captured.out
-
-    def test_agent_edit_llm_updates_profile_llm(self, capsys):
-        engine = _EditableProfileEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command(
-            "/agent edit llm coder.safe smart",
-            engine=engine,
-            cli_context=cli_context,
-        )
-
-        assert engine.updated_calls == [
-            {
-                "name": "coder.safe",
-                "llm_profile": "smart",
-                "tools": ["tool.read"],
-                "extra_prompts": ["prompts/base.md"],
-                "tool_confirmation_default": "confirm",
-                "tool_confirmation_overrides": {"tool.write": "deny"},
-            }
-        ]
-        captured = capsys.readouterr()
-        assert "LLM updated: smart" in captured.out
-
-    def test_agent_edit_prompts_replaces_prompt_paths(self, capsys):
-        engine = _EditableProfileEngineStub()
-        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
-
-        handle_command(
-            "/agent edit prompts coder.safe prompts/review.md prompts/safety.md",
-            engine=engine,
-            cli_context=cli_context,
-        )
-
-        assert engine.updated_calls == [
-            {
-                "name": "coder.safe",
-                "llm_profile": "fast",
-                "tools": ["tool.read"],
-                "extra_prompts": ["prompts/review.md", "prompts/safety.md"],
-                "tool_confirmation_default": "confirm",
-                "tool_confirmation_overrides": {"tool.write": "deny"},
-            }
-        ]
-        captured = capsys.readouterr()
-        assert "prompt paths updated" in captured.out
+        assert "Agent mutation commands were removed from the CLI" in captured.out
 
 
 class TestWorkspaceCanonicalToolImports:

@@ -92,6 +92,7 @@ runtime:
 ```
 
 - `session_state_dir`: directory that stores saved-session JSON files under `sessions/`
+- `session_state_dir/checkpoints/`: directory that stores named checkpoint JSON snapshots for the provider-backed `/checkpoint` commands
 - `entry_history_dir`: directory that stores the Textual accepted-input history file `textual_entry_history.json`
 
 Relative paths resolve from the workspace root. Absolute paths are also accepted.
@@ -116,6 +117,14 @@ Where `agent_policies` is keyed by flow name and can contain:
 `tool_policies` keys accept canonical dotted ids and typed `tool:` references. The runtime normalizes them to canonical dotted tool ids before lookup and persistence.
 
 Session confirmation overrides follow the same rule when they are written into saved-session state: tool and agent keys are canonicalized to dotted registry ids, while invalid or unresolvable policy entries are dropped.
+
+The new command-provider runtime does not yet persist a canonical `runtime.command_policy` section. Command capability checks currently run against the in-memory `CommandContext.capabilities` set built by the engine. When command authorization becomes user-configurable, that policy will need to be documented here beside the existing tool-confirmation model rather than as a separate unrelated subsystem.
+
+Current default behavior:
+
+- interactive/root command invocations receive a built-in root capability set from the engine
+- delegated or subagent command invocations do not inherit those capabilities automatically
+- there is still no persisted YAML surface for command capabilities or command policy overrides
 
 Supported policies are:
 
@@ -306,6 +315,8 @@ Workspace agent profiles are loaded from every discovered `<resource_root>/<name
 Workspace hook definitions are loaded from every discovered `<resource_root>/<name>.hook.yaml`, `<resource_root>/<name>.hook.md`, `<resource_root>/hooks/**/*.hook.yaml`, `<resource_root>/hooks/**/*.hook.md`, and typed `hook.<group>/` collection. In grouped collections, hook names default from the dotted relative path, for example `hook.memory/default.hook.md` becomes `memory.default`.
 
 Current hook files store a `name`, optional `description`, and a `phases` mapping keyed by runtime lifecycle phase. Markdown hook files can also provide phase bodies through fenced blocks such as ```` ```vm before_llm ````.
+
+The workspace currently includes `.pocketcode/hook.memory/chat_history.hook.md`, which loads as `workspace.memory.chat_history`. That hook appends the last six entries from the active saved-session transcript to `formatted_cli_context` during `before_turn`.
 
 Current YAML schema:
 

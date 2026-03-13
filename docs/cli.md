@@ -147,10 +147,46 @@ Design properties:
 - commands are shell-split with `shlex.split()`
 - aliases are normalized before dispatch
 - Textual-only commands are rejected outside the Textual interface
-- most commands mutate engine state directly and print user-facing status lines
-- command handlers are intentionally thin wrappers over engine methods
+- shell-level commands still execute directly inside the shared dispatcher
+- non-shell command dispatch now has an extension hook through engine-backed command providers
+- provider-backed commands return structured command results, while the CLI layer remains responsible for printing user-facing output
+- existing built-in command handlers are still intentionally thin wrappers over engine methods
 
 The dispatcher returns `"__exit__"` only for `/exit` and `/quit`. All other commands communicate by printing to stdout.
+
+## Command Layers
+
+The implemented command architecture now distinguishes between a small shell command layer and provider-backed ACP-style commands.
+
+Resolution order is:
+
+1. shell/app commands implemented directly in `pocketcode/cli/command_handler.py`
+2. active-agent exported provider commands exposed through the engine
+3. root exported provider commands exposed through the engine
+4. unknown command fallback
+
+Current shell/app commands are intentionally narrow and include lifecycle, inspection, and interface controls such as:
+
+- `/help`
+- `/quit`
+- `/exit`
+- `/reload`
+- `/debug`
+- `/stop`
+- `/cancel`
+
+Provider-backed commands are intended for runtime behaviors that may eventually be supplied by the root command host, the active agent, or delegated subagents. The initial runtime hook is implemented, but no new provider-only slash command families are canonical yet.
+
+The current root provider now exports these command groups:
+
+- `/memory <show|trim [keep_last]|compact [keep_last]>`
+- `/checkpoint <list|save <name>|show <name>|restore <name>>`
+
+Only agent-profile commands declared with visibility `exported` participate in slash-command discovery. Agent-profile commands declared as `delegated` or `private` are available only through engine-level invocation paths used by parent agents or future ACP surfaces.
+
+Even for slash-triggered commands, the runtime now builds an internal structured invocation envelope before control reaches active-agent command targets. The CLI still accepts plain slash syntax, but nested command delegation no longer depends only on raw strings once execution enters the engine/runtime layer.
+
+The CLI currently remains text-first: provider-backed command output is still printed from the `output` field. Structured command `payload` and result `data` are now part of the internal runtime contract, but they are not yet surfaced as a first-class interactive CLI syntax. Workspace asset authoring and other mutable configuration editing are no longer part of the shared shell command surface; those flows are expected to move through ACP/provider commands or direct file edits.
 
 ## Universal Commands
 
@@ -162,7 +198,6 @@ The shared command layer exposes these primary command groups:
 - `/flow`
 - `/prompts`
 - `/agent`
-- `/asset`
 - `/stackvm`
 - `/skill`
 - `/context`
@@ -184,6 +219,8 @@ Plural convenience commands map to `/list` scopes:
 - `/llms`
 - `/tools`
 - `/prompts`
+
+`/agent` is now inspection-only from the CLI: `list`, `show`, and `switch` remain, while clone/edit/tool-policy mutation flows were removed. `/skill` is similarly inspection-only: `list` and `show` remain, while enable/disable mutation flows were removed.
 
 ### Aliases
 
@@ -233,50 +270,7 @@ Behavior by scope:
 
 ## Selection And Override Commands
 
-## Asset Scaffolding
-
-Syntax:
-
-```text
-/asset list <agent|flow|tool>
-/asset show <agent|flow|tool> <name>
-/asset clone <agent|flow|tool> <source_name> <new_name>
-/asset edit <agent|flow|tool> <name> <markdown_file>
-/asset delete <agent|flow|tool> <name> --yes
-/asset create <agent|flow|tool> <name>
-```
-
-Behavior:
-
-- `list` shows workspace-backed Markdown assets currently loaded for that kind
-- `show` prints the resolved source path and current Markdown source for a workspace-backed asset
-- `clone` copies a workspace-backed Markdown asset to a new name
-- `edit` replaces a workspace-backed Markdown asset from an external Markdown file
-- `delete` removes a workspace-backed Markdown asset after explicit `--yes` confirmation
-- scaffolds workspace Markdown assets in the primary resource root, typically `.pocketcode/`
-- `agent` creates a Markdown agent profile under `<resource_root>/agent.<group>/...`; for example, `review.safe` writes to `<resource_root>/agent.review/safe.agent.md`
-- `flow` creates a Markdown VM flow scaffold at `<resource_root>/<name>.md`
-- `tool` creates both a Markdown tool definition at `<resource_root>/<name>.tool.md` and a sibling Python handler module at `<resource_root>/<name>.tool.py`
-- cloning a tool also copies a sibling relative Python handler module when the Markdown `handler:` points at a local file
-- editing validates that front matter `name:` still matches the target asset name before saving
-- editing and cloning tool assets also validate that the `handler:` reference resolves before reload
-- deleting a tool removes the Markdown definition but currently leaves any sibling handler module in place
-- successful creation triggers an engine reload so the new asset is immediately visible to runtime discovery
-- names are restricted to letters, numbers, dot, underscore, and hyphen to keep file paths and registry names stable
-- the exact Markdown file formats for these assets are documented in `markdown_assets.md`
-
-Examples:
-
-```text
-/asset list flow
-/asset show tool workspace_echo
-/asset clone tool workspace_echo workspace_echo_copy
-/asset edit flow triage ./drafts/triage.md
-/asset delete tool workspace_echo_copy --yes
-/asset create agent reviewer.safe
-/asset create flow triage
-/asset create tool workspace_echo
-```
+There is no longer a shared `/asset` shell command family. Workspace asset scaffolding, cloning, and editing must be done either through ACP/provider commands or by editing the files directly under the workspace resource roots documented in `configuration.md` and `markdown_assets.md`.
 
 ## StackVM Commands
 
@@ -390,8 +384,6 @@ Current subcommands are:
 /agent tools <agent> all
 /agent tools <agent> none
 /agent tools <agent> set <tools...>
-/agent policy default <agent> <allow|confirm|deny|reset>
-/agent policy tool <agent> <tool> <allow|confirm|deny|reset>
 /agent help
 ```
 
@@ -400,17 +392,8 @@ Behavior:
 - `/agent list` excludes synthesised defaults
 - `/agent show` defaults to the active profile when no name is provided
 - `/agent switch` activates an existing named profile
-- `/agent clone` creates a workspace-backed copy, which is the prerequisite for editing namespace-backed or synthesised profiles
-- `/agent edit llm` updates only the profile-level LLM override
-- `/agent edit prompts` replaces the full extra prompt path list
-- `/agent tools` replaces the tool allowlist
-- `/agent policy` edits the default or per-tool confirmation policy
-
-Editing constraints:
-
-- only workspace-backed agent profiles are editable
-- namespace-backed and synthesised profiles must be cloned first
-- tool names are validated against the profile's underlying flow before being written
+- CLI-level agent mutation commands were removed
+- agent changes now go through ACP/provider commands or direct file edits
 
 ## Mode Commands
 
@@ -421,17 +404,14 @@ Current subcommands are:
 ```text
 /skill list
 /skill show <skill_name>
-/skill enable <skill_name>
-/skill disable <skill_name>
 /skill help
 ```
 
 Behavior:
 
 - `/skill list` groups skills by top-level prefix derived from `::`, `-`, or `.` separators
-- enabling a skill appends it to the session skill set and refreshes runtime components
-- disabling a skill removes it from the session skill set and refreshes runtime components
 - `/skill show` prints tool refs, provided tools, extra prompts, references, scripts, assets, and source path
+- CLI-level skill mutation commands were removed
 
 ## Context Commands
 

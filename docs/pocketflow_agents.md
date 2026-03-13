@@ -256,6 +256,26 @@ When a PocketFlow `flow_instance` or StackVM-backed flow runs, the runtime injec
 
 These are runtime conveniences, not part of the manifest schema.
 
+## React Agent Memory Model
+
+The built-in `core.react` flow currently has two distinct memory layers:
+
+- per-run working memory in the shared store, primarily `react_trace`, `last_observation`, and the current `initial_request`
+- saved-session transcript persistence managed by the engine and exposed through `/memory` and `/session` commands
+
+Current behavior is intentionally narrow:
+
+- the React prompt receives the current request, the in-flight ReAct trace, the latest observation, and formatted CLI context
+- the saved-session transcript is persisted after each run, but it is not automatically injected back into `core.react` as prompt context on later turns
+
+The workspace now ships a generic hook-based simple-memory path for agents that already consume `formatted_cli_context`:
+
+- `workspace.memory.chat_history` runs in `before_turn`
+- it reads the active saved-session transcript through the StackVM host transcript helpers
+- it appends the last six transcript entries as a compact `Role: content` block on `formatted_cli_context`
+
+So the runtime already has transcript persistence, and simple recent-history memory can be added generically through hooks. `core.react` now uses that hook through the workspace `my-react` agent profile, but richer long-term retrieval still requires explicit engine or flow-level design beyond this recency-based pattern.
+
 ## Handoffs
 
 A flow can hand off to other flows through `handoff_agents` and optional handoff policy configuration.

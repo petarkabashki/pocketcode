@@ -42,12 +42,42 @@ Current fields:
 | `hooks` | `List[str] \| None` | `None` | Ordered hook refs mixed into the agent lifecycle; `None` means inherit |
 | `skills` | `List[str] \| None` | `None` | Default enabled skills; `None` means use global skill defaults |
 | `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` means inherit flow tool surface |
+| `commands` | `List[AgentCommand]` | `[]` | Declarative command aliases exported by the agent profile |
 | `tool_confirmation` | `dict` | `{}` | Confirmation defaults and per-tool overrides |
 | `source` | `str` | `"synthesised"` | One of `synthesised`, `namespace`, or `workspace` |
 | `source_path` | `Path \| None` | `None` | Source file path for workspace-backed agents |
 
 - `tools` entries resolve through the shared registry, so they accept canonical dotted ids and typed `tool:` references.
 - `hooks` entries resolve through the shared registry, so they accept canonical dotted ids and typed `hook:` references.
+
+Current `commands` entries are declarative aliases with these fields:
+
+- `name`: slash-command name exported by the active agent provider
+- `target`: either a shell-like command string to delegate to, such as `memory compact 1`, or a structured target mapping
+- `visibility`: one of `exported`, `delegated`, or `private`; only `exported` is currently surfaced by the active-agent provider
+- `description`: optional human-readable help text
+- `capabilities`: optional capability names added to the delegated command context
+- `payload_schema`: optional structured input contract for the command
+- `result_schema`: optional structured result contract for the command
+- `policy`: optional command-policy metadata such as confirmation expectations
+
+Current structured target mappings support:
+
+- `kind: command`
+  - `command`: shell-like delegated command string
+- `kind: agent_command`
+  - `agent`: target agent/profile name
+  - `command`: target declared command name on that agent
+  - `visibility`: optional target-lookup visibility; defaults to `delegated`
+- `kind: local_handler`
+  - `handler`: deterministic handler name resolved by the engine for the active agent
+  - `command`: optional logical target label; currently defaults to the handler name when omitted
+
+Current visibility semantics are:
+
+- `exported`: exposed by the active-agent provider and reachable from slash-command dispatch
+- `delegated`: not exposed as a slash command, but reachable through the engine's active-agent command invocation API
+- `private`: not exposed as a slash command and only reachable when the caller explicitly performs a private-visibility lookup
 
 ## Source And Precedence
 
@@ -71,6 +101,7 @@ Current inheritance rules are:
 - `hooks`: inherited when omitted; explicit lists replace the parent list
 - `skills`: inherited when omitted; explicit lists replace the parent list
 - `tools`: inherited when omitted; explicit lists replace the parent list
+- `commands`: merged by command `name`, with child declarations replacing parent declarations of the same name
 - `extra_prompts`: appended after parent `extra_prompts`
 - `inline_prompt`: appended after parent `inline_prompt`
 - `tool_confirmation.default`: child overrides parent when present
@@ -130,6 +161,13 @@ The agent-profile system uses these workspace paths:
 Built-in `core` is loaded from the package resource root under `pocketcode/.pocketcore/`. The package-owned Python implementations for that namespace live under `pocketcode/core_tools/`.
 
 Current hook phases are `before_turn`, `before_llm`, `after_llm`, `before_tool`, `after_tool`, and `after_turn`. Hook phase bodies are StackVM source.
+
+The current StackVM host surface for hooks and VM-backed flows also includes active saved-session transcript access:
+
+- `active-session-transcript` pushes the active saved session transcript as a list of transcript-entry mappings
+- `active-session-transcript-text` pops `keep_last` and pushes a compact `Role: content` text block for the last `N` transcript entries
+
+This enables reusable memory hooks that append recent chat history to prompt context without hardcoding memory logic into a specific flow.
 
 ## Workspace LLM Profile Schema
 
@@ -193,7 +231,7 @@ flow: core.react
 description: Optional description
 llm_profile: fast-review
 hooks:
-  - workspace.memory.default
+  - workspace.memory.chat_history
 skills:
   - python-testing
 tools:
@@ -251,6 +289,7 @@ Notes:
 - that same pre-reload validation now resolves the target `flow`, validates `extends` against currently loaded executable or authored agents, and checks explicit `hooks`, `tools`, and `prompt:` entries in `extra_prompts` against the live registries.
 - when a workspace-backed agent profile is saved or updated, registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries are written back in canonical dotted form, while `prompt:` sources remain typed and plain path-based prompt entries remain plain paths; Markdown-backed profiles are preserved as Markdown on save.
 - after the engine has loaded flows, tools, and prompts, authored agents are resolved through inheritance and validated again against the live registries; resolvable tool refs are canonicalized, invalid prompt-resource refs are removed with a warning, and agents whose effective target flow is no longer available are dropped from the loaded registry.
+- the workspace includes a reusable `workspace.memory.chat_history` hook that appends the last six saved-session transcript entries to `formatted_cli_context` during `before_turn`; attach it to any agent whose runtime already consumes that context field, such as `core.react`
 
 ## Inline Flow Default Agent Block
 
@@ -337,6 +376,82 @@ Current skill fallback order is:
 2. active profile file `skills`
 3. active session global skill override
 4. Textual `default_skills`
+
+## Command Providers
+
+PocketCoder's slash-command parser is still global, but agent-scoped command handling now has an engine-level extension surface.
+
+The current runtime exposes two provider hooks on `PocketCodeEngine`:
+
+- `get_active_agent_command_provider()`
+- `get_root_command_provider()`
+
+Those hooks return `CommandProvider` implementations defined by `pocketcode/core/command_runtime.py`. A provider publishes `CommandSpec` records and handles invocation through structured `CommandContext` and `CommandResult` models.
+
+Current provider precedence for non-shell commands is:
+
+1. active-agent provider
+2. root provider
+
+This means agent-specific or subagent-backed commands can be encapsulated behind the active agent's provider without replacing the shared slash-command parser.
+
+The intended command ownership split is:
+
+- shell/app commands stay in the CLI layer
+- root provider commands cover shared runtime capabilities that should behave like a base global agent surface
+- active-agent providers can export agent-specific commands
+- subagents can define their own command surfaces privately or as delegated ACP actions, but they should only become user-facing slash commands when the parent or root provider explicitly re-exports them
+
+The current provider runtime does not yet add canonical new agent-profile fields for authored command definitions. The implemented hook is the engine/provider contract that later metadata-backed command exports will target.
+
+The current root provider already behaves like a base global command host for two deterministic command families:
+
+- `memory`
+- `checkpoint`
+
+Those commands are not tied to any specific authored agent profile. They are exported by the engine's root provider so future active agents can extend or override them while the shared slash-command parser remains stable.
+
+Capability scope currently works like this:
+
+- interactive/root command execution gets the engine's default root command-capability set
+- subagent or delegated execution gets no implicit root capabilities
+- a parent must pass explicit capabilities into the delegated command context if a child is meant to invoke protected root-provider actions such as `memory.trim`, `memory.compact`, or `checkpoint.restore`
+
+That model keeps "base global" commands available at the top level while still allowing stricter subagent boundaries.
+
+The currently implemented active-agent command surface is metadata-driven:
+
+- when the active agent profile contains `commands`, the engine builds an active-agent `CommandProvider` from those declarations
+- each exported declaration delegates to its `target` command string through the same provider runtime used by root commands
+- structured `agent_command` targets delegate to another named agent profile's declared command without switching the globally active profile
+- structured `local_handler` targets dispatch to deterministic handler callables supplied by the engine for the active agent profile
+- self-targeting command aliases are rejected
+
+When an agent command runs, the engine now also builds an internal `CommandInvocation` envelope that carries:
+
+- normalized command name
+- positional args
+- structured `payload`
+- caller agent
+- active agent
+- session id
+- requested visibility
+- delegated capabilities
+- arbitrary metadata for nested delegation
+
+That envelope is not yet persisted or exposed as a public protocol surface, but it is now the canonical internal shape passed through nested agent-command and local-handler dispatch.
+
+Command handlers can now also return structured `data` alongside plain-text `output`. The current CLI still renders the text path, but the runtime contract is now ready for typed command-result handling.
+
+Current authored command-schema semantics:
+
+- `payload_schema` and `result_schema` are canonical metadata fields carried through the runtime on `AgentCommand` and `CommandSpec`
+- `payload_schema` is now enforced for structured payloads passed through active-agent command invocation
+- `result_schema` is now enforced against `CommandResult.data` returned through active-agent command invocation
+- current enforcement supports the implemented subset: `type`, `properties`, `required`, and primitive property types
+- `policy` is descriptive metadata today; it is carried through command loading and discovery so future policy enforcement can use a stable authored field
+- the engine also exposes a visibility-aware active-agent invocation path for non-exported `delegated` and `private` declarations
+- `delegated` and `private` declarations are therefore usable today through engine/ACP-style callers even though only `exported` declarations participate in slash-command discovery
 
 ## Status Display
 

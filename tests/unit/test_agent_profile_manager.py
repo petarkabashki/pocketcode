@@ -408,6 +408,49 @@ class TestInheritedAgents:
         assert child.tools == ["tool.read"]
         assert child.extra_prompts == ["prompts/base.md", "prompts/child.md"]
 
+    def test_workspace_agent_command_aliases_inherit_with_child_override(self, tmp_path):
+        qname, defn = _make_agent_def("plug", "agent", llm_profile="base-llm")
+        profiles_dir = tmp_path / ".pocketcode"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / "base.agent.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "base",
+                    "flow": qname,
+                    "commands": [
+                        {"name": "compact-now", "target": "memory compact 10"},
+                        {"name": "checkpoint-list", "target": "checkpoint list"},
+                    ],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (profiles_dir / "child.agent.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "child",
+                    "extends": "base",
+                    "commands": [
+                        {"name": "compact-now", "target": "memory compact 1"},
+                    ],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        apm = AgentProfileManager(tmp_path)
+        apm.load({qname: defn})
+
+        child = apm.resolve("child")
+
+        assert child is not None
+        assert [(command.name, command.target) for command in child.commands] == [
+            ("compact-now", "memory compact 1"),
+            ("checkpoint-list", "checkpoint list"),
+        ]
+
     def test_workspace_agent_extends_unknown_base_is_not_resolved(self, tmp_path):
         qname, defn = _make_agent_def("plug", "agent")
         profiles_dir = tmp_path / ".pocketcode"

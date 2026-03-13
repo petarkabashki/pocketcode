@@ -2,6 +2,8 @@ name: my-react
 flow: core.react
 description: Synthesised default agent for core.react.
 llm_profile: gemini-3-flash-preview
+hooks:
+- workspace.memory.chat_history
 skills:
 - pocketcode-plugin-authoring
 - pocketcode-profiles-prompts
