@@ -35,7 +35,7 @@ From `workspace_catalog.py`, `resource_roots.py`, and `agent_profile_manager.py`
 - namespace-pack files are registered by qualified dotted ids such as `namespace.flow`
 - self-contained `.agent.md` files can synthesize their own executable flow definitions
 - local tool and prompt refs resolve within the owning namespace first
-- legacy `namespace::name` references normalize to canonical dotted ids
+- registry references must use canonical dotted ids such as `namespace.name`
 
 Common executable asset fields:
 - `description`
@@ -59,7 +59,7 @@ Common executable asset fields:
 
 Prefer:
 - `read_file` when the tool is owned by the same namespace
-- `core::read_file` or `core.read_file` for cross-namespace use
+- `core.read_file` for cross-namespace use
 
 Avoid:
 - ambiguous bare names when multiple namespaces can own the same tool

@@ -29,10 +29,10 @@ def collect_stackvm_authoring_warnings(ast: list[Any], *, source: str | None = N
 
 def _collect_authoring_warnings(nodes: list[Any], warnings: list[dict[str, Any]]) -> None:
     for start_index in range(max(len(nodes) - 3, 0)):
-        if _matches_legacy_tool_loop(nodes, start_index):
-            warnings.append(_make_warning("legacy-tool-loop"))
-        if _matches_legacy_prompt_route(nodes, start_index):
-            warnings.append(_make_warning("legacy-prompt-route"))
+        if _matches_manual_tool_loop(nodes, start_index):
+            warnings.append(_make_warning("manual-tool-loop"))
+        if _matches_manual_prompt_route(nodes, start_index):
+            warnings.append(_make_warning("manual-prompt-route"))
 
     for node in nodes:
         if isinstance(node, list):
@@ -53,7 +53,7 @@ def _validate_stackvm_node(node: Any) -> None:
         raise ValueError(f"StackVM compile-time form '{token_value}' cannot appear in executable AST.")
 
 
-def _matches_legacy_tool_loop(nodes: list[Any], start_index: int) -> bool:
+def _matches_manual_tool_loop(nodes: list[Any], start_index: int) -> bool:
     if start_index + 4 >= len(nodes):
         return False
 
@@ -72,7 +72,7 @@ def _matches_legacy_tool_loop(nodes: list[Any], start_index: int) -> bool:
     return _contains_symbol(request_branch, "tool-request")
 
 
-def _matches_legacy_prompt_route(nodes: list[Any], start_index: int) -> bool:
+def _matches_manual_prompt_route(nodes: list[Any], start_index: int) -> bool:
     if start_index + 3 >= len(nodes):
         return False
 
@@ -107,16 +107,16 @@ def _collect_source_authoring_warnings(source: str) -> list[dict[str, Any]]:
     tokens = tokenize_stackvm_source(source)
 
     for start_index in range(len(tokens)):
-        tool_loop_end = _match_legacy_tool_loop_tokens(tokens, start_index)
+        tool_loop_end = _match_manual_tool_loop_tokens(tokens, start_index)
         if tool_loop_end is not None:
-            warnings.append(_make_warning("legacy-tool-loop", start=tokens[start_index], end=tokens[tool_loop_end]))
+            warnings.append(_make_warning("manual-tool-loop", start=tokens[start_index], end=tokens[tool_loop_end]))
 
-        prompt_route_span = _match_legacy_prompt_route_tokens(tokens, start_index)
+        prompt_route_span = _match_manual_prompt_route_tokens(tokens, start_index)
         if prompt_route_span is not None:
             prompt_route_start, prompt_route_end = prompt_route_span
             warnings.append(
                 _make_warning(
-                    "legacy-prompt-route",
+                    "manual-prompt-route",
                     start=tokens[prompt_route_start],
                     end=tokens[prompt_route_end],
                 )
@@ -147,12 +147,12 @@ def _make_warning(
 
 
 def _warning_message(code: str) -> str:
-    if code == "legacy-tool-loop":
+    if code == "manual-tool-loop":
         return (
             "StackVM source uses the manual 'last-tool-result none?' tool loop pattern. "
             "Prefer the built-in 'tool-once' macro for tool-first flows."
         )
-    if code == "legacy-prompt-route":
+    if code == "manual-prompt-route":
         return (
             "StackVM source uses the manual 'prompt-interaction' plus 'switch' routing pattern. "
             "Prefer the built-in 'prompt-route' macro for exact-match interaction routing."
@@ -160,7 +160,7 @@ def _warning_message(code: str) -> str:
     raise ValueError(f"Unknown StackVM warning code {code!r}")
 
 
-def _match_legacy_tool_loop_tokens(tokens: list[StackVmSourceToken], start_index: int) -> int | None:
+def _match_manual_tool_loop_tokens(tokens: list[StackVmSourceToken], start_index: int) -> int | None:
     if not _token_is(tokens, start_index, "last-tool-result"):
         return None
     if not _token_is(tokens, start_index + 1, "none?"):
@@ -183,7 +183,7 @@ def _match_legacy_tool_loop_tokens(tokens: list[StackVmSourceToken], start_index
     return if_index
 
 
-def _match_legacy_prompt_route_tokens(tokens: list[StackVmSourceToken], start_index: int) -> tuple[int, int] | None:
+def _match_manual_prompt_route_tokens(tokens: list[StackVmSourceToken], start_index: int) -> tuple[int, int] | None:
     if not _token_is(tokens, start_index, "prompt-interaction"):
         return None
 

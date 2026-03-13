@@ -32,7 +32,7 @@ The existing tool model is intentionally flexible:
 
 - a tool can be a `BaseTool` subclass, a `BaseTool` instance, or a plain callable
 - a callable may request `shared_store`
-- some tools depend on live in-process objects such as `user_input_handler`, runtime event callbacks, and active agent profile state
+- some tools depend on live in-process objects such as `interaction_handler`, runtime event callbacks, and active agent profile state
 
 Because of that, a blanket "run every tool in a subprocess" change would be unsafe. It would break tools that depend on non-serializable runtime state and would make behavior differ between tool types.
 

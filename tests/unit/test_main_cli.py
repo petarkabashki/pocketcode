@@ -16,7 +16,7 @@ class _EngineStub:
     def status(self):
         return {
             "runtime_flow": "internal-router",
-            "flow": "core::react",
+            "flow": "core.react",
             "agent": "coder.safe",
             "skills": [],
             "global_llm_override": self.global_llm_override,
@@ -95,7 +95,7 @@ def test_one_shot_status_verbose_prints_vm_warning_messages(monkeypatch):
     engine = _EngineStub()
     engine.status = lambda: {
         "runtime_flow": "internal-router",
-        "flow": "core::react",
+        "flow": "core.react",
         "agent": "coder.safe",
         "skills": [],
         "global_llm_override": engine.global_llm_override,
@@ -108,7 +108,7 @@ def test_one_shot_status_verbose_prints_vm_warning_messages(monkeypatch):
             "last_run_summary": {
                 "vm_validation_warnings": [
                     {
-                        "code": "legacy-tool-loop",
+                        "code": "manual-tool-loop",
                         "message": "Prefer tool-once.",
                         "location": "line 4, cols 1-12",
                         "span": {
@@ -125,8 +125,8 @@ def test_one_shot_status_verbose_prints_vm_warning_messages(monkeypatch):
     exit_code, stdout, _, _ = _run_cli(monkeypatch, ["--prompt", "/status verbose"], engine=engine)
 
     assert exit_code == 0
-    assert "VM Validation Warnings: legacy-tool-loop" in stdout
-    assert "- legacy-tool-loop (line 4, cols 1-12): Prefer tool-once." in stdout
+    assert "VM Validation Warnings: manual-tool-loop" in stdout
+    assert "- manual-tool-loop (line 4, cols 1-12): Prefer tool-once." in stdout
 
 
 def test_one_shot_textual_command_reports_scope(monkeypatch):
@@ -144,10 +144,10 @@ def test_removed_workflow_flag_is_rejected(monkeypatch):
 
 
 def test_removed_agent_flag_alias_is_rejected(monkeypatch):
-    exit_code, _, stderr, _ = _run_cli(monkeypatch, ["--agent", "core::react", "--prompt", "/help"])
+    exit_code, _, stderr, _ = _run_cli(monkeypatch, ["--agent", "core.react", "--prompt", "/help"])
 
     assert exit_code == 2
-    assert "unrecognized arguments: --agent core::react" in stderr
+    assert "unrecognized arguments: --agent core.react" in stderr
 
 
 def test_build_debugger_until_predicate_supports_node_and_condition_matching():

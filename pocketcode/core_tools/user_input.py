@@ -5,8 +5,6 @@ from typing import Any, Callable, Dict
 
 from pocketcode.cli.user_interaction import request_interaction_from_console
 from pocketcode.core.interfaces import BaseTool
-from pocketcode.core.user_interaction import normalize_interaction_request
-
 logger = logging.getLogger(__name__)
 
 _YES_VALUES = {"y", "yes", "true", "1", "on"}
@@ -20,19 +18,11 @@ def _resolve_interaction_handler(shared_store: Dict[str, Any] | None) -> Callabl
     handler = shared_store.get("interaction_handler")
     if callable(handler):
         return handler
-
-    legacy_handler = shared_store.get("user_input_handler")
-    if not callable(legacy_handler):
-        return None
-
-    def _wrapped(request: Dict[str, Any]) -> Dict[str, Any]:
-        interaction = normalize_interaction_request(request)
-        if interaction.kind != "text":
-            raise RuntimeError("Legacy user_input_handler only supports free-form text prompts.")
-        value = legacy_handler(interaction.prompt)
-        return {"kind": "text", "value": value, "raw_input": value}
-
-    return _wrapped
+    if callable(shared_store.get("user_input_handler")):
+        raise RuntimeError(
+            "Deprecated shared-store key 'user_input_handler' is not supported. Use 'interaction_handler'."
+        )
+    return None
 
 
 def _request_interaction(

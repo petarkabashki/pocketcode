@@ -29,7 +29,7 @@ PocketCoder executes:
 
 ## Skill and workspace tool loading
 
-`markdown_profiles.py` loads skill-owned tools from `tools/*.py`.
+`markdown_profiles.py` loads skill-owned tools from `tools/*.tool.py`.
 Workspace tools are loaded separately from `.pocketcode/*.tool.py or .pocketcode/*.tool.md` by the resource-root/catalog runtime.
 
 ## Editing rules

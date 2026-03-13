@@ -26,10 +26,10 @@ from pocketcode.core.resource_roots import (
     discover_resource_roots,
     primary_resource_root,
     resource_root_for_path,
+    resource_root_namespace,
 )
 
 logger = logging.getLogger(__name__)
-WORKSPACE_NAMESPACE = "workspace"
 
 
 def _normalize_agent_commands(raw_commands: Any, *, field_name: str) -> list[Any]:
@@ -354,20 +354,6 @@ class CompositeAgentManager:
         files: list[tuple[Path, str | None]] = []
         seen: set[Path] = set()
 
-        for path in sorted(path for path in resource_root.path.glob("*.agent.yaml") if self._is_agent_profile_file(path)):
-            resolved = path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            files.append((path, None))
-
-        for path in sorted(resource_root.path.glob("*.agent.md")):
-            resolved = path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            files.append((path, None))
-
         agent_roots: list[tuple[Path, str | None]] = []
         agents_root = resource_root.path / "agents"
         if agents_root.is_dir():
@@ -459,6 +445,9 @@ class CompositeAgentManager:
             return None
         return self._namespace_context_by_root.get(Path(namespace_root).resolve())
 
+    def _default_resource_context_namespace(self) -> str:
+        return resource_root_namespace(self._primary_resource_root)
+
     def _load_agent_file(
         self,
         yaml_file: Path,
@@ -475,7 +464,7 @@ class CompositeAgentManager:
                     markdown_kwargs = {
                         "fallback_dirs": self._workspace_prompt_fallback_dirs(),
                         "prompt_registry": self._prompt_registry,
-                        "context_namespace": WORKSPACE_NAMESPACE,
+                        "context_namespace": self._default_resource_context_namespace(),
                     }
                 elif self._prompt_registry is not None:
                     context_namespace = self._namespace_context_for_root(namespace_root)
@@ -519,7 +508,14 @@ class CompositeAgentManager:
             if is_self_contained:
                 # Compile a FlowDefinition from these fields
                 if not flow_name:
-                    flow_name = f"agents.{name}"
+                    if source == "namespace":
+                        context_namespace = self._namespace_context_for_root(namespace_root)
+                        if context_namespace:
+                            flow_name = str(name) if "." in str(name) else f"{context_namespace}.{name}"
+                        else:
+                            flow_name = f"agents.{name}"
+                    else:
+                        flow_name = f"agents.{name}"
                 
                 # We need to register this flow in the flow registry.
                 # Since we don't have direct access to WorkspaceCatalog's flow registry here,

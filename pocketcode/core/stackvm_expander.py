@@ -14,7 +14,7 @@ class MacroDefinition:
     name: str
     parameters: tuple[str, ...]
     template: list[StackVmAstNode]
-    template_mode: str = "legacy"
+    template_mode: str = "plain"
     builtin: bool = False
 
 
@@ -161,7 +161,7 @@ def _consume_macro_definition(output: list[StackVmAstNode]) -> MacroDefinition:
 
     name_node = output.pop()
     template_node = output.pop()
-    template_mode = "legacy"
+    template_mode = "plain"
     if _is_symbol(template_node, "syntax-quote"):
         template_mode = "syntax"
         if not output:

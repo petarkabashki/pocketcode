@@ -197,7 +197,7 @@ class _SessionCommandEngineStub(_EngineStub):
 
 class _PromptListingEngineStub(_EngineStub):
     def list_prompts(self):
-        return ["core.react", "workspace.review"]
+        return ["core.react", "resource_root.pocketcode.review"]
 
 
 class _FlowSelectionEngineStub(_EngineStub):
@@ -257,7 +257,7 @@ class _EditableProfileEngineStub(_EngineStub):
     def __init__(self):
         self.profile = SimpleNamespace(
             name="coder.safe",
-            agent="coder::coder",
+            agent="coder.coder",
             source="workspace",
             source_path=Path("/tmp/coder.safe.yaml"),
             llm_profile="fast",
@@ -348,7 +348,7 @@ class _StatusEngineStub(_EngineStub):
     def status(self):
         return {
             "runtime_flow": "internal-router",
-            "flow": "core::react",
+            "flow": "core.react",
             "agent": "coder.safe",
             "skills": ["python-testing"],
             "global_llm_override": None,
@@ -366,7 +366,7 @@ class _WarningStatusEngineStub(_EngineStub):
     def status(self):
         return {
             "runtime_flow": "internal-router",
-            "flow": "core::react",
+            "flow": "core.react",
             "agent": "coder.safe",
             "skills": ["python-testing"],
             "global_llm_override": None,
@@ -386,7 +386,7 @@ class _WarningStatusEngineStub(_EngineStub):
                         "status": "completed",
                         "duration_ms": 12.0,
                         "summary": "Transition: call_tool",
-                        "details": {"agent": "core::react"},
+                        "details": {"agent": "core.react"},
                     },
                     {
                         "index": 2,
@@ -399,7 +399,7 @@ class _WarningStatusEngineStub(_EngineStub):
                 ],
                 "vm_validation_warnings": [
                     {
-                        "code": "legacy-tool-loop",
+                        "code": "manual-tool-loop",
                         "message": "Prefer tool-once.",
                         "location": "line 4, cols 1-12",
                         "span": {
@@ -410,7 +410,7 @@ class _WarningStatusEngineStub(_EngineStub):
                         },
                     },
                     {
-                        "code": "legacy-prompt-route",
+                        "code": "manual-prompt-route",
                         "message": "Prefer prompt-route.",
                         "location": "line 9, cols 5-22",
                         "span": {
@@ -550,12 +550,12 @@ class _StackVmCommandEngineStub(_EngineStub):
         self.update_markdown_calls: list[tuple[str, str, str]] = []
 
     def list_flows(self):
-        return ["core.react", "workspace.vm_review", "workspace.vm_router"]
+        return ["core.react", "resource_root.pocketcode.vm_review", "resource_root.pocketcode.vm_router"]
 
     def describe_flow(self, flow_name=None):
         vm_modes = {
-            "workspace.vm_review": "vm",
-            "workspace.vm_router": "vm",
+            "resource_root.pocketcode.vm_review": "vm",
+            "resource_root.pocketcode.vm_router": "vm",
             "core.react": "llm",
         }
         return {"name": flow_name, "execution_mode": vm_modes.get(flow_name, "llm")}
@@ -601,7 +601,7 @@ class _StackVmCommandEngineStub(_EngineStub):
             "target_kind": kind,
             "name": target,
             "path": self.workspace_root / ".pocketcode" / ("vm" if kind == "script" else "flows") / target,
-            "flow": "workspace.vm_review" if kind == "agent" else None,
+            "flow": "resource_root.pocketcode.vm_review" if kind == "agent" else None,
             "agent": "review.safe" if kind == "agent" else None,
             "execution_mode": "vm",
             "vm_entry": entry or "decide",
@@ -610,7 +610,7 @@ class _StackVmCommandEngineStub(_EngineStub):
             "warning_count": 1,
             "warnings": [
                 {
-                    "code": "legacy-tool-loop",
+                    "code": "manual-tool-loop",
                     "location": "line 1, cols 1-10",
                     "message": "Prefer tool-once.",
                 }
@@ -850,7 +850,7 @@ class TestCommandHandlerParsing:
 
         captured = capsys.readouterr()
         assert "Internal flow: internal-router" in captured.out
-        assert "Selected flow: core::react" in captured.out
+        assert "Selected flow: core.react" in captured.out
         assert "Runtime Steps: 0" in captured.out
         assert "workflow" not in captured.out.lower()
 
@@ -908,7 +908,7 @@ class TestCommandHandlerParsing:
         )
 
         captured = capsys.readouterr()
-        assert "VM Validation Warnings: legacy-tool-loop, legacy-prompt-route" in captured.out
+        assert "VM Validation Warnings: manual-tool-loop, manual-prompt-route" in captured.out
         assert "Runtime Steps: 2" in captured.out
 
     def test_status_verbose_output_includes_vm_validation_warning_messages(self, capsys):
@@ -926,11 +926,11 @@ class TestCommandHandlerParsing:
         )
 
         captured = capsys.readouterr()
-        assert "VM Validation Warnings: legacy-tool-loop, legacy-prompt-route" in captured.out
-        assert "- legacy-tool-loop (line 4, cols 1-12): Prefer tool-once." in captured.out
-        assert "- legacy-prompt-route (line 9, cols 5-22): Prefer prompt-route." in captured.out
+        assert "VM Validation Warnings: manual-tool-loop, manual-prompt-route" in captured.out
+        assert "- manual-tool-loop (line 4, cols 1-12): Prefer tool-once." in captured.out
+        assert "- manual-prompt-route (line 9, cols 5-22): Prefer prompt-route." in captured.out
         assert "1. agent_turn (completed) [12.0ms] Transition: call_tool" in captured.out
-        assert "details: {'agent': 'core::react'}" in captured.out
+        assert "details: {'agent': 'core.react'}" in captured.out
 
     def test_status_steps_outputs_step_trace_without_verbose_details(self, capsys):
         cli_context = {
@@ -1150,7 +1150,7 @@ class TestCommandHandlerParsing:
         captured = capsys.readouterr()
         assert "Available prompts:" in captured.out
         assert "core.react" in captured.out
-        assert "workspace.review" in captured.out
+        assert "resource_root.pocketcode.review" in captured.out
 
     def test_agent_command_no_longer_falls_back_to_flow_selection(self, capsys):
         cli_context = {
@@ -1162,14 +1162,14 @@ class TestCommandHandlerParsing:
         engine = _FlowSelectionEngineStub()
 
         handle_command(
-            "/agent coder::coder",
+            "/agent coder.coder",
             engine=engine,
             cli_context=cli_context,
         )
 
         assert engine.set_flow_calls == []
         captured = capsys.readouterr()
-        assert "Unknown /agent subcommand: coder::coder" in captured.out
+        assert "Unknown /agent subcommand: coder.coder" in captured.out
 
     def test_stackvm_list_prints_flows_and_scripts(self, capsys, tmp_path):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -1177,7 +1177,7 @@ class TestCommandHandlerParsing:
         handle_command("/stackvm list", engine=_StackVmCommandEngineStub(tmp_path), cli_context=cli_context)
 
         captured = capsys.readouterr()
-        assert "workspace.vm_review" in captured.out
+        assert "resource_root.pocketcode.vm_review" in captured.out
         assert "router.vm" in captured.out
 
     def test_stackvm_create_flow_supports_entry_and_agent(self, capsys, tmp_path):
@@ -1204,7 +1204,7 @@ class TestCommandHandlerParsing:
         )
 
         captured = capsys.readouterr()
-        assert "legacy-tool-loop" in captured.out
+        assert "manual-tool-loop" in captured.out
         assert "Expanded StackVM:" in captured.out
 
     def test_stackvm_alter_script_uses_source_file(self, capsys, tmp_path):
@@ -1256,7 +1256,7 @@ class TestCommandHandlerParsing:
         }
 
         handle_command(
-            "/fl core::react",
+            "/fl core.react",
             engine=_EngineStub(),
             cli_context=cli_context,
         )
@@ -1277,7 +1277,7 @@ class TestAgentCommands:
         )
 
         captured = capsys.readouterr()
-        assert "core::react" not in captured.out
+        assert "core.react" not in captured.out
         assert "coder.safe" in captured.out
         assert "review.safe" in captured.out
 

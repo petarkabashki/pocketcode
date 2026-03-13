@@ -80,7 +80,7 @@ Common runtime keys used by the current engine include:
 
 At startup, PocketCoder discovers resource roots from the workspace, loads any extra configured namespace roots from `runtime.workspace_paths`, and compiles those sources into one in-memory `WorkspaceCatalog`. The catalog is the runtime snapshot queried by the engine; the resource roots remain the underlying filesystem authoring surface.
 
-`runtime.default_agent` is normalized against the loaded flow registry during engine startup and when saved from the Textual system-settings editor. Legacy values such as `core::react` are accepted, but when the backing registry can qualify them they are persisted in canonical dotted form such as `core.react`.
+`runtime.default_agent` must use canonical dotted ids such as `core.react`. Older `core::react` values are rejected until the workspace is migrated through the workspace migration command.
 
 ### Runtime storage paths
 
@@ -136,7 +136,7 @@ Supported policies are:
 
 ### Textual settings
 
-The `runtime.textual` section stores both defaults and last-used runtime state.
+The `runtime.textual` section stores startup defaults and last-used runtime state.
 
 Common keys include:
 
@@ -147,9 +147,9 @@ Common keys include:
 - `selection_presets`
 - `last_used`
 
-The engine still reads legacy `workspace_mode` values from older configs, but `workspace_view` is the canonical persisted key.
+`workspace_view` is the only supported persisted view key. Legacy `workspace_mode` values are rejected until the workspace is migrated.
 
-At Textual startup, the saved `workspace_view` restores layout details such as inspector visibility, but the shell still opens on the `chat` view by default. Changing the workspace view from inside Textual continues to switch to that preset's paired view.
+At Textual startup, the saved `workspace_view` restores layout details such as whether the right-side details panel is visible, but the shell still opens on the `chat` view by default. The runtime UI now exposes only `chat` and `run` views.
 
 `last_used` can persist:
 
@@ -163,9 +163,9 @@ At Textual startup, the saved `workspace_view` restores layout details such as i
 - `inline`
 - `modal`
 
-`inline` renders pending runtime input controls directly in the Textual chat/run surfaces, replaces those controls with the submitted value after acceptance, and keeps debugger breakpoint controls on-screen in the Run view. `modal` opens those control flows in popup screens instead. Older configs that still contain `user_input_popups: true` are read as `control_presentation: modal`.
+`inline` renders pending runtime input controls directly in the Textual chat/run surfaces, replaces those controls with the submitted value after acceptance, and keeps debugger breakpoint controls on-screen in the Run view. `modal` opens those control flows in popup screens instead. Legacy `user_input_popups` keys are rejected until the workspace is migrated.
 
-Session-only inspector selections are not written into `runtime.textual.last_used`. They live in the active saved session under `<runtime.storage.session_state_dir>/sessions/*.json`.
+The current Textual shell does not expose editors for `runtime.textual` values. These settings remain file-backed and are read during startup.
 
 Current skill persistence order inside `runtime.textual` is:
 
@@ -182,7 +182,7 @@ When selection presets are saved, any registry-backed tool references embedded i
 
 PocketCoder distinguishes between the workspace root and one or more discovered `resource_root` folders inside it.
 
-The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain recognized resource collections or flat convention files such as `*.md`, `*.agent.md`, `*.agent.yaml`, `*.hook.md`, `*.hook.yaml`, `*.tool.md`, `*.prompt.md`, or `*.tool.py`. Recognized collections now include `agents/`, `hooks/`, `prompts/`, `tools/`, `skills/`, `llm-profiles/`, and typed collection folders such as `agent.<group>/`, `hook.<group>/`, `tool.<group>/`, and `skill.<name>/`.
+The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain recognized resource collections or canonical flat convention files such as `*.md`, `*.hook.md`, `*.hook.yaml`, `*.tool.md`, `*.prompt.md`, or `*.tool.py`. Recognized collections include `agents/`, `hooks/`, `prompts/`, `tools/`, `skills/`, `llm-profiles/`, and typed collection folders such as `agent.<group>/`, `hook.<group>/`, and `tool.<group>/`.
 
 Examples:
 
@@ -209,7 +209,6 @@ Each resource root can provide this extension surface:
 ├── agent.<group>/
 ├── hook.<group>/
 ├── tool.<group>/
-├── skill.<name>/
 └── vm/
 ```
 
@@ -222,7 +221,7 @@ Additional collection conventions:
 - `hook.<group>/` is an extra recursive hook root; hook files default to `<group>.<relative_name>`
 - `tool.<group>/` is an extra recursive tool root; Markdown tool wrappers default to `<group>.<relative_name>`
 - `agent.<group>/` is an extra recursive agent root; Markdown agent profiles default to `<group>.<relative_name>`
-- `skill.<name>/` is equivalent to `skills/<name>/` for a single skill bundle
+- skills must live under `skills/<name>/`
 
 Configured workspace discovery paths are separate from resource roots. They are declared in `runtime.workspace_paths` and are used for additional plain namespace roots such as `.github/`:
 
@@ -236,7 +235,7 @@ Rules:
 
 - each entry is resolved relative to the workspace root unless already absolute
 - when a path is a plain namespace folder, the namespace is the folder basename with any leading `.` removed
-- plain namespace folders load executable `*.md`, `*.prompt.md`, and `*.tool.py`
+- plain namespace folders load executable `*.md` and `*.agent.md` programs plus `*.prompt.md` and `*.tool.py`
 - adjacent `tool_files` referenced from a Markdown program are resolved relative to that Markdown file before flow finalization
 - built-in `core` is loaded from the package resource root at `pocketcode/.pocketcore/` and does not need an entry in `workspace_paths`
 
@@ -278,12 +277,10 @@ Preferred flat convention files:
 - `<resource_root>/<flow>.prompt.md` for sibling prompt text auto-attached to that flow
 - `<resource_root>/<flow>.tool.py` for sibling helper tools auto-attached to that flow when the flow omits `tool_files`
 - `<resource_root>/<tool>.tool.md` plus `<resource_root>/<tool>.tool.py` for standalone Markdown tool assets
-- legacy flat `<resource_root>/<agent>.agent.md` and `<resource_root>/<agent>.agent.yaml` workspace agent profiles that still load for compatibility
 - `<resource_root>/prompts/**/*.md` for prompt collections
 - `<resource_root>/tools/**/*.tool.md` and `<resource_root>/tools/**/*.tool.py` for recursive tool collections
 - `<resource_root>/agents/**/*.agent.md` and `<resource_root>/agents/**/*.agent.yaml` for recursive agent collections
 - `<resource_root>/tool.<group>/...` and `<resource_root>/agent.<group>/...` for typed grouped collections; new agent writes default to `agent.<group>/...`
-- `<resource_root>/skill.<name>/SKILL.md` as a single-skill alias beside `skills/<name>/SKILL.md`
 
 Additional directories still used by the runtime:
 
@@ -312,13 +309,15 @@ These files are the editable workspace-backed copies used by the Textual clone/e
 
 ## Workspace Agent Profiles
 
-Workspace agent profiles are loaded from every discovered `<resource_root>/<name>.agent.yaml`, `<resource_root>/<name>.agent.md`, `<resource_root>/agents/**/*.agent.yaml`, `<resource_root>/agents/**/*.agent.md`, and typed `agent.<group>/` collection. New or cloned profiles are written to the primary resource root using the grouped `agent.<group>/...` convention. For example, `review.safe` writes to `agent.review/safe.agent.md`, while `review` writes to `agent.review/review.agent.md`.
+Workspace agent profiles are loaded from every discovered `<resource_root>/agents/**/*.agent.yaml`, `<resource_root>/agents/**/*.agent.md`, and typed `agent.<group>/` collection. New or cloned profiles are written to the primary resource root using the grouped `agent.<group>/...` convention. For example, `review.safe` writes to `agent.review/safe.agent.md`, while `review` writes to `agent.review/review.agent.md`.
+
+Self-contained Markdown agents in those same locations also contribute executable catalog entries when they include flow-definition fields or fenced `vm` / `stackvm` blocks. Their embedded flow names default to `agents.<agent_name>` unless an explicit `flow` is provided.
 
 Workspace hook definitions are loaded from every discovered `<resource_root>/<name>.hook.yaml`, `<resource_root>/<name>.hook.md`, `<resource_root>/hooks/**/*.hook.yaml`, `<resource_root>/hooks/**/*.hook.md`, and typed `hook.<group>/` collection. In grouped collections, hook names default from the dotted relative path, for example `hook.memory/default.hook.md` becomes `memory.default`.
 
 Current hook files store a `name`, optional `description`, and a `phases` mapping keyed by runtime lifecycle phase. Markdown hook files can also provide phase bodies through fenced blocks such as ```` ```vm before_llm ````.
 
-The workspace currently includes `.pocketcode/hook.memory/chat_history.hook.md`, which loads as `workspace.memory.chat_history`. That hook appends the last six entries from the active saved-session transcript to `formatted_cli_context` during `before_turn`.
+The workspace currently includes `.pocketcode/hook.memory/chat_history.hook.md`, which loads as `resource_root.pocketcode.memory.chat_history`. That hook appends the last six entries from the active saved-session transcript to `formatted_cli_context` during `before_turn`.
 
 Current YAML schema:
 
@@ -328,7 +327,7 @@ flow: core.react
 description: Restrictive review profile
 llm_profile: fast-review
 hooks:
-  - workspace.memory.default
+  - resource_root.pocketcode.memory.default
 skills:
   - python-testing
 tools:

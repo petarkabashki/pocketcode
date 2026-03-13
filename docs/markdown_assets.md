@@ -8,8 +8,8 @@ Use this document together with:
 
 - `architecture.md` for startup order and registry behavior
 - `configuration.md` for workspace and resource-root paths
-- `agent_system.md` for agent semantics and compatibility profile terminology
-- `modes_and_skills.md` for skill behavior and legacy mode migration notes
+- `agent_system.md` for agent semantics and profile terminology
+- `modes_and_skills.md` for skill behavior
 - `cli.md` for `/asset` creation, editing, and cloning
 
 ## Supported Asset Kinds
@@ -21,10 +21,10 @@ PocketCoder currently uses Markdown for these asset surfaces:
 | Prompt | `<resource_root>/*.prompt.md`, `<resource_root>/prompts/**/*.md`, namespace `*.prompt.md`, path-based prompt includes | prompt text plus source tracking |
 | Tool | adjacent `*.tool.py` modules, `<resource_root>/*.tool.md`, `<resource_root>/tools/**/*.tool.md`, `<resource_root>/tools/**/*.tool.py`, `<resource_root>/tool.<group>/**/*.tool.md`, `<resource_root>/tool.<group>/**/*.tool.py` | wrapped executable tool metadata plus Python handler |
 | Flow | namespace `*.md`, `<resource_root>/*.md` | `FlowDefinition` with either a loaded PocketFlow factory or StackVM program source |
-| Agent | `<resource_root>/*.agent.md`, `<resource_root>/*.agent.yaml`, `<resource_root>/agents/**/*.agent.md`, `<resource_root>/agents/**/*.agent.yaml`, `<resource_root>/agent.<group>/**/*.agent.md`, `<resource_root>/agent.<group>/**/*.agent.yaml` | `CompositeAgent`; may also include an embedded `FlowDefinition` for self-contained agents |
-| Skill | `<resource_root>/skills/<name>/SKILL.md`, `<resource_root>/skill.<name>/SKILL.md` | `SkillDefinition` |
+| Agent | `<resource_root>/*.agent.md`, `<resource_root>/*.agent.yaml`, `<resource_root>/agents/**/*.agent.md`, `<resource_root>/agents/**/*.agent.yaml`, `<resource_root>/agent.<group>/**/*.agent.md`, `<resource_root>/agent.<group>/**/*.agent.yaml`, namespace `*.agent.md` | `CompositeAgent`; self-contained Markdown agents also compile embedded executable `FlowDefinition` entries |
+| Skill | `<resource_root>/skills/<name>/SKILL.md` | `SkillDefinition` |
 
-Discovered resource roots accept both root-local assets such as `review.md` and flat namespace-pack files whose filenames carry the namespace prefix such as `coder.coder.md` and `coder.git.tool.py`. They also accept collection folders for prompts, tools, agents, and skills. The default workspace `.pocketcode/` root and the built-in package root `pocketcode/.pocketcore/` both use that discovery model. `runtime.workspace_paths` is reserved for additional plain namespace roots with executable `*.md` files plus adjacent `*.tool.py` and `*.prompt.md` siblings.
+Discovered resource roots accept both root-local assets such as `review.md` and flat namespace-pack files whose filenames carry the namespace prefix such as `coder.coder.md`, `coder.coder.agent.md`, and `coder.git.tool.py`. They also accept collection folders for prompts, tools, agents, and skills. The default workspace `.pocketcode/` root and the built-in package root `pocketcode/.pocketcore/` both use that discovery model. `runtime.workspace_paths` is reserved for additional plain namespace roots with executable `*.md` and `*.agent.md` files plus adjacent `*.tool.py` and `*.prompt.md` siblings.
 
 Collection-folder naming rules:
 
@@ -36,7 +36,7 @@ Collection-folder naming rules:
 
 Markdown-backed assets participate in the same registries and precedence rules as direct resource folders and Python factories referenced from Markdown.
 
-The current runtime still uses some internal `profile` naming for backward compatibility. In this document, `.agent.*` files are treated as authored agents, whether they are pure overlays or self-contained executable agents.
+The runtime still uses some internal `profile` naming. In this document, `.agent.*` files are treated as authored agents, whether they are pure overlays or self-contained executable agents. For new executable authoring, prefer `.agent.md` over plain `.md` unless you intentionally want the lower-level flow surface.
 
 ## Common Syntax
 
@@ -134,7 +134,6 @@ Direct prompt registrations use canonical registry names such as:
 
 - `core.system`
 - `resource_root.pocketcode.review`
-- `workspace.review` for the default `.pocketcode/` compatibility namespace
 
 When a path-based prompt source is loaded, PocketCoder records the contributing source files so runtime prompt provenance remains visible on the compiled flow definition.
 
@@ -153,7 +152,7 @@ The Markdown file provides:
 
 The underlying executable implementation still comes from the required `handler` field.
 
-For Python tool modules discovered by convention rather than through a Markdown wrapper, `*.tool.py` is the preferred filename shape. The runtime still accepts other `*.py` files in direct tool folders and skill tool folders for compatibility.
+For Python tool modules discovered by convention rather than through a Markdown wrapper, `*.tool.py` is the required filename shape.
 
 Current supported handler forms are:
 
@@ -204,7 +203,7 @@ Markdown flows compile into ordinary `FlowDefinition` objects.
 2. **StackVM flow**: The Markdown file includes fenced `vm` or `stackvm` blocks. **This is the recommended way to author flows.**
 
 > [!TIP]
-> **Use StackVM for all new flows.** It replaces the legacy graph-based flow system with a more powerful and flexible stack-based orchestration language.
+> **Use StackVM for all new flows.** It replaces the older graph-based flow system with a more powerful and flexible stack-based orchestration language.
 > See [**StackVM Cookbook**](stackvm_cookbook.md) for patterns, [**StackVM Patterns**](stackvm_patterns.md) for architecture, and [**StackVM Macros**](stackvm_macros.md) for advanced usage.
 
 Mermaid or DOT graph-authored Markdown flows are no longer a supported execution form in the current runtime. Existing graph definitions should be migrated to StackVM.
@@ -237,7 +236,6 @@ Markdown flow prompt content can come from:
 - `system_prompt` or `prompt`
 - `system_prompt_file` or `prompt_file`
 - `prompt_files`
-- `prompts` as a compatibility alias
 - `prompt:` resource references anywhere a prompt file reference is accepted
 
 The loader resolves those through the shared prompt bundle path and stores the resulting `system_prompt` and `prompt_sources` on the compiled `FlowDefinition`.
@@ -349,7 +347,7 @@ You are an echo bot.
 
 Current load and save behavior:
 
-- workspace agents load from both legacy flat `<resource_root>/*.agent.yaml` or `<resource_root>/*.agent.md` files and grouped `agent.<group>/` collections
+- workspace agents load from recursive `agents/` collections and grouped `agent.<group>/` collections
 - new or cloned workspace agents are written under `agent.<group>/...`, using the first name segment as the group directory
 - saving a Markdown-backed workspace agent preserves Markdown format instead of rewriting to YAML
 - cloning a Markdown-backed workspace agent preserves its Markdown naming convention, including `.agent.md`
@@ -376,8 +374,7 @@ The Markdown file contributes:
 
 Skill directories may also contain:
 
-- `tools/*.tool.py` for preferred skill-local Python tools
-- other `tools/*.py` files for compatibility
+- `tools/*.tool.py` for skill-local Python tools
 - `references/`
 - `assets/`
 - `scripts/`

@@ -14,7 +14,7 @@ Use this document together with:
 
 An agent is a named configuration object that governs how a flow behaves during a session.
 
-The current codebase still uses `AgentProfile` and "profile" in some APIs and UI labels. In the canonical model, that term means a named agent overlay. The preferred authoring shape for new work is a self-contained Markdown agent that carries both prompt/personality and executable VM logic in one file.
+The current codebase still uses `AgentProfile` and "profile" in some APIs and UI labels. In the canonical model, that term means a named agent overlay. The preferred authored executable shape for new work is a self-contained Markdown agent that carries both prompt/personality and executable VM logic in one file.
 
 An authored agent can control:
 
@@ -46,12 +46,12 @@ Current fields:
 | `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` means inherit flow tool surface |
 | `commands` | `List[AgentCommand]` | `[]` | Declarative command aliases exported by the agent |
 | `tool_confirmation` | `dict` | `{}` | Confirmation defaults and per-tool overrides |
-| `source` | `str` | `"synthesised"` | One of `synthesised`, `namespace`, or `workspace`; `namespace` is the current compatibility label for non-workspace resource-root assets |
+| `source` | `str` | `"synthesised"` | One of `synthesised`, `namespace`, or `workspace`; `namespace` marks agent overlays synthesized from configured namespace roots and non-workspace resource roots |
 | `source_path` | `Path \| None` | `None` | Source file path for workspace-backed agents |
 
 - `tools` entries resolve through the shared registry, so they accept canonical dotted ids and typed `tool:` references.
 - `hooks` entries resolve through the shared registry, so they accept canonical dotted ids and typed `hook:` references.
-- legacy `namespace::name` references are still normalized to canonical dotted ids on load and persistence
+- registry references must use canonical dotted ids such as `core.read_file`
 
 Current `commands` entries are declarative aliases with these fields:
 
@@ -86,12 +86,12 @@ Current visibility semantics are:
 
 Agents are loaded through `AgentManager` with this effective precedence:
 
-1. workspace agent profiles from discovered resource roots, with new writes defaulting to grouped `agent.<group>/` paths while legacy flat `<resource_root>/*.agent.*` files still load
+1. workspace agent profiles from discovered resource roots, with new writes defaulting to grouped `agent.<group>/` paths
 2. synthesised defaults built from flow definitions
 
 On name collision, the higher-precedence source wins.
 
-Configured namespace roots from `runtime.workspace_paths` are not part of this authored-agent search path. Their executable Markdown files register flows in `WorkspaceCatalog`; `AgentManager` then synthesizes default agents for those flows unless another agent overrides them. Matching `.tool.py` files in those configured roots register tools, not agents.
+Configured namespace roots from `runtime.workspace_paths` are still not part of the authored-agent overlay search path. Their executable Markdown assets register flows in `WorkspaceCatalog`; self-contained `.agent.md` files in those roots therefore become executable catalog entries first, and `AgentManager` then synthesizes or resolves overlays for them. Matching `.tool.py` files in those configured roots register tools.
 
 ## Inheritance
 
@@ -158,8 +158,8 @@ The authored-agent system uses these workspace paths:
 - `<resource_root>/tool.<group>/**/*.tool.md` and `<resource_root>/tool.<group>/**/*.tool.py` for typed grouped tool collections; Markdown tool files default their name to `<group>.<relative_name>` when `name` is omitted
 - `<resource_root>/<name>.prompt.md` for shared direct prompts and prompt fallback resolution
 - `<resource_root>/prompts/**/*.md` for prompt collections resolved by dotted relative path
-- `<resource_root>/skill.<name>/SKILL.md` as a single-skill alias beside `<resource_root>/skills/<name>/SKILL.md`
-- `runtime.workspace_paths[*]` for namespace-owned executable `*.md` flows, `*.prompt.md` prompts, and `*.tool.py` tools from plain namespace roots such as `.github/`
+- `<resource_root>/skills/<name>/SKILL.md` for skill bundles
+- `runtime.workspace_paths[*]` for namespace-owned executable `*.md` and `*.agent.md` programs, `*.prompt.md` prompts, and `*.tool.py` tools from plain namespace roots such as `.github/`
 
 Built-in `core` is loaded from the package resource root under `pocketcode/.pocketcore/`. The package-owned Python implementations for that namespace live under `pocketcode/core_tools/`.
 
@@ -197,9 +197,9 @@ Markdown-backed agents use the same fields, with YAML front matter for structure
 
 Markdown agents can also define their own executable flow logic directly in the same file. This is the canonical vm-first authoring path.
 
-If a Markdown agent file includes any flow-definition fields (such as `vm_source`, `vm_entry`, or `module`), the system automatically:
+If a Markdown agent file includes any flow-definition fields, or fenced `vm` / `stackvm` blocks, the system automatically:
 1.  Compiles an embedded `FlowDefinition` from those fields.
-2.  Registers it in the flow registry under `agents.<agent_name>` (unless an explicit `flow` is provided).
+2.  Registers it in the flow registry under `agents.<agent_name>` for workspace agent collections, or under `<namespace>.<agent_name>` for configured namespace roots, unless an explicit `flow` is provided.
 3.  Configures the agent to target this embedded flow.
 
 This allows creating a fully functional agent in a single `.md` file.
@@ -222,7 +222,7 @@ You are an echo bot.
 ```
 
 Notes:
-- Self-contained agents require at least one `vm_*` field or `module`/`entry_fn`.
+- Self-contained agents require at least one `vm_*` field, a fenced `vm` or `stackvm` block, or `module`/`entry_fn`.
 - The CLI command `/agent new self-md <name>` creates a scaffold for this kind of self-contained agent.
 - Overlay-only agents are still supported, but new executable authoring should prefer the self-contained Markdown form.
 
@@ -234,7 +234,7 @@ flow: core.react
 description: Optional description
 llm_profile: fast-review
 hooks:
-  - workspace.memory.chat_history
+  - resource_root.pocketcode.memory.chat_history
 skills:
   - python-testing
 tools:
@@ -254,7 +254,7 @@ Example inheriting YAML form:
 name: my-agent-safe
 extends: my-agent
 hooks:
-  - workspace.shortcut.cache
+  - resource_root.pocketcode.shortcut.cache
 tools:
   - core.read_file
 tool_confirmation:
@@ -292,7 +292,7 @@ Notes:
 - that same pre-reload validation now resolves the target `flow`, validates `extends` against currently loaded executable or authored agents, and checks explicit `hooks`, `tools`, and `prompt:` entries in `extra_prompts` against the live registries.
 - when a workspace-backed agent profile is saved or updated, registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries are written back in canonical dotted form, while `prompt:` sources remain typed and plain path-based prompt entries remain plain paths; Markdown-backed profiles are preserved as Markdown on save.
 - after the engine has loaded flows, tools, and prompts, authored agents are resolved through inheritance and validated again against the live registries; resolvable tool refs are canonicalized, invalid prompt-resource refs are removed with a warning, and agents whose effective target flow is no longer available are dropped from the loaded registry.
-- the workspace includes a reusable `workspace.memory.chat_history` hook that appends the last six saved-session transcript entries to `formatted_cli_context` during `before_turn`; attach it to any agent whose runtime already consumes that context field, such as `core.react`
+- the workspace includes a reusable `resource_root.pocketcode.memory.chat_history` hook that appends the last six saved-session transcript entries to `formatted_cli_context` during `before_turn`; attach it to any agent whose runtime already consumes that context field, such as `core.react`
 
 ## Inline Flow Default Agent Block
 
@@ -358,20 +358,11 @@ Flow selection can optionally activate a profile:
 
 Current Textual agent-system controls include:
 
-- `F3` opens the editor picker for agent config, LLM config, tool selection, tool policies, and workspace flow or tool assets
-- `F4` opens the clone picker for agent and LLM configs plus workspace flow or tool assets
-- `F6` opens the Control Center for active profile selection, LLM override, skills, tool selection, tool policy editing, selection presets, session confirmation, and system settings
-- the inspector exposes inline `Skills` and `Allowed Tools` selection lists, each with a `Save` button that writes the current selection into the active workspace agent profile file
-- inline inspector tool and skill selections are session-scoped effective runtime overrides, not persistent `pocketcode.yml` state
-- new sessions seed those runtime overrides from the active agent profile file before any session-specific changes are applied
-- tool entries are grouped hierarchically and can be toggled at either the group or leaf level
-- searchable selection popups support `Ctrl+Down`, `Ctrl+Up`, and `Space`
-- tool groups are derived from the tool source path under `tools/`
-- last-used profile and LLM choices are still persisted for Textual startup convenience
-- saving inspector skills writes `skills` in the active workspace agent profile file and clears any matching legacy Textual override state
-- saving inspector tools writes `tools` in the active workspace agent profile file and clears any matching legacy Textual override state
-- `Reset` clears the current session override and `Save as Default` writes the current selection into config
-- editing a built-in resource-root or synthesised agent from the Textual UI requires cloning it to a workspace-backed agent first
+- `F5` opens the runtime view picker for `chat` and `run`
+- `F10` toggles the right-side details panel
+- the details panel is read-only and shows runtime summary, session context, session history, and prompt sources
+- agent switching, profile editing, tool allowlist editing, and other authored-agent mutations are no longer exposed through the Textual shell
+- authored agent configuration remains file-backed; use workspace files or provider/admin command surfaces rather than the runtime UI
 
 Current skill fallback order is:
 
@@ -487,12 +478,12 @@ Core implementation files:
 | `pocketcode/core/stackvm_loader.py` | StackVM source assembly from inline, module, and file-backed flow fields |
 | `pocketcode/core/stackvm_parser.py` | StackVM tokenization and AST parsing before execution |
 | `pocketcode/core/stackvm_expander.py` | StackVM compile-time macro expansion over parsed AST |
-| `pocketcode/core/stackvm_validator.py` | StackVM executable-AST validation, compile-only form checks, and source-level authoring warnings for legacy tool-loop and prompt-route patterns |
+| `pocketcode/core/stackvm_validator.py` | StackVM executable-AST validation, compile-only form checks, and source-level authoring warnings for manual tool-loop and prompt-route patterns |
 | `pocketcode/core/agent_stack_vm.py` | StackVM execution engine, built-in words, and runtime host words |
 | `pocketcode/core/tool_runtime.py` | confirmation policy resolution and allowlist enforcement |
 | `pocketcode/cli/command_handler.py` | `/flow` and `/agent` CLI surface |
 | `pocketcode/cli/completers.py` | profile completion support |
-| `pocketcode/cli/textual_app.py` | Stable Textual UI import surface and re-exports |
+| `pocketcode/cli/textual_ui/__init__.py` | Textual UI package export surface |
 | `pocketcode/cli/textual_ui/` | Textual status bar, control surfaces, modal screens, and UI workflows |
 | `tests/unit/test_agent_profile_manager.py` | manager unit tests |
 | `tests/unit/test_agent_profile_resolution.py` | precedence and resolution tests |

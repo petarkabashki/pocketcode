@@ -143,6 +143,28 @@ Use a stricter review bar.
     assert compiled["inline_prompt"] == "Use a stricter review bar."
 
 
+def test_compile_markdown_agent_definition_collects_vm_source_blocks(tmp_path: Path):
+    agent_file = tmp_path / "review.agent.md"
+    agent_file.write_text(
+        """---
+name: review.safe
+---
+Use a stricter review bar.
+
+```vm
+"review ok" answer
+```
+""",
+        encoding="utf-8",
+    )
+
+    document = load_markdown_asset_document(agent_file)
+    compiled = compile_markdown_agent_definition(document, default_name="review.safe")
+
+    assert compiled["execution_mode"] == "vm"
+    assert compiled["vm_source"] == '"review ok" answer'
+
+
 def test_compile_markdown_agent_definition_preserves_commands(tmp_path: Path):
     agent_file = tmp_path / "review.agent.md"
     agent_file.write_text(

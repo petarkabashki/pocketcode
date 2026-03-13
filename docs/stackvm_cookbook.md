@@ -168,7 +168,7 @@ Prefer the built-in `tool-once` macro when a flow should call a tool on the firs
 
 `tool-once` expands to the same `last-tool-result none?` pattern the runtime already understands, but it keeps the router focused on the later-turn logic instead of repeating the request branch in every tool-first example.
 
-When a flow still uses the manual `last-tool-result none? ... tool-request ... if` pattern, runtime metadata now records a non-fatal `legacy-tool-loop` authoring warning in `last_vm_validation_warnings`.
+When a flow still uses the manual `last-tool-result none? ... tool-request ... if` pattern, runtime metadata now records a non-fatal `manual-tool-loop` authoring warning in `last_vm_validation_warnings`.
 
 ## Define A Simple Custom Macro
 
@@ -295,7 +295,7 @@ dup "normalized.summary" shared!? drop
 "Summary recorded: " swap concat answer
 ```
 
-`prompt-user` requires `interaction_handler` or `user_input_handler` in the shared store.
+`prompt-user` requires `interaction_handler` in the shared store.
 
 ## Prompt For Structured Choices And Continue
 
@@ -314,7 +314,7 @@ prompt-route
 
 `prompt-route` expands to `prompt-interaction` plus `switch`. The request expression and case table are passed as quotations, so multi-step setup such as `dict-set` or `shared!?` can stay inside the macro arguments.
 
-When a flow still uses direct `prompt-interaction ... switch` exact-match routing, runtime metadata now records a non-fatal `legacy-prompt-route` authoring warning in `last_vm_validation_warnings`.
+When a flow still uses direct `prompt-interaction ... switch` exact-match routing, runtime metadata now records a non-fatal `manual-prompt-route` authoring warning in `last_vm_validation_warnings`.
 
 ## Format Checklist Selections Cleanly
 

@@ -45,7 +45,7 @@ Managed subprocess tools are only valid for `BaseTool` implementations.
 
 ## Skill tools
 
-`markdown_profiles.py` loads skill-owned tools from `.pocketcode/skills/<skill>/tools/*.py`:
+`markdown_profiles.py` loads skill-owned tools from `.pocketcode/skills/<skill>/tools/*.tool.py`:
 - tools are auto-registered under `skill.<skill_slug>.<tool_name>`
 - public callables and `BaseTool` implementations are both valid
 - a `TOOLS` export can override discovery
@@ -58,4 +58,3 @@ When building tools:
 3. Keep schemas concrete and minimal.
 4. Check whether the tool must survive confirmation, allowlist, or skill scoping.
 5. Add or update tests around the runtime path that will actually execute the tool.
-

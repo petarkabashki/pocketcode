@@ -29,7 +29,7 @@ Valid top-level sections commonly used:
 - registers tools, flows, prompts, hooks, skills, and LLM profiles
 - treats qualified ids as dotted `namespace.name`
 - resolves local tool names within the owning namespace first
-- normalizes legacy `namespace::tool` and `namespace::flow` references
+- expects canonical dotted `namespace.tool` and `namespace.flow` references
 
 Important behavior:
 - prompt text is resolved during catalog load
@@ -43,7 +43,6 @@ Important behavior:
 Prompt files are resolved by `resolve_prompt_bundle()`:
 - inline prompt fields are concatenated first
 - prompt files are loaded after that
-- `prompts:` is accepted as an alias for `prompt_files` in flow definitions
 - prompt includes use `{{ include:path.md }}`
 
 ## Authoring checklist
@@ -60,7 +59,7 @@ When creating or editing a namespace:
 
 Prefer:
 - `read_file` when the tool is owned by the same namespace
-- `core::read_file` or `core.read_file` for cross-namespace use
+- `core.read_file` for cross-namespace use
 
 Avoid:
 - ambiguous bare names when multiple namespaces can own the same tool

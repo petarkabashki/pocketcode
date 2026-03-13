@@ -116,13 +116,13 @@ def _looks_like_resource_root(path: Path) -> bool:
         if (path / hint).exists():
             return True
     for child in path.iterdir():
-        if child.is_dir() and child.name.startswith(("agent.", "hook.", "skill.", "tool.")):
+        if child.is_dir() and child.name.startswith(("agent.", "hook.", "tool.")):
             return True
     for child in path.iterdir():
         if not child.is_file():
             continue
         child_name = child.name
-        if child_name.endswith((".agent.md", ".agent.yaml", ".hook.md", ".hook.yaml", ".tool.md", ".prompt.md", ".tool.py", ".md")):
+        if child_name.endswith((".hook.md", ".hook.yaml", ".tool.md", ".prompt.md", ".tool.py", ".md")):
             return True
     return False
 

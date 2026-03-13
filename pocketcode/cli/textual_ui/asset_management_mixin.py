@@ -230,7 +230,7 @@ class TextualAppAssetManagementMixin:
         active_profile = self._engine.get_agent_profile(profile_name)
         if active_profile is None:
             return
-        current_agent = str(getattr(active_profile, "agent", "") or self._engine.get_current_agent() or "")
+        current_agent = str(getattr(active_profile, "flow", "") or self._engine.get_current_agent() or "")
         available_tools, picker_options, grouped_values, initial_selected_values = self._build_tool_picker_model(
             agent_name=current_agent,
             active_profile=active_profile,

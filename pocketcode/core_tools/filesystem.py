@@ -12,7 +12,6 @@ _FILESYSTEM_ROOT_KEY = "filesystem_root"
 
 __all__ = [
     "ReadFileTool",
-    "WriteFileTool",
     "WriteToFileTool",
     "ListFilesTool",
     "CreateDirectoryTool",
@@ -260,12 +259,6 @@ class WriteToFileTool(BaseTool):
         else:
             # Error logged within write_file function
             return {"success": False, "error": f"Failed to write to file '{path}'."}
-
-
-class WriteFileTool(WriteToFileTool):
-    """Backward-compatible alias for older manifests importing WriteFileTool."""
-
-
 class ListFilesTool(BaseTool):
     """Tool to list files and directories."""
 

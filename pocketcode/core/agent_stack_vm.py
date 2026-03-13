@@ -202,7 +202,6 @@ class AgentStackVM:
         async def prompt_user() -> None:
             question = str(self.stack.pop() if self.stack else "")
             interaction_handler = self.store.get("interaction_handler")
-            legacy_user_input_handler = self.store.get("user_input_handler")
 
             if callable(interaction_handler):
                 response = interaction_handler(
@@ -215,13 +214,8 @@ class AgentStackVM:
                 if inspect.isawaitable(response):
                     response = await response
                 payload = dict(response) if isinstance(response, dict) else {"value": response, "raw_input": response}
-            elif callable(legacy_user_input_handler):
-                response = legacy_user_input_handler(question)
-                if inspect.isawaitable(response):
-                    response = await response
-                payload = {"kind": "text", "value": response, "raw_input": response}
             else:
-                raise RuntimeError("prompt-user requires an interaction_handler or user_input_handler in the shared store.")
+                raise RuntimeError("prompt-user requires an interaction_handler in the shared store.")
 
             self.store["last_user_prompt"] = question
             self.store["last_user_interaction"] = payload
@@ -238,24 +232,14 @@ class AgentStackVM:
                 raise RuntimeError("prompt-interaction expects a mapping or YAML mapping string.")
 
             interaction_handler = self.store.get("interaction_handler")
-            legacy_user_input_handler = self.store.get("user_input_handler")
 
             if callable(interaction_handler):
                 response = interaction_handler(request)
                 if inspect.isawaitable(response):
                     response = await response
                 payload = dict(response) if isinstance(response, dict) else {"value": response, "raw_input": response}
-            elif callable(legacy_user_input_handler):
-                kind = str(request.get("kind") or "text").strip().lower()
-                if kind != "text":
-                    raise RuntimeError("Legacy user_input_handler only supports text interactions.")
-                prompt = str(request.get("prompt") or "")
-                response = legacy_user_input_handler(prompt)
-                if inspect.isawaitable(response):
-                    response = await response
-                payload = {"kind": "text", "value": response, "raw_input": response}
             else:
-                raise RuntimeError("prompt-interaction requires an interaction_handler or user_input_handler in the shared store.")
+                raise RuntimeError("prompt-interaction requires an interaction_handler in the shared store.")
 
             extracted_value = _extract_vm_interaction_value(payload)
             self.store["last_user_prompt"] = str(request.get("prompt") or "")

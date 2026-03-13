@@ -148,12 +148,20 @@ def compile_markdown_agent_definition(
 ) -> Dict[str, Any]:
     definition = _mapping_copy(document.front_matter)
     definition.setdefault("name", default_name)
-    _merge_yaml_blocks(definition, document, labels=("spec", "agent", "profile", "config"))
+    _merge_yaml_blocks(definition, document, labels=("spec", "agent", "profile", "config", "flow", "definition"))
     if "base_agent" not in definition and "extends" in definition:
         definition["base_agent"] = definition.get("extends")
     inline_prompt_sections = _collect_prompt_sections(document, include_body=True)
     if inline_prompt_sections:
         definition["inline_prompt"] = "\n\n".join(section for section in inline_prompt_sections if section).strip()
+    vm_sections = [
+        block.content.strip()
+        for block in document.find_blocks(languages=("vm", "stackvm"))
+        if block.content.strip()
+    ]
+    if vm_sections:
+        definition["vm_source"] = "\n\n".join(vm_sections).strip()
+        definition.setdefault("execution_mode", "vm")
     return definition
 
 

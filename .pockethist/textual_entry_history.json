@@ -18,5 +18,13 @@
   "0-1",
   "/memory help",
   "/memory show",
-  "/memory show 2"
+  "/memory show 2",
+  "make a funny 300 word story about a cat",
+  "/?",
+  "/flows",
+  "/agents",
+  "/",
+  "/llms",
+  "/agent help",
+  "/"
 ]

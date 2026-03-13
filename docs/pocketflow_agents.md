@@ -6,7 +6,7 @@ For the canonical Markdown file formats for flows and agents, see `markdown_asse
 
 ## One Executable Model, Multiple Agent Layers
 
-PocketCoder executes flows. Agents do not replace flows; they configure how a selected flow runs. For new work, the preferred shape is a self-contained Markdown agent that contains both the VM program and the authored agent metadata.
+PocketCoder executes flows. Agents do not replace flows internally; they configure how a selected flow runs. For authored executable work, the preferred public surface is now a self-contained Markdown agent that contains both the VM program and the authored agent metadata.
 
 The current stack is:
 
@@ -16,12 +16,12 @@ The current stack is:
 4. optional enabled skills
 5. session overrides from the CLI or Textual UI
 
-## Flow Authoring
+## Executable Authoring
 
-PocketCoder supports two canonical executable flow authoring paths:
+PocketCoder supports two canonical executable authoring paths:
 
-1. StackVM flow authored in self-contained Markdown
-2. PocketFlow factory authored in Python
+1. self-contained Markdown agent with StackVM or Python factory fields
+2. direct Markdown flow for compatibility and lower-level runtime work
 
 StackVM should be the default choice for new orchestration-heavy flows. PocketFlow remains the escape hatch for flows that genuinely need Python-native objects, custom node classes, or logic that would be awkward to express in VM words.
 
@@ -60,17 +60,17 @@ Markdown registration:
 name: analyst
 module: analyst.py
 entry_fn: create_flow
-description: Analyze the current workspace.
+description: Analyze the current resource_root.pocketcode.
 ```
 
-Markdown can also author executable flows directly. In that case the Markdown file contributes the flow fields, and PocketCoder currently supports two execution backends from that one authoring surface:
+Markdown can still author executable flows directly. In that case the Markdown file contributes the flow fields, and PocketCoder currently supports two execution backends from that one authoring surface:
 
 - Python factory flow via `module` plus `entry_fn`
 - StackVM flow when the file contributes fenced `vm` or `stackvm` blocks, or explicit `vm_*` source fields
 
 Graph-authored Markdown flows are no longer supported by the runtime loader; migrate those definitions to StackVM. The StackVM path is the preferred executable Markdown surface for multi-step orchestration while still running inside the same shared-store and handoff contract. It does not replace handwritten Python factories when you need custom logic tightly coupled to Python objects or richer PocketFlow node classes.
 
-For new work, prefer a single Markdown file that contains:
+For new work, prefer a single Markdown agent file that contains:
 
 - front matter for tool refs, prompt refs, handoff config, and optional `tool_files`
 - Markdown body text for the system prompt
@@ -78,12 +78,12 @@ For new work, prefer a single Markdown file that contains:
 
 `tool_files` entries are resolved relative to that Markdown file, loaded as Python tool modules, and registered into the same namespace before the flow is finalized. The preferred convention for those helper modules is `*.tool.py`. When explicit `tool_files` and prompt-file fields are omitted, PocketCoder also auto-loads sibling `<name>.tool.py` and `<name>.prompt.md` files beside the Markdown program.
 
-Configured workspace discovery paths in `runtime.workspace_paths` add two canonical Markdown flow paths:
+Configured workspace discovery paths in `runtime.workspace_paths` add two canonical executable Markdown paths:
 
-1. use a plain namespace folder such as `.github/`, then add `*.md`, `*.tool.py`, and `*.prompt.md` files inside it
-2. use a flat namespace-pack root such as `.pocketcode/`, then add files like `coder.coder.md`, `coder.git.tool.py`, and `coder.system.prompt.md`
+1. use a plain namespace folder such as `.github/`, then add executable `*.md` or `*.agent.md` files plus adjacent `*.tool.py` and `*.prompt.md` helpers
+2. use a flat namespace-pack root such as `.pocketcode/`, then add files like `coder.coder.md` or `coder.coder.agent.md` plus `coder.git.tool.py` and `coder.system.prompt.md`
 
-In both cases PocketCoder registers each executable Markdown file as a flow under `<namespace>.<name>`.
+In both cases PocketCoder registers each executable asset as a flow under `<namespace>.<name>`. Self-contained `.agent.md` files remain agent-authored inputs, but their embedded execution is now discovered directly in the executable catalog as well.
 
 ## What A Flow Definition Can Do
 
@@ -121,7 +121,7 @@ Agents do not define executable graph logic unless they are self-contained Markd
 Current authored-agent sources are:
 
 1. inline `default_agent` inside a flow definition
-2. workspace agent profiles in discovered resource roots, including legacy flat files and grouped `agent.<group>/` collections
+2. workspace agent profiles in discovered resource roots, loaded from grouped `agent.<group>/` collections and recursive `agents/` collections
 3. synthesised fallback agent created from the flow definition
 
 Effective precedence is:
@@ -154,7 +154,17 @@ Markdown agents can also define their own flow logic directly in the same file. 
 
 This pattern is ideal for simple, portable agents where personality and control logic are tightly coupled.
 
-Do not confuse those `.agent.*` files with configured namespace assets. In plain namespace folders and flat namespace-pack roots, plain executable `.md` files are treated as runtime flows, not as agent overlays.
+Current executable `.agent.md` authoring paths are:
+
+- workspace resource-root agent locations such as `<resource_root>/agents/**/*.agent.md`, typed `agent.<group>/`, and flat `<resource_root>/*.agent.md`
+- configured plain namespace roots such as `.github/reviewer.agent.md`
+- flat namespace-pack roots such as `.pocketcode/coder.reviewer.agent.md`
+
+When a self-contained `.agent.md` omits `flow`, the runtime derives the embedded flow name from the authoring location:
+
+- workspace resource-root agent collections default to `agents.<agent_name>`
+- configured namespace roots default to `<namespace>.<agent_name>`
+- explicit `flow` still wins when provided
 
 ## Synthesised Defaults
 
@@ -177,7 +187,7 @@ flow: core.react
 description: Review-focused profile
 llm_profile: fast-review
 hooks:
-  - workspace.memory.default
+  - resource_root.pocketcode.memory.default
 skills:
   - python-testing
 tools:
@@ -197,7 +207,7 @@ Current inheriting schema:
 name: my-review-profile-safe
 extends: my-review-profile
 hooks:
-  - workspace.shortcut.cache
+  - resource_root.pocketcode.shortcut.cache
 tools:
   - core.read_file
 tool_confirmation:
@@ -270,7 +280,7 @@ Current behavior is intentionally narrow:
 
 The workspace now ships a generic hook-based simple-memory path for agents that already consume `formatted_cli_context`:
 
-- `workspace.memory.chat_history` runs in `before_turn`
+- `resource_root.pocketcode.memory.chat_history` runs in `before_turn`
 - it reads the active saved-session transcript through the StackVM host transcript helpers
 - it appends the last six transcript entries as a compact `Role: content` block on `formatted_cli_context`
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
-from pocketcode.cli.textual_app import PocketCodeTextualApp
+from pocketcode.cli.textual_ui import PocketCodeTextualApp
 from pocketcode.cli.textual_ui.selectors import select_run_preview_blocks
 from pocketcode.cli.textual_ui.store import OutputBlock, make_initial_runtime_state
 
@@ -60,7 +60,7 @@ class _EngineStub:
         }
 
     def get_current_agent(self):
-        return "coder::coder"
+        return "coder.coder"
 
     def get_active_skills(self):
         return []

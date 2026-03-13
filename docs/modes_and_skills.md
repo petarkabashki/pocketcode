@@ -1,6 +1,6 @@
 # Skills And Legacy Modes
 
-This document describes the current skill system and the migration status of the removed legacy mode surface.
+This document describes the current skill system.
 
 See [`markdown_assets.md`](markdown_assets.md) for shared Markdown syntax and [`agent_system.md`](agent_system.md) for how skills interact with agent profiles.
 
@@ -58,7 +58,7 @@ Skills can contribute:
 - inline prompt body text
 - prompt sources from `extra_prompts`
 - references to existing tools through `tools`
-- new Python tools from `tools/*.py`
+- new Python tools from `tools/*.tool.py`
 - human-facing references, scripts, and assets
 
 Skill-provided tools are registered under:

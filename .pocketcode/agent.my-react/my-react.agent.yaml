@@ -3,7 +3,7 @@ flow: core.react
 description: Synthesised default agent for core.react.
 llm_profile: gemini-3-flash-preview
 hooks:
-- workspace.memory.chat_history
+- resource_root.pocketcode.memory.chat_history
 skills:
 - pocketcode-namespace-authoring
 - pocketcode-profiles-prompts

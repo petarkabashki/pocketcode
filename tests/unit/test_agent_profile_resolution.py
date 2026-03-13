@@ -29,7 +29,7 @@ from pocketcode.core.tool_runtime import ToolRuntime
 
 def _make_profile(
     name: str = "test-profile",
-    agent: str = "plug::agent",
+    agent: str = "plug.agent",
     *,
     llm_profile: str | None = None,
     tools: list[str] | None = None,
@@ -168,13 +168,13 @@ class TestToolAllowlistGuard:
 
     def test_mismatched_profile_agent_skips_allowlist_guard(self):
         store: dict = {
-            "active_agent": "plug::other_agent",
-            "active_agent_profile": _make_profile(agent="plug::agent", tools=["my_tool"]),
+            "active_agent": "plug.other_agent",
+            "active_agent_profile": _make_profile(agent="plug.agent", tools=["my_tool"]),
         }
         runtime, _ = _make_tool_runtime(store)
         with patch.object(runtime, "_resolve_confirmation_policy", return_value="allow"):
             with patch.object(runtime, "_resolve_tool", return_value=lambda **kw: {"ok": True}):
-                result = runtime.execute_tool("blocked_tool", {}, store, agent_name="plug::other_agent")
+                result = runtime.execute_tool("blocked_tool", {}, store, agent_name="plug.other_agent")
         assert "allowlist" not in str(result.get("error", ""))
 
     def test_active_allowed_tools_empty_list_denies_all_tools(self):

@@ -6,7 +6,7 @@ from typing import Iterable
 
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import ContentSwitcher
-from textual.widgets import Button, Input, OptionList, RichLog, Select, SelectionList, Static, Switch, TextArea
+from textual.widgets import Button, Input, OptionList, RichLog, Select, SelectionList, Static
 from textual.widgets.option_list import Option
 
 from .renderables import (
@@ -355,67 +355,32 @@ class TextualAppWidgetSyncMixin:
                 breakpoint_count=state.debugger_breakpoint_count,
                 state=state,
             )
-        self._syncing_controls = True
-        try:
-            self._set_select_options(
-                self.query_one("#workspace-view-select", Select),
-                state.workspace_view_select.options,
-                state.workspace_view_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#theme-select", Select),
-                state.theme_select.options,
-                state.theme_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#profile-select", Select),
-                state.profile_select.options,
-                state.profile_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#llm-select", Select),
-                state.llm_select.options,
-                state.llm_select.value,
-            )
-            self._set_select_options(
-                self.query_one("#session-confirm-select", Select),
-                state.session_confirm_select.options,
-                state.session_confirm_select.value,
-            )
-            if (
-                previous is None
-                or previous.debugger_inline_breakpoint_visible != state.debugger_inline_breakpoint_visible
-                or previous.debugger_inline_breakpoint_type != state.debugger_inline_breakpoint_type
-                or previous.debugger_inline_breakpoint_placeholder != state.debugger_inline_breakpoint_placeholder
-                or previous.debugger_inline_breakpoint_help != state.debugger_inline_breakpoint_help
-                or previous.debugger_inline_breakpoint_value != state.debugger_inline_breakpoint_value
-            ):
-                self._apply_debugger_inline_editor_state(state)
-            if (
-                previous is None
-                or previous.inline_prompt_visible != state.inline_prompt_visible
-                or previous.inline_prompt_resolved != state.inline_prompt_resolved
-                or previous.inline_prompt_kind != state.inline_prompt_kind
-                or previous.inline_prompt_prompt != state.inline_prompt_prompt
-                or previous.inline_prompt_help != state.inline_prompt_help
-                or previous.inline_prompt_placeholder != state.inline_prompt_placeholder
-                or previous.inline_prompt_submit_label != state.inline_prompt_submit_label
-                or previous.inline_prompt_text_value != state.inline_prompt_text_value
-                or previous.inline_prompt_selected_value != state.inline_prompt_selected_value
-                or previous.inline_prompt_selected_values != state.inline_prompt_selected_values
-                or previous.inline_prompt_summary_text != state.inline_prompt_summary_text
-                or previous.inline_prompt_select_options != state.inline_prompt_select_options
-                or previous.inline_prompt_checklist_options != state.inline_prompt_checklist_options
-            ):
-                self._apply_inline_prompt_state(state)
-            self.query_one("#auto-confirm-switch", Switch).value = state.auto_confirm_tools
-        finally:
-            self._syncing_controls = False
-
-        self._profile_list_names = list(state.profile_list_names)
-        self._set_option_list_labels(self.query_one("#profile-list", OptionList), state.profile_list_labels)
-        self._set_selection_list_options(self.query_one("#skill-list", SelectionList), state.skill_list_options)
-        self._set_selection_list_options(self.query_one("#inspector-tools", SelectionList), state.tool_list_options)
+        if (
+            previous is None
+            or previous.debugger_inline_breakpoint_visible != state.debugger_inline_breakpoint_visible
+            or previous.debugger_inline_breakpoint_type != state.debugger_inline_breakpoint_type
+            or previous.debugger_inline_breakpoint_placeholder != state.debugger_inline_breakpoint_placeholder
+            or previous.debugger_inline_breakpoint_help != state.debugger_inline_breakpoint_help
+            or previous.debugger_inline_breakpoint_value != state.debugger_inline_breakpoint_value
+        ):
+            self._apply_debugger_inline_editor_state(state)
+        if (
+            previous is None
+            or previous.inline_prompt_visible != state.inline_prompt_visible
+            or previous.inline_prompt_resolved != state.inline_prompt_resolved
+            or previous.inline_prompt_kind != state.inline_prompt_kind
+            or previous.inline_prompt_prompt != state.inline_prompt_prompt
+            or previous.inline_prompt_help != state.inline_prompt_help
+            or previous.inline_prompt_placeholder != state.inline_prompt_placeholder
+            or previous.inline_prompt_submit_label != state.inline_prompt_submit_label
+            or previous.inline_prompt_text_value != state.inline_prompt_text_value
+            or previous.inline_prompt_selected_value != state.inline_prompt_selected_value
+            or previous.inline_prompt_selected_values != state.inline_prompt_selected_values
+            or previous.inline_prompt_summary_text != state.inline_prompt_summary_text
+            or previous.inline_prompt_select_options != state.inline_prompt_select_options
+            or previous.inline_prompt_checklist_options != state.inline_prompt_checklist_options
+        ):
+            self._apply_inline_prompt_state(state)
         self.query_one("#main-input", Input).placeholder = state.main_input_placeholder
         self._sync_output_widget(force=previous is None)
         self._sync_run_preview_widget(state.run_preview_blocks, force=previous is None)
@@ -425,6 +390,12 @@ class TextualAppWidgetSyncMixin:
         self._sync_rich_log_widget("inspector-prompts", state.inspector_prompt_blocks, force=previous is None)
 
         self._ui_state = state
+    def _set_static_text(self, widget: Static, text: str) -> None:
+        cache_key = widget.id or ""
+        if self._text_state_cache.get(cache_key) == text:
+            return
+        widget.update(text)
+        self._text_state_cache[cache_key] = text
 
     def _set_select_options(self, widget: Select, options: Iterable[tuple[str, str]], value: str) -> None:
         option_list = [(str(label), str(option_value)) for label, option_value in options]
@@ -440,37 +411,6 @@ class TextualAppWidgetSyncMixin:
                 widget.value = option_list[0][1]
                 value = option_list[0][1]
         self._select_state_cache[cache_key] = (option_tuple, value)
-
-    def _set_text_area_text(self, widget: TextArea, text: str) -> None:
-        cache_key = widget.id or ""
-        if self._text_state_cache.get(cache_key) == text:
-            return
-        widget.text = text
-        self._text_state_cache[cache_key] = text
-
-    def _load_text_area_text(self, widget: TextArea, text: str) -> None:
-        cache_key = widget.id or ""
-        if self._text_state_cache.get(cache_key) == text:
-            return
-        widget.load_text(text)
-        self._text_state_cache[cache_key] = text
-
-    def _set_static_text(self, widget: Static, text: str) -> None:
-        cache_key = widget.id or ""
-        if self._text_state_cache.get(cache_key) == text:
-            return
-        widget.update(text)
-        self._text_state_cache[cache_key] = text
-
-    def _set_option_list_labels(self, widget: OptionList, labels: Iterable[str]) -> None:
-        option_tuple = tuple(str(label) for label in labels)
-        cache_key = widget.id or ""
-        if self._option_list_state_cache.get(cache_key) == option_tuple:
-            return
-        widget.clear_options()
-        if option_tuple:
-            widget.add_options(option_tuple)
-        self._option_list_state_cache[cache_key] = option_tuple
 
     def _set_option_list_options(
         self,

@@ -10,16 +10,12 @@ UNSET_OPTION = "__unset__"
 INHERIT_POLICY = "__inherit__"
 LOADING_OPTION = "__loading__"
 MAX_OUTPUT_LINES = 400
-DEFAULT_MAIN_INPUT_PLACEHOLDER = "Type a request or /command. F2 history F3 edit F4 clone F5 views F6 control"
+DEFAULT_MAIN_INPUT_PLACEHOLDER = "Type a request or /command. F2 history F5 views F10 details"
 SKILL_GROUP_PREFIX = "__skill_group__:"
 TEXTUAL_VIEWS = {
     "chat": {
         "label": "Chat",
         "description": "Output console and conversation history",
-    },
-    "control": {
-        "label": "Control",
-        "description": "Runtime controls and Textual workspace settings",
     },
     "run": {
         "label": "Run",
@@ -27,7 +23,7 @@ TEXTUAL_VIEWS = {
     },
 }
 VIEW_TITLES = {
-    "control": "Control Center",
+    "chat": "Conversation",
     "run": "Run Inspector",
 }
 
@@ -80,12 +76,7 @@ def _theme_css(palette: TextualThemePalette) -> str:
 
     Screen.theme-{palette.name} .card,
     Screen.theme-{palette.name} #output,
-    Screen.theme-{palette.name} #profile-list,
-    Screen.theme-{palette.name} #profile-tools-summary,
-    Screen.theme-{palette.name} #profile-prompts,
-    Screen.theme-{palette.name} #context-preview,
     Screen.theme-{palette.name} #run-preview,
-    Screen.theme-{palette.name} #inspector-tools,
     Screen.theme-{palette.name} #inspector-prompts {{
         background: {palette.surface_2};
         border: round {palette.border};
@@ -159,7 +150,6 @@ THEME_CSS = "\n".join(_theme_css(palette) for palette in THEME_PALETTES.values()
 WORKSPACE_VIEWS = {
     "balanced": {"label": "Balanced", "view": "chat", "right": True},
     "chat_focus": {"label": "Chat Focus", "view": "chat", "right": True},
-    "control_desk": {"label": "Control Desk", "view": "control", "right": True},
     "minimal": {"label": "Minimal", "view": "chat", "right": False},
     "review": {"label": "Review", "view": "run", "right": True},
 }
@@ -241,9 +231,9 @@ def _surface_label(surface_id: str | None) -> str:
     labels = {
         "output": "Chat",
         "run-preview": "Run Preview",
-        "inspector-summary": "Inspector Summary",
+        "inspector-summary": "Runtime Summary",
         "inspector-context": "Session Context",
-        "inspector-sessions": "Saved Sessions",
+        "inspector-sessions": "Session History",
         "inspector-prompts": "Prompt Sources",
     }
     return labels.get(str(surface_id or ""), "No panel")

@@ -22,7 +22,7 @@ Use pytest and target the smallest failing test first.
 """,
             encoding="utf-8",
         )
-        (skill_dir / "tools" / "pytest_tools.py").write_text(
+        (skill_dir / "tools" / "pytest_tools.tool.py").write_text(
             """
 def run_pytest(shared_store=None):
     return {"success": True}
@@ -56,8 +56,8 @@ def run_pytest(shared_store=None):
         (tmp_path / ".pocketcode" / ".pocketcodeignore").write_text(
             "\n".join(
                 [
-                    "skills/python-testing/tools/*.py",
-                    "!skills/python-testing/tools/keep.py",
+                    "skills/python-testing/tools/*.tool.py",
+                    "!skills/python-testing/tools/keep.tool.py",
                     "skills/python-testing/references/*.md",
                     "!skills/python-testing/references/keep.md",
                     "skills/hidden.disabled/",
@@ -66,8 +66,8 @@ def run_pytest(shared_store=None):
             encoding="utf-8",
         )
         (skill_dir / "SKILL.md").write_text("---\nname: python-testing\n---\nUse it.\n", encoding="utf-8")
-        (skill_dir / "tools" / "drop.py").write_text("def drop_tool():\n    return 'drop'\n", encoding="utf-8")
-        (skill_dir / "tools" / "keep.py").write_text("def keep_tool():\n    return 'keep'\n", encoding="utf-8")
+        (skill_dir / "tools" / "drop.tool.py").write_text("def drop_tool():\n    return 'drop'\n", encoding="utf-8")
+        (skill_dir / "tools" / "keep.tool.py").write_text("def keep_tool():\n    return 'keep'\n", encoding="utf-8")
         (skill_dir / "references" / "drop.md").write_text("drop", encoding="utf-8")
         (skill_dir / "references" / "keep.md").write_text("keep", encoding="utf-8")
         hidden_dir = tmp_path / ".pocketcode" / "skills" / "hidden.disabled"
@@ -107,7 +107,7 @@ Use it.
         assert skill.tool_refs == ["core.read_file"]
         assert skill.extra_prompts == ["prompt:resource_root.pocketcode.review"]
 
-    def test_skill_alias_folder_loads_skill(self, tmp_path):
+    def test_skill_alias_folder_is_ignored(self, tmp_path):
         skill_dir = tmp_path / ".pocketcode" / "skill.python-testing"
         (skill_dir / "tools").mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(
@@ -127,9 +127,7 @@ Use it.
         manager = SkillManager(tmp_path)
         manager.load()
 
-        skill = manager.get("python-testing")
-        assert skill is not None
-        assert sorted(skill.provided_tools.keys()) == ["skill.python_testing.run_pytest"]
+        assert manager.get("python-testing") is None
 
     def test_invalid_typed_prompt_ref_skips_skill(self, tmp_path):
         skill_dir = tmp_path / ".pocketcode" / "skills" / "python-testing"

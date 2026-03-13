@@ -86,6 +86,7 @@ def load_settings(settings_path: str | None = None, workspace_root: str | None =
 
         # 1. Substitute environment variables globally
         settings = _substitute_env_vars(raw_settings)
+        _validate_runtime_settings(settings)
 
         # 2. Validate LLM structure
         llm = settings.get("llm")
@@ -120,6 +121,21 @@ def load_settings(settings_path: str | None = None, workspace_root: str | None =
     except Exception as e:
         logger.error(f"An unexpected error occurred while loading settings from {resolved_settings_path}: {e}")
         raise
+
+
+def _validate_runtime_settings(settings: Dict[str, Any]) -> None:
+    runtime = settings.get("runtime", {})
+    if not isinstance(runtime, dict):
+        return
+    textual = runtime.get("textual", {})
+    if not isinstance(textual, dict):
+        return
+    if "workspace_mode" in textual:
+        raise ValueError("Unsupported config key 'runtime.textual.workspace_mode'. Run `pocketcode --migrate-workspace`.")
+    if "user_input_popups" in textual:
+        raise ValueError(
+            "Unsupported config key 'runtime.textual.user_input_popups'. Run `pocketcode --migrate-workspace`."
+        )
 
 # Example usage (for testing purposes)
 if __name__ == "__main__":

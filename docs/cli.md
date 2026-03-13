@@ -29,13 +29,12 @@ Startup sequence:
 
 1. Load environment variables with `python-dotenv`.
 2. Parse CLI flags.
-3. Resolve configuration from `./pocketcode.yml` in the workspace root.
-4. Configure logging to `pocketcode.log` and optionally stderr/stdout.
-5. Construct `PocketCodeEngine(config=config, workspace_root=os.getcwd())`.
-6. Apply startup overrides such as flow, global LLM, and auto-confirm.
-7. Choose one of the runtime interfaces: one-shot, basic interactive, or Textual.
-
-The `--config` flag still exists for compatibility, but it is ignored. The runtime always resolves configuration from the workspace-local `pocketcode.yml`.
+3. Run workspace-migration preflight and automatically rewrite unsupported workspace state into canonical forms when needed.
+4. Resolve configuration from `./pocketcode.yml` in the workspace root.
+5. Configure logging to `pocketcode.log` and optionally stderr/stdout.
+6. Construct `PocketCodeEngine(config=config, workspace_root=os.getcwd())`.
+7. Apply startup overrides such as flow, global LLM, and auto-confirm.
+8. Choose one of the runtime interfaces: one-shot, basic interactive, or Textual.
 
 ## Startup Flags
 
@@ -45,7 +44,7 @@ Current supported startup flags are:
 - `--llm <profile_name>`: apply a global LLM override before the first request
 - `--prompt "..."`: run one request non-interactively and exit
 - `--auto-confirm-tools`: force tool execution approval regardless of runtime defaults
-- `--config <path>`: accepted but ignored; configuration still comes from `./pocketcode.yml`
+- `--migrate-workspace`: rewrite unsupported workspace state to canonical forms and exit
 
 There is no current startup `--agent` flag and no `--workflow` flag.
 
@@ -95,30 +94,19 @@ The full UI is used for interactive terminals when `textual` is importable.
 Behavior:
 
 - the runtime sets `cli_context["interface"] = "textual"`
-- `pocketcode/cli/textual_app.py::run_textual_cli()` remains the stable entrypoint and forwards to the split Textual UI implementation under `pocketcode/cli/textual_ui/`
-- the app owns the screen state, input routing, picker dialogs, editing dialogs, and live run monitor
+- `pocketcode/cli/textual_ui::run_textual_cli()` is the Textual entrypoint
+- the app owns the screen state, input routing, a small set of runtime popups, and the live run monitor
 - the Textual implementation now keeps two reducer-backed state slices: `TextualCliState` for layout, theme, active view, and engine snapshot, and `TextualRuntimeState` for run status, pending input prompts, console history, the main input placeholder, and the currently presented modal kind/title
 - the runtime console state now stores both plain-text transcript lines and semantic output blocks so the interactive chat pane can render theme-aware Rich content without changing copy/export behavior
 - runtime-derived console text, inspector summary text, modal labels, context/session summaries, prompt summaries, and run preview text are now computed through selector helpers in `pocketcode/cli/textual_ui/selectors.py` so the rendering mixin mostly binds derived values into widgets instead of formatting those runtime strings inline
-- shared skill/tool picker grouping, nested tool tree construction, and selection-list option shaping now live in `pocketcode/cli/textual_ui/picker_model_mixin.py` so rendering, interaction, and asset-management flows reuse one picker-model layer
-- `TextualUIState` construction now lives in `pocketcode/cli/textual_ui/ui_state_mixin.py`, which assembles the view model from reducer state, selector outputs, and picker-model helpers before the rendering mixin applies it to widgets
+- `TextualUIState` construction now lives in `pocketcode/cli/textual_ui/ui_state_mixin.py`, which assembles the view model from reducer state, selector outputs, and engine snapshots before the rendering mixin applies it to widgets
 - cached widget updates, view switching, and `TextualUIState` application now live in `pocketcode/cli/textual_ui/widget_sync_mixin.py` so the rendering mixin focuses on runtime output flow and live event handling
 - render commits now flow through a single helper in `pocketcode/cli/textual_ui/rendering_mixin.py`, which can optionally refresh input suggestions, hydrate reducer-backed engine snapshots, and then apply the rebuilt `TextualUIState`; that layer also supports batched commits plus engine-mutation transactions so multi-step updates can merge into one reducer-and-render pass
 - slash-command execution and run-event consumption update runtime UI state before the renderer reapplies derived widget values
 - Textual side effects are now funneled through dedicated helpers for command execution, request startup, pending-input resolution, and active-run draining so widget event handlers remain thin orchestration code
-- picker-driven mutations such as profile and LLM selection, system-settings persistence, selection presets, clone/delete flows, and saved-session operations are also routed through dedicated selection-effect helpers instead of calling engine mutation APIs inline from UI handlers
-- edit-screen flows now route workspace-agent saves, LLM-profile updates, clone-before-edit flows, and tool-policy/tool-allowlist default persistence through dedicated config-effect helpers instead of mixing those engine writes into the YAML-editing UI code
-- Textual edit and control-center flows now also support workspace markdown flow and tool assets through the shared engine asset API used by the basic CLI
-- workspace markdown flow edits and clones proactively validate executable Mermaid and DOT graph definitions before runtime reload
-- workspace markdown flow and tool edits and clones also resolve Markdown `include` and `import` directives before reload, so broken prompt-file references fail during authoring instead of during a later runtime load
-- workspace markdown flow edits and clones now also validate that referenced tools, handoff targets, composite agents, and prompt-bundle entries resolve before reload
-- workspace markdown agent edits and clones now apply the same pre-reload `include` and `import` validation path as workspace flow and tool assets
-- workspace markdown agent edits and clones also validate that referenced flows, tools, and `prompt:` entries resolve in the live registries before reload
 - modal and picker presentation is now centralized behind a modal coordinator helper so `push_screen`, callback wrapping, error handling, reducer-backed modal open/close dispatch, and post-close UI resync happen in one place instead of being duplicated across view mixins; modal dismissal now participates in the same batched render-commit path as follow-up result handlers
 - slash commands still route through `handle_command()` so the command layer remains shared with the basic CLI
-- skill toggles in the inspector persist against the active agent profile when one is selected; otherwise they persist as the global Textual last-used skill selection
-- the inspector `Save` buttons write the current skill or tool selection into the active workspace agent profile file
-- the edit picker can open workspace markdown flow and tool assets in the Textual editor, and the control center can clone or delete those same assets
+- the Textual shell is now runtime-focused: it no longer exposes workspace editing, cloning, deletion, or system-settings mutation flows
 
 ## Shared CLI Context
 
@@ -231,7 +219,7 @@ Short aliases are normalized as follows:
 - `/ap` -> `/agent`
 - `/lm` -> `/llm`
 - `/lf` -> `/llm-flow`
-- `/la` -> `/llm-agent`, then normalized to `/llm-flow`
+- `/la` is removed; use `/llm-flow`
 - `/lh` -> `/llm-handoff`
 - `/st` -> `/status`
 - `/c` -> `/cancel`
@@ -346,7 +334,7 @@ Syntax:
 /llm-flow <flow_name> <profile_name|none>
 ```
 
-`/llm-agent` is a compatibility alias for the same command path.
+`/llm-agent` has been removed. Use `/llm-flow`.
 
 ### Handoff-Specific LLM Override
 
@@ -409,7 +397,7 @@ Current subcommands are:
 
 Behavior:
 
-- `/skill list` groups skills by top-level prefix derived from `::`, `-`, or `.` separators
+- `/skill list` groups skills by top-level prefix derived from `-` or `.` separators
 - `/skill show` prints tool refs, provided tools, extra prompts, references, scripts, assets, and source path
 - CLI-level skill mutation commands were removed
 
@@ -621,7 +609,6 @@ Textual-specific behavior:
 - each saved breakpoint is also rendered as its own selectable block in the `Run` inspector
 - selecting a breakpoint block lets `Clear Selected` remove that specific breakpoint directly from the UI
 - breakpoints added or cleared in Textual are now stored on the active saved session and are restored automatically on later `/debug` runs after session resume or app restart
-- the Control Center `Sessions` category can inspect a saved session's persisted debugger breakpoints or clear them before the next debug run
 - while paused, the main input accepts the same debugger commands as the basic CLI: `next`, `continue`, `until ...`, `break ...`, `breaks`, `clear ...`, `status`, `steps`, and `quit`
 - Textual key bindings for debugger control are `F7` (`next`), `F8` (`continue`), `F9` (`add breakpoint`), `Ctrl+G` (`status`), `Ctrl+B` (`breaks`), `Ctrl+K` (`clear selected breakpoint`), and `Ctrl+Shift+B` (`clear all breakpoints`)
 
@@ -629,32 +616,27 @@ One-shot mode still exposes the same runtime step timeline and live event stream
 
 ## Textual UI Architecture
 
-The public Textual UI import surface remains `pocketcode/cli/textual_app.py`, but the implementation is now split across `pocketcode/cli/textual_ui/`.
+The Textual UI lives under `pocketcode/cli/textual_ui/`.
 
 The main app class is `PocketCodeTextualApp(App[None])`.
 
 Current module layout:
 
-- `pocketcode/cli/textual_app.py`: compatibility facade that re-exports the Textual UI surface
 - `pocketcode/cli/textual_ui/app.py`: final `PocketCodeTextualApp` composition and `run_textual_cli()`
 - `pocketcode/cli/textual_ui/base.py`: app shell, bindings, CSS, and layout composition
 - `pocketcode/cli/textual_ui/debugger_mixin.py`: Textual debugger queueing, pause sync, and paused-command handling
-- `pocketcode/cli/textual_ui/picker_model_mixin.py`: shared skill/tool picker models and grouping helpers used across rendering and interaction flows
-- `pocketcode/cli/textual_ui/ui_state_mixin.py`: `TextualUIState` assembly from reducer state, selector outputs, and picker models
+- `pocketcode/cli/textual_ui/ui_state_mixin.py`: `TextualUIState` assembly from reducer state, selector outputs, and engine snapshots
 - `pocketcode/cli/textual_ui/widget_sync_mixin.py`: cached widget updates, view switching, and `TextualUIState` application
 - `pocketcode/cli/textual_ui/rendering_mixin.py`: runtime output flow and run-event updates
-- `pocketcode/cli/textual_ui/selection_mixin.py`: profile, LLM, confirmation, and system-settings selection flows
-- `pocketcode/cli/textual_ui/control_center_mixin.py`: F6 control-center category and action routing
-- `pocketcode/cli/textual_ui/config_editing_mixin.py`: agent, LLM, tool-policy, and workspace asset editing helpers
-- `pocketcode/cli/textual_ui/asset_management_mixin.py`: clone, delete, preset, skill, and tool-selection flows
+- `pocketcode/cli/textual_ui/selection_mixin.py`: runtime view selection flow
 - `pocketcode/cli/textual_ui/interaction_mixin.py`: input handling, UI event handlers, and user actions
-- `pocketcode/cli/textual_ui/picker_screens.py` and `pocketcode/cli/textual_ui/editor_screens.py`: modal screen classes
+- `pocketcode/cli/textual_ui/picker_screens.py` and `pocketcode/cli/textual_ui/interaction_screens.py`: modal screen classes used for runtime popups
 - `pocketcode/cli/textual_ui/shared.py`: constants, helper functions, and immutable UI state dataclasses
 
 Core state owned by the app includes:
 
 - the engine and shared CLI context
-- the current view (`chat`, `control`, or `run`)
+- the current view (`chat` or `run`)
 - right-panel visibility
 - theme name and workspace view
 - active run handle
@@ -670,12 +652,10 @@ The current Textual UI pipeline is intentionally layered:
 
 1. reducer-backed state in `store.py` owns structural UI state and transient runtime state, and now includes pure helpers for reducing ordered action batches instead of only one action at a time
 2. selector helpers in `selectors.py` derive runtime-facing text blocks and summaries from that state
-3. picker-model helpers in `picker_model_mixin.py` derive grouped skill and tool selection models shared across multiple flows
-4. `ui_state_mixin.py` assembles `TextualUIState` from reducer state, selector output, picker models, and engine-backed choices
-5. `widget_sync_mixin.py` applies `TextualUIState` to Textual widgets using cached updates to avoid redundant work
-6. `rendering_mixin.py` handles runtime output flow, live event consumption, and the centralized render-commit helper that can refresh suggestions, hydrate engine snapshots, and re-render in one step or batch related updates into a single render pass
-7. engine-mutating UI flows now use a dedicated transaction helper that always hydrates engine-backed state at commit time, so handlers choose intent once instead of repeating `hydrate_engine=True` at every call site
-8. effect mixins and the modal coordinator mutate engine state or present screens, then trigger the render-commit path as needed; modal result handlers now batch modal close plus any follow-up commits into a single render transaction
+3. `ui_state_mixin.py` assembles `TextualUIState` from reducer state, selector output, and engine-backed choices
+4. `widget_sync_mixin.py` applies `TextualUIState` to Textual widgets using cached updates to avoid redundant work
+5. `rendering_mixin.py` handles runtime output flow, live event consumption, and the centralized render-commit helper that can refresh suggestions, hydrate engine snapshots, and re-render in one step or batch related updates into a single render pass
+6. effect mixins and the modal coordinator present runtime popups or mutate run state, then trigger the render-commit path as needed
 - rendered output buffer and trimmed line count
 - suggestion list for input completion
 - cached UI state snapshots to avoid unnecessary redraws
@@ -686,36 +666,22 @@ The app renders:
 
 - a top bar with agent and LLM summary
 - a main column with a view title, a content switcher, and the main input
-- a right inspector panel
+- a right details panel
 - a footer with key bindings
 
-The content switcher exposes three views:
+The content switcher exposes two views:
 
 - `chat`: read-only output console
-- `control`: immediate runtime controls such as workspace view, theme, active profile, LLM, session confirm default, and auto-confirm switch
 - `run`: a structured preview of the last run summary and current live-run state
 
-The right inspector panel shows:
+The right details panel shows:
 
-- a summary card
+- a runtime summary card
 - current session context
-- saved session history
-- available agent profiles
-- skills as an inline grouped selector
-- allowed tools as an inline grouped and nested selector
+- session history
 - prompt sources
 
-Inspector selector behavior:
-
-- the `Skills` list applies a session-scoped skill selection immediately when toggled
-- the `Allowed Tools` list applies a session-scoped tool selection immediately when toggled
-- fresh sessions seed those session-scoped skill and tool selections from the active agent profile file
-- the `Skills` header `Save` button writes the current selection into the active workspace agent's `skills` field
-- the `Allowed Tools` header `Save` button writes the current effective tool scope into the active workspace agent's `tools` field
-- tool groups and subgroups are derived from tool metadata, preferring the tool source path under `tools/`
-- when every tool is selected, the effective tool scope is unrestricted for that profile
-
-The F6 Control Center includes a `Sessions` category that can start a fresh session, resume saved history, delete a saved non-active session, or clear all previous sessions while keeping the active session.
+The details panel is read-only. Runtime editing, cloning, profile mutation, and settings mutation are no longer part of the Textual shell.
 
 ### Themes And Workspace Views
 
@@ -731,7 +697,6 @@ Built-in workspace views are:
 
 - `balanced`
 - `chat_focus`
-- `control_desk`
 - `minimal`
 - `review`
 
@@ -755,7 +720,7 @@ The `run` view now uses the same Rich-capable rendering path as the main chat co
 
 The right-side inspector summary also surfaces the last run's runtime event count, runtime step count, and any StackVM authoring warning codes when the active run summary recorded `vm_validation_warnings`.
 
-The right-side inspector panel now follows the same pattern for its summary, session context, saved sessions, and prompt-source panes. Those sections render semantic Rich blocks rather than plain text areas, while the profile list, skill selection list, and tool selection list remain interactive list widgets.
+The right-side details panel now follows the same pattern for its runtime summary, session context, session history, and prompt-source panes. Those sections render semantic Rich blocks and are read-only.
 
 Long code, diff, YAML, text-preview, and tool-result panels are now compacted at render time. The underlying runtime state and plain-text transcript remain unchanged, but the visible Rich panels show only the leading portion of oversized content and annotate the panel with a truncation subtitle such as the number of displayed versus total lines.
 
@@ -783,17 +748,14 @@ Current bindings are:
 
 - `Tab`: complete the current input from the suggestion list
 - `F2`: open the previous-entry picker for the main input box
-- `F3`: open the edit asset picker
-- `F4`: open the clone asset picker
-- `F5`: open the global view selector for `chat`, `control`, and `run`
-- `F6`: open the main asset/control picker
+- `F5`: open the global view selector for `chat` and `run`
 - `Ctrl+P`: load the previous main-input entry
 - `Ctrl+N`: move forward through recalled main-input entries
 - `Ctrl+Up`: focus the previous visible Rich surface
 - `Ctrl+Down`: focus the next visible Rich surface
 - `Ctrl+Left`: select the previous compactable block in the focused Rich surface
 - `Ctrl+Right`: select the next compactable block in the focused Rich surface
-- `F10`: toggle the right inspector panel
+- `F10`: toggle the right details panel
 - `Ctrl+E`: expand or restore the selected compacted block in the focused Rich surface
 - `Ctrl+Shift+A`: copy full output buffer
 - `Ctrl+Y`: copy the last assistant response
@@ -808,7 +770,7 @@ These commands are available only from the Textual input box:
 - `/copy`: copy the last assistant response to the clipboard
 - `/copy-all`: copy the full visible console output to the clipboard
 - `/view`: open the popup view selector
-- `/view list|show|switch <chat|control|run>`: inspect or change the active Textual view
+- `/view list|show|switch <chat|run>`: inspect or change the active Textual view
 
 Outside the Textual interface, the shared command layer prints a message explaining that these commands are UI-only.
 
@@ -839,30 +801,22 @@ Event handling responsibilities:
 - write the final assistant output on `run_completed`
 - clear busy state and run handles on completion, failure, or cancellation
 
-### Picker And Editor Surfaces
+### Popup Surfaces
 
-The Textual UI contains modal screens and picker flows for higher-level editing tasks.
+The Textual UI still uses modal screens, but only for runtime-focused tasks.
 
 Current capabilities implemented across `pocketcode/cli/textual_ui/` include:
 
-- selecting the active agent profile
-- selecting a global LLM override
-- selecting a workspace view
-- toggling skills, including grouped skill toggles
-- editing allowed tools for a profile, including selectable groups and subgroups
-- editing per-tool confirmation policy
-- cloning the current agent or LLM profile plus workspace flow and tool assets
-- deleting workspace-backed agent or LLM assets plus workspace flow and tool assets
-- saving, loading, and deleting selection presets
-- editing and saving system settings
+- selecting the active Textual view
 - recalling previous main-input entries from a picker or keyboard history
-- answering pending runtime prompts through inline chat/run controls by default or popup controls when enabled
+- answering pending runtime prompts through inline chat/run controls, with popup fallbacks where the runtime still requests them
+- debugger breakpoint and debugger-status helper popups
 
-These are UI conveniences over engine methods. The Textual app maintains a reducer-backed CLI state snapshot, hydrates it from engine/session state, and renders widgets from that snapshot via one-way data flow.
+Workspace and configuration authoring are intentionally out of scope for the Textual shell. Those tasks now belong in direct file edits or future provider/admin command surfaces.
 
 ## Textual Persistence Model
 
-The Textual UI persists defaults and reusable presets into `runtime.textual` in `pocketcode.yml`, but live inspector tool and skill selections are session-scoped and are stored in the active saved-session snapshot instead.
+The Textual UI persists only startup-oriented defaults plus accepted-input history. It no longer exposes UI flows for saving presets or writing agent/tool selections back into workspace config.
 
 Persisted settings currently include:
 
@@ -879,11 +833,8 @@ Persisted settings currently include:
 Important behavior:
 
 - empty `last_used` sections are removed from config
-- preset snapshots are normalized before save and when loaded back
-- session files hold live skill selections, tool selections, and session confirmation overrides for the active session
 - Textual entry history is stored separately from `pocketcode.yml`
-- registry-backed tool refs inside preset snapshots and saved session confirmation maps are persisted in canonical dotted form
-- deleting a workspace asset also cleans invalid references from selection presets and last-used state
+- the current runtime shell reads these values but does not expose Textual editors for them
 
 ## System Settings
 
@@ -901,11 +852,7 @@ Current values returned are:
 
 On startup, `workspace_view` restores the saved layout preset but does not override the initial `chat` surface. Interactive workspace-view changes inside Textual still switch to the preset's paired view.
 
-When the Textual system-settings editor opens, it normalizes saved agent ids to canonical dotted namespace form before populating the selector widgets.
-
-The same normalization also happens inside `PocketCodeEngine` when system settings are read, applied, and saved, so `runtime.default_agent` cannot drift back to an incompatible form after startup.
-
-Other engine control surfaces that accept flow or agent ids also normalize typed references such as `flow:core.react` and `agent:core.react` before lookup, so CLI and TUI paths resolve through the same canonical registry form.
+The current Textual shell no longer exposes an in-app system-settings editor. Settings remain file-backed and are read on startup.
 
 ## Output Model
 
@@ -927,7 +874,7 @@ Primary implementation files:
 - `pocketcode/cli/command_handler.py`: shared slash-command parsing, aliases, and engine mutation commands
 - `pocketcode/cli/runtime_events.py`: human-readable runtime event formatting
 - `pocketcode/cli/user_interaction.py`: console formatting and parsing for structured interaction requests
-- `pocketcode/cli/textual_app.py`: stable Textual UI import surface and compatibility facade
+- `pocketcode/cli/textual_ui/__init__.py`: Textual UI package export surface
 - `pocketcode/cli/textual_ui/`: split Textual shell implementation, modal screens, pickers, editors, run monitor, and persistence actions
 - `pocketcode/cli/completers.py`: small prompt-toolkit completer helpers that are currently not wired into the default startup path
 
@@ -940,4 +887,4 @@ The current CLI implementation does not provide:
 - persistent session context for `/context`; only Textual selection state and related runtime settings are persisted
 - a startup flag for directly selecting an agent profile
 
-When updating CLI behavior, keep this document in sync with `pocketcode/main.py`, `pocketcode/cli/textual_app.py`, and the implementation modules under `pocketcode/cli/textual_ui/`.
+When updating CLI behavior, keep this document in sync with `pocketcode/main.py` and the implementation modules under `pocketcode/cli/textual_ui/`.

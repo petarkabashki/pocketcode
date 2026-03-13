@@ -13,9 +13,9 @@ PocketCoder is a resource-root runtime with four distinct layers:
 
 Markdown-authored flows, tools, prompts, agents, and skills are compilation inputs, not a separate runtime layer. They are normalized into the same registries and runtime models used by direct resource folders and Python factories referenced from Markdown. See `markdown_assets.md` for the asset-level syntax and validation model.
 
-The engine always executes a flow. Agents, hooks, and skills modify how that flow is invoked. In practice, new authoring should prefer self-contained Markdown agents, but the runtime still materializes them as a flow plus an agent record internally.
+The engine always executes a flow. Agents, hooks, and skills modify how that flow is invoked. In practice, new executable authoring should prefer self-contained Markdown agents, but the runtime still materializes them as a flow plus an agent record internally.
 
-For new executable authoring, the canonical shape is a self-contained Markdown VM program plus optional sibling `.tool.py` / `.prompt.md` helpers. `FlowDefinition` remains the internal runtime model, but new docs use "VM program" when describing the preferred authoring unit.
+For new executable authoring, the canonical shape is a self-contained Markdown agent with VM blocks plus optional sibling `.tool.py` / `.prompt.md` helpers. `FlowDefinition` remains the internal runtime model, but the public authoring surface is agent-first.
 
 Built-in core tools have a single canonical package location:
 
@@ -25,7 +25,7 @@ Built-in core tools have a single canonical package location:
 
 Core filesystem-style tools in `pocketcode/core_tools/filesystem.py` and staged file-edit helpers in `pocketcode/core_tools/file_ops.py` are constrained to the current workspace root. The engine publishes that root into each request's shared store, and any path that resolves outside it is rejected before read, write, mkdir, glob, selection, extract, or staged-apply work is performed.
 
-Workspace-owned compatibility shims are loaded through the shared helper in `pocketcode/core/workspace_module_loader.py`.
+Workspace-owned shim modules are not part of the supported runtime surface. Workspace migration removes them before startup.
 
 ## Workspace Root Versus Resource Root
 
@@ -37,7 +37,7 @@ PocketCoder distinguishes between:
 
 `resource_root` is the filesystem primitive. `WorkspaceCatalog` is the compiled runtime view produced from those roots. The engine executes against the catalog so lookups, precedence handling, and registry qualification do not require repeated filesystem traversal.
 
-The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain flat convention files such as `*.md`, `*.agent.md`, `*.agent.yaml`, `*.hook.md`, `*.hook.yaml`, `*.tool.md`, `*.prompt.md`, or `*.tool.py`, resource collections such as `agents/`, `hooks/`, `prompts/`, `tools/`, `skills/`, or `llm-profiles/`, or typed collection folders such as `agent.<group>/`, `hook.<group>/`, `tool.<group>/`, and `skill.<name>/`.
+The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain canonical flat convention files such as `*.md`, `*.hook.md`, `*.hook.yaml`, `*.tool.md`, `*.prompt.md`, or `*.tool.py`, resource collections such as `agents/`, `hooks/`, `prompts/`, `tools/`, `skills/`, or `llm-profiles/`, or typed collection folders such as `agent.<group>/`, `hook.<group>/`, and `tool.<group>/`.
 
 Examples:
 
@@ -53,7 +53,7 @@ Engine construction in `pocketcode.core.engine.PocketCodeEngine` follows this or
 1. Load `pocketcode.yml` from the workspace root.
 2. Build `WorkspaceCatalog` and load discovered package/workspace resource roots plus configured namespace roots.
 3. Resolve `runtime.workspace_paths`, treating each entry as either one VM-first namespace root or one flat namespace-pack root.
-4. Load direct prompt, hook, tool, and flow resources from all discovered resource roots, including Markdown-backed hook assets, tools, and flows.
+4. Load direct prompt, hook, tool, and executable resources from all discovered resource roots, including Markdown-backed hook assets, tools, flows, and self-contained executable agents.
 5. Build `AgentManager` from loaded flows.
 6. Load skills from all discovered resource roots.
 7. Load workspace LLM profiles from all discovered resource roots.
@@ -73,21 +73,23 @@ Markdown asset loading participates in the same two phases:
 
 That shared model applies across prompt files, Markdown hook definitions, Markdown tool definitions, Markdown flow definitions, Markdown agent definitions, and skills.
 
-Within a resource root, flat files still load exactly as before. New workspace agent writes use grouped `agent.<group>/...` paths, and the additional folder conventions are additive:
+Within a resource root, canonical flat files still load exactly as before. Workspace agents still load as overlays from agent locations, and self-contained Markdown agents in those same locations now also contribute executable catalog entries when they carry flow fields. The additional folder conventions are:
 
-- `prompts/**/*.md` registers workspace prompts by relative dotted path, for example `prompts/review.md -> workspace.review` and `prompts/shared/base.md -> workspace.shared.base`
+- `prompts/**/*.md` registers workspace prompts by relative dotted path, for example `prompts/review.md -> resource_root.pocketcode.review` and `prompts/shared/base.md -> resource_root.pocketcode.shared.base`
 - `hooks/**/*.hook.md` and `hooks/**/*.hook.yaml` load workspace hook definitions; hook files default their name from the relative dotted path under `hooks/`
 - `tools/**/*.tool.md` and `tools/**/*.tool.py` register direct workspace tools; Markdown tool wrappers default their tool name from the relative dotted path under `tools/`
 - `agents/**/*.agent.md` and `agents/**/*.agent.yaml` load workspace agent profiles; Markdown agent profiles default their name from the relative dotted path under `agents/`
 - `hook.<group>/` behaves like an extra hook collection root; hook files inside it default to `<group>.<relative_name>`
 - `tool.<group>/` behaves like an extra tool collection root; Markdown tool wrappers inside it default to `<group>.<relative_name>`
 - `agent.<group>/` behaves like an extra agent collection root; Markdown agent profiles inside it default to `<group>.<relative_name>`
-- `skill.<name>/` behaves like a single-skill alias for `skills/<name>/` and must still contain `SKILL.md`
+- skills load from `skills/<name>/SKILL.md`
 
-For flow Markdown specifically, the loader now has two execution outcomes:
+For executable Markdown specifically, the loader now has two execution outcomes:
 
 - if the compiled definition provides `module` plus `entry_fn`, PocketCoder loads that Python PocketFlow factory
 - if the compiled definition carries StackVM source fields such as `vm_source`, `vm_module`, or `vm_file`, PocketCoder registers a VM-backed flow with `execution_mode: vm`
+
+That applies both to direct `*.md` flow assets and to self-contained `*.agent.md` assets that carry embedded execution fields or fenced VM blocks.
 
 Markdown flow definitions may also declare `tool_files`. Each entry is resolved relative to the Markdown file first, loaded as a Python tool module, and registered into the same namespace before the flow definition is finalized. When `tool_files` is present and the flow does not declare `tools`, the exported tool names become the flow's base tool list automatically. When `tool_files` and prompt-file fields are omitted, the loader also looks for sibling `<name>.tool.py` and `<name>.prompt.md` files beside the Markdown program and wires them in automatically.
 
@@ -222,7 +224,7 @@ Skills contribute:
 - inline prompt text
 - extra prompt files
 - references to already-registered tools
-- tool modules loaded from `tools/*.tool.py` first, then other `tools/*.py` files for compatibility
+- tool modules loaded from `tools/*.tool.py`
 
 Skills validate static tool and prompt references during manager load itself because the engine passes the live tool and prompt registries into that loader.
 
@@ -244,10 +246,9 @@ Reference parsing is centralized in `pocketcode/core/reference_syntax.py`.
 
 - `ResourceReference` is the shared parsed representation used for typed-kind detection, canonical target normalization, and qualified versus unqualified checks.
 - manifest loading, workspace agent loading, markdown skill loading, registry normalization, prompt-resource resolution, and engine-side post-load pruning now consume this parsed form instead of duplicating string-splitting logic.
-- runtime tool lookup, allowlist checks, and confirmation-policy maps also normalize legacy and typed tool ids through the same parser-backed path.
-- persistence paths reuse the same normalization layer, so workspace agent profile files, saved session confirmation overrides, persistent tool-confirmation config, and Textual selection presets are written back with canonical dotted registry ids instead of mixed legacy forms.
-- permissive compatibility callers that must not reject malformed legacy input now route through the same shared fallback helper in `reference_syntax` instead of re-implementing local `::` normalization branches.
-- compatibility helpers such as `normalize_registry_reference()` remain available, but they are wrappers over the shared parser.
+- runtime tool lookup, allowlist checks, and confirmation-policy maps normalize canonical and typed tool ids through the same parser-backed path.
+- persistence paths reuse the same normalization layer, so workspace agent profile files, saved session confirmation overrides, persistent tool-confirmation config, and Textual selection presets are written back with canonical dotted registry ids instead of mixed older forms.
+- `normalize_registry_reference()` remains the strict shared entrypoint for canonical registry ids.
 
 ## Catalog Discovery
 
@@ -291,7 +292,7 @@ Each discovered resource root contributes a workspace-owned extension surface:
 
 Runtime session state is persisted under `<runtime.storage.session_state_dir>/sessions/`, which defaults to `.pocketstate/sessions/` relative to the workspace root.
 
-Direct resource-root prompts, hooks, tools, and flows are registered under resource-root namespaces. For backward compatibility, the default `.pocketcode/` resource root also exposes its direct prompts, hooks, tools, and Markdown flows under the legacy `workspace` namespace.
+Direct resource-root prompts, hooks, tools, and flows are registered under resource-root namespaces such as `resource_root.pocketcode`.
 
 Configured workspace namespace roots and flat namespace-pack roots sit alongside that direct resource-root surface. They register their own flows, prompts, and `.tool.py` helpers under their declared namespace and are not auto-written by the workspace asset editors.
 
@@ -485,7 +486,7 @@ When a confirmation prompt returns a scope choice, `ToolRuntime.execute_tool()` 
 
 ## Session Persistence
 
-`PocketCodeEngine` creates an active saved session during initialization if none exists for the workspace.
+`PocketCodeEngine` creates an active saved session during initialization if none exists for the resource_root.pocketcode.
 
 Current behavior:
 

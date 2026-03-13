@@ -11,7 +11,7 @@ from pocketcode.core.session_manager import SessionManager
 
 class _ImmediateRuntime:
     def run(self, shared_store):
-        shared_store["active_agent"] = "core::agent"
+        shared_store["active_agent"] = "core.agent"
         shared_store["final_output"] = "ready"
 
 
@@ -28,7 +28,7 @@ class _PromptRuntime:
                 "default": "no",
             }
         )
-        shared_store["active_agent"] = "core::agent"
+        shared_store["active_agent"] = "core.agent"
         shared_store["final_output"] = f"answer={answer.get('value')}"
 
 
@@ -37,33 +37,33 @@ class _EventfulRuntime:
         emit = shared_store["runtime_event_handler"]
         emit(
             "tool_started",
-            agent="core::agent",
-            tool="workspace::write_file",
+            agent="core.agent",
+            tool="resource_root.pocketcode.write_file",
             arguments={"path": "notes.txt", "content": "hello"},
         )
         emit(
             "tool_finished",
-            agent="core::agent",
-            tool="workspace::write_file",
+            agent="core.agent",
+            tool="resource_root.pocketcode.write_file",
             success=True,
             result={"success": True, "result": "ok"},
         )
         emit(
             "handoff_return",
-            source_agent="core::agent",
-            target_agent="planner::agent",
+            source_agent="core.agent",
+            target_agent="planner.agent",
             return_transition="continue",
         )
-        shared_store["active_agent"] = "core::agent"
+        shared_store["active_agent"] = "core.agent"
         shared_store["final_output"] = "ready"
 
 
 class _WarningRuntime:
     def run(self, shared_store):
-        shared_store["active_agent"] = "core::agent"
+        shared_store["active_agent"] = "core.agent"
         shared_store["last_vm_validation_warnings"] = [
             {
-                "code": "legacy-tool-loop",
+                "code": "manual-tool-loop",
                 "message": "Prefer tool-once.",
                 "location": "line 4, cols 1-12",
                 "span": {
@@ -83,26 +83,26 @@ class _CancellableRuntime:
             if shared_store["run_cancel_requested"]():
                 raise RunCancelledError(shared_store["run_cancel_reason"]())
             time.sleep(0.01)
-        shared_store["active_agent"] = "core::agent"
+        shared_store["active_agent"] = "core.agent"
         shared_store["final_output"] = "late"
 
 
 class _DebuggableRuntime:
     def run(self, shared_store):
         emit = shared_store["runtime_event_handler"]
-        shared_store["active_agent"] = "core::agent"
+        shared_store["active_agent"] = "core.agent"
         time.sleep(0.01)
         emit(
             "tool_started",
-            agent="core::agent",
-            tool="workspace::write_file",
+            agent="core.agent",
+            tool="resource_root.pocketcode.write_file",
             arguments={"path": "notes.txt"},
         )
         time.sleep(0.01)
         emit(
             "tool_finished",
-            agent="core::agent",
-            tool="workspace::write_file",
+            agent="core.agent",
+            tool="resource_root.pocketcode.write_file",
             success=True,
             result={"success": True, "result": "ok"},
         )
@@ -148,7 +148,7 @@ def _build_engine(runtime) -> PocketCodeEngine:
     engine.active_session_id = None
     engine.active_session_title = None
     engine.active_session_loaded_from_history = False
-    engine.list_agents = lambda: ["core::agent"]
+    engine.list_agents = lambda: ["core.agent"]
     engine.get_active_skills = lambda: []
     return engine
 
@@ -164,7 +164,7 @@ class TestEngineRunHandle:
         assert result == "ready"
         assert [event["type"] for event in events] == ["run_started", "run_completed"]
         assert events[-1]["output"] == "ready"
-        assert engine.last_run_summary["current_agent"] == "core::agent"
+        assert engine.last_run_summary["current_agent"] == "core.agent"
 
     def test_start_request_can_bridge_user_input_through_run_handle(self):
         engine = _build_engine(_PromptRuntime())
@@ -227,17 +227,17 @@ class TestEngineRunHandle:
             {
                 "index": 1,
                 "kind": "tool_call",
-                "label": "Tool call: workspace::write_file",
+                "label": "Tool call: resource_root.pocketcode.write_file",
                 "status": "completed",
                 "parent_step_index": None,
                 "duration_ms": engine.last_run_summary["steps"][0]["duration_ms"],
                 "summary": "Succeeded: 'ok'",
                 "details": {
-                    "agent": "core::agent",
-                    "tool": "workspace::write_file",
+                    "agent": "core.agent",
+                    "tool": "resource_root.pocketcode.write_file",
                     "arguments": {"path": "notes.txt", "content": "hello"},
                     "outcome": {
-                        "tool": "workspace::write_file",
+                        "tool": "resource_root.pocketcode.write_file",
                         "success": True,
                         "result": {"success": True, "result": "ok"},
                     },
@@ -246,14 +246,14 @@ class TestEngineRunHandle:
             {
                 "index": 2,
                 "kind": "handoff_return",
-                "label": "Handoff return: core::agent <- planner::agent",
+                "label": "Handoff return: core.agent <- planner.agent",
                 "status": "completed",
                 "parent_step_index": None,
                 "duration_ms": 0.0,
                 "summary": "Transition: continue",
                 "details": {
-                    "source_agent": "core::agent",
-                    "target_agent": "planner::agent",
+                    "source_agent": "core.agent",
+                    "target_agent": "planner.agent",
                     "return_transition": "continue",
                 },
             },
@@ -269,7 +269,7 @@ class TestEngineRunHandle:
         assert engine.last_run_summary["vm_validation_warning_count"] == 1
         assert engine.last_run_summary["vm_validation_warnings"] == [
             {
-                "code": "legacy-tool-loop",
+                "code": "manual-tool-loop",
                 "message": "Prefer tool-once.",
                 "location": "line 4, cols 1-12",
                 "span": {
@@ -322,7 +322,7 @@ class TestEngineRunHandle:
         assert paused_event["step_index"] == 1
 
         snapshot = handle.get_debug_snapshot()
-        assert snapshot["active_agent"] == "core::agent"
+        assert snapshot["active_agent"] == "core.agent"
         assert snapshot["step_count"] == 1
         assert snapshot["runtime_event_count"] == 3
 
@@ -431,23 +431,23 @@ class TestEngineRunHandle:
             {
                 "type": "tool_started",
                 "step_index": 3,
-                "tool": "workspace::write_file",
+                "tool": "resource_root.pocketcode.write_file",
                 "arguments": {"path": "notes.txt", "content": "hello"},
             }
         )
         handoff_message = format_runtime_event(
             {
                 "type": "handoff_return",
-                "source_agent": "core::agent",
-                "target_agent": "planner::agent",
+                "source_agent": "core.agent",
+                "target_agent": "planner.agent",
                 "return_transition": "continue",
             }
         )
 
         assert tool_message.startswith("Step 3: Tool call:")
-        assert "workspace::write_file" in tool_message
+        assert "resource_root.pocketcode.write_file" in tool_message
         assert "notes.txt" in tool_message
-        assert handoff_message == "Handoff return: core::agent <- planner::agent (transition=continue)."
+        assert handoff_message == "Handoff return: core.agent <- planner.agent (transition=continue)."
 
     def test_format_runtime_event_includes_cancellation_messages(self):
         assert format_runtime_event({"type": "run_cancel_requested", "reason": "Please stop"}) == (

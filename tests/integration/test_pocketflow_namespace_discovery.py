@@ -56,7 +56,7 @@ def test_agent_namespace_migration(monkeypatch):
 
     react_agent = catalog.agents["core.react"]
     assert isinstance(react_agent.flow_instance, Flow), \
-        "core::react flow_instance must be a pocketflow.Flow"
+        "core.react flow_instance must be a pocketflow.Flow"
 
 
 def test_workspace_namespaces_are_loaded_from_dot_pocketcode(monkeypatch):

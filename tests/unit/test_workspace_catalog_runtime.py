@@ -156,6 +156,50 @@ def test_workspace_markdown_program_can_reference_namespace_tool_modules(tmp_pat
     assert flow_def.tools == ["sample.echo_text"]
 
 
+def test_workspace_agents_collection_self_contained_agent_is_executable(tmp_path):
+    resource_root = tmp_path / ".pocketcode"
+    _write(resource_root / "agents" / "review.agent.md", "---\n---\nInline review prompt.\n\n```vm\n\"ok\" answer\n```\n")
+    _write(resource_root / "agents" / "review.prompt.md", "Shared review prompt")
+    _write(
+        resource_root / "agents" / "review.tool.py",
+        "def echo_text(text):\n"
+        "    return {'text': text}\n",
+    )
+
+    manager = _manager_for(tmp_path)
+    manager.load()
+
+    flow_def = manager.agents.resolve("agents.review")
+    assert flow_def.execution_mode == "vm"
+    assert flow_def.tools == ["resource_root.pocketcode.echo_text"]
+    assert "Inline review prompt." in flow_def.system_prompt
+    assert "Shared review prompt" in flow_def.system_prompt
+
+
+def test_workspace_namespace_root_self_contained_agent_registers_as_namespaced_program(tmp_path):
+    namespace_root = tmp_path / "sample"
+    _write(namespace_root / "reviewer.agent.md", "---\n---\nNamespace agent prompt.\n\n```vm\n\"ns ok\" answer\n```\n")
+
+    manager = _manager_for(tmp_path, str(namespace_root))
+    manager.load()
+
+    flow_def = manager.agents.resolve("sample.reviewer")
+    assert flow_def.execution_mode == "vm"
+    assert flow_def.vm_source == '"ns ok" answer'
+
+
+def test_resource_root_flat_namespace_pack_self_contained_agent_registers_namespace(tmp_path):
+    resource_root = tmp_path / ".pocketcode"
+    _write(resource_root / "alpha.review.agent.md", "---\n---\nPack agent prompt.\n\n```vm\n\"pack ok\" answer\n```\n")
+
+    manager = _manager_for(tmp_path, str(resource_root))
+    manager.load()
+
+    flow_def = manager.agents.resolve("alpha.review")
+    assert flow_def.execution_mode == "vm"
+    assert flow_def.vm_source == '"pack ok" answer'
+
+
 def test_resource_root_flat_conventions_load_prompts_tools_and_flows(tmp_path):
     resource_root = tmp_path / ".pocketcode"
     _write(resource_root / "review.prompt.md", "Review prompt")
@@ -202,12 +246,12 @@ def test_resource_root_flat_conventions_load_prompts_tools_and_flows(tmp_path):
     manager = _manager_for(tmp_path)
     manager.load()
 
-    flow_def = manager.agents.resolve("workspace.review")
-    assert flow_def.tools == ["workspace.echo_text"]
+    flow_def = manager.agents.resolve("resource_root.pocketcode.review")
+    assert flow_def.tools == ["resource_root.pocketcode.echo_text"]
     assert "Inline prompt." in flow_def.system_prompt
     assert "Review prompt" in flow_def.system_prompt
-    assert manager.prompts.resolve("workspace.review") == "Review prompt"
-    assert manager.tools.resolve("workspace.sample_tool").name == "sample_tool"
+    assert manager.prompts.resolve("resource_root.pocketcode.review") == "Review prompt"
+    assert manager.tools.resolve("resource_root.pocketcode.sample_tool").name == "sample_tool"
 
 
 def test_resource_root_collection_folders_load_prompts_and_tools(tmp_path):
@@ -245,9 +289,9 @@ def test_resource_root_collection_folders_load_prompts_and_tools(tmp_path):
     manager = _manager_for(tmp_path)
     manager.load()
 
-    assert manager.prompts.resolve("workspace.review") == "Review prompt from folder"
-    assert manager.tools.resolve("workspace.echo_text")(text="ok") == {"text": "ok"}
-    assert manager.tools.resolve("workspace.checks.sample").name == "checks.sample"
+    assert manager.prompts.resolve("resource_root.pocketcode.review") == "Review prompt from folder"
+    assert manager.tools.resolve("resource_root.pocketcode.echo_text")(text="ok") == {"text": "ok"}
+    assert manager.tools.resolve("resource_root.pocketcode.checks.sample").name == "checks.sample"
 
 
 def test_resource_root_typed_tool_folder_loads_tools(tmp_path):
@@ -284,5 +328,5 @@ def test_resource_root_typed_tool_folder_loads_tools(tmp_path):
     manager = _manager_for(tmp_path)
     manager.load()
 
-    assert manager.tools.resolve("workspace.git_status")() == {"ok": True}
-    assert manager.tools.resolve("workspace.git.describe").name == "git.describe"
+    assert manager.tools.resolve("resource_root.pocketcode.git_status")() == {"ok": True}
+    assert manager.tools.resolve("resource_root.pocketcode.git.describe").name == "git.describe"

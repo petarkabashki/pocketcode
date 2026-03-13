@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import io
 from contextlib import redirect_stdout
 from typing import Any
@@ -11,7 +10,7 @@ from pocketcode.cli.user_interaction import parse_interaction_response
 
 class TextualAppEffectsMixin:
     async def _execute_command_effect(self, command_input: str) -> tuple[str, bool]:
-        return await asyncio.to_thread(self._run_command_capture, command_input)
+        return self._run_command_capture(command_input)
 
     def _run_command_capture(self, command_input: str) -> tuple[str, bool]:
         output = io.StringIO()

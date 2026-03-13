@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from pocketcode.cli.textual_app import (
+from pocketcode.cli.textual_ui import (
     AssetPickerScreen,
     InteractionControlsScreen,
     NameInputScreen,
@@ -53,10 +53,10 @@ from textual.widgets import Input, OptionList, RichLog, Select, SelectionList, S
 class TestTopStatsText:
     def test_stats_text_shows_runtime_counters_without_repeating_agent(self):
         status = {
-            "agent": "core::react",
+            "agent": "core.react",
             "session_tool_confirmation_overrides": {"default_policy": "confirm"},
             "last_run_summary": {
-                "current_agent": "core::reviewer",
+                "current_agent": "core.reviewer",
                 "llm_usage": {
                     "prompt_tokens": 128,
                     "completion_tokens": 64,
@@ -70,8 +70,8 @@ class TestTopStatsText:
 
         assert text == "Tokens in=128 out=64 total=192 | Cost=$0.012345 | Session confirm=confirm"
         assert "Agent=" not in text
-        assert "core::react" not in text
-        assert "core::reviewer" not in text
+        assert "core.react" not in text
+        assert "core.reviewer" not in text
 
     def test_stats_text_defaults_when_run_summary_is_missing(self):
         status = {}
@@ -94,17 +94,17 @@ class TestTopStatsText:
 class TestUiTextHelpers:
     def test_status_text_matches_footer_format(self):
         status = {
-            "flow": "coder::coder",
+            "flow": "coder.coder",
             "agent": "coder.safe",
             "selected_agent": "coder.safe",
             "active_agent": "coder.safe",
             "active_agent_profile": "coder.safe",
             "global_llm_override": "fast",
-            "selected_flow": "architect::architect",
+            "selected_flow": "architect.architect",
             "selected_llm_profile": "smart",
             "runtime_workflow": "internal-flow",
             "last_run_summary": {
-                "current_agent": "coder::coder",
+                "current_agent": "coder.coder",
                 "current_llm_profile": "fast",
                 "current_llm_model": "gpt-test",
                 "agent_path": [],
@@ -348,7 +348,7 @@ class TestTextualRuntimeSelectors:
                 "vm_validation_warning_count": 2,
                 "vm_validation_warnings": [
                     {
-                        "code": "legacy-tool-loop",
+                        "code": "manual-tool-loop",
                         "message": "Prefer tool-once.",
                         "location": "line 4, cols 1-12",
                         "span": {
@@ -359,7 +359,7 @@ class TestTextualRuntimeSelectors:
                         },
                     },
                     {
-                        "code": "legacy-prompt-route",
+                        "code": "manual-prompt-route",
                         "message": "Prefer prompt-route.",
                         "location": "line 9, cols 5-22",
                         "span": {
@@ -388,7 +388,7 @@ class TestTextualRuntimeSelectors:
         assert "Modal: Pick Tools" in summary_text
         assert "Agent note: Focus mode" in summary_text
         assert "Active session: Review Session (session-1)" in summary_text
-        assert "VM warnings: legacy-tool-loop@4:1-12; legacy-prompt-route@9:5-22" in summary_text
+        assert "VM warnings: manual-tool-loop@4:1-12; manual-prompt-route@9:5-22" in summary_text
         assert "Runtime events: 4" in summary_text
         assert "Runtime steps: 2" in summary_text
         assert "active_modal: tool_selection" in preview_text
@@ -2101,14 +2101,14 @@ class TestTextualSelectStability:
 
         asyncio.run(exercise())
 
-    def test_f6_system_settings_normalizes_legacy_agent_alias(self):
+    def test_f6_system_settings_normalizes_old_agent_alias(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
-            engine.list_agents = lambda: ["core.react", "workspace.review"]
+            engine.list_agents = lambda: ["core.react", "resource_root.pocketcode.review"]
             engine.get_system_settings = lambda: {
                 "theme_name": "ocean",
                 "workspace_view": "balanced",
-                "default_agent": "core::react",
+                "default_agent": "core.react",
                 "default_llm_profile": "fast",
             }
             app = PocketCodeTextualApp(
@@ -2138,7 +2138,7 @@ class TestTextualSelectStability:
     def test_f6_system_settings_normalizes_typed_agent_alias(self):
         async def exercise() -> None:
             engine = _TextualEngineStub()
-            engine.list_agents = lambda: ["core.react", "workspace.review"]
+            engine.list_agents = lambda: ["core.react", "resource_root.pocketcode.review"]
             engine.get_system_settings = lambda: {
                 "theme_name": "ocean",
                 "workspace_view": "balanced",

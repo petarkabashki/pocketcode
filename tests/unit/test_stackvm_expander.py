@@ -100,7 +100,7 @@ def test_expand_stackvm_source_supports_builtin_shared_or_macro():
 
 def test_expand_stackvm_source_supports_builtin_tool_once_macro():
     result = expand_stackvm_source(
-        '"workspace.echo" [ "{text: ping}" yaml> ] [ "last_tool_result.text" shared@ answer ] tool-once'
+        '"resource_root.pocketcode.echo" [ "{text: ping}" yaml> ] [ "last_tool_result.text" shared@ answer ] tool-once'
     )
 
     assert result.expansion_trace == ["tool-once"]
@@ -108,7 +108,7 @@ def test_expand_stackvm_source_supports_builtin_tool_once_macro():
         ("sym", "last-tool-result"),
         ("sym", "none?"),
         [
-            ("str", "workspace.echo"),
+            ("str", "resource_root.pocketcode.echo"),
             [("str", "{text: ping}"), ("sym", "yaml>")],
             ("sym", "call"),
             ("sym", "tool-request"),

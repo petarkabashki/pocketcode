@@ -21,6 +21,7 @@ from pocketcode.core.markdown_profiles import parse_markdown_front_matter
 from pocketcode.core.discovery_rules import DiscoveryFilter
 from pocketcode.core.markdown_assets import (
     build_markdown_tool_wrapper,
+    compile_markdown_agent_definition,
     compile_markdown_hook_definition,
     compile_markdown_flow_definition,
     compile_markdown_tool_definition,
@@ -29,7 +30,6 @@ from pocketcode.core.markdown_assets import (
 from pocketcode.core.resource_roots import (
     ResourceRoot,
     discover_resource_roots,
-    is_default_resource_root,
     primary_resource_root,
     resource_root_for_path,
     resource_root_namespace,
@@ -39,8 +39,6 @@ from pocketcode.core.tool_conventions import TOOL_MODULE_SUFFIX, iter_convention
 from pocketcode.core.workspace_namespaces import WorkspaceNamespace, namespace_asset_name
 
 logger = logging.getLogger(__name__)
-
-WORKSPACE_NAMESPACE = "workspace"
 _EXECUTABLE_MARKDOWN_KEYS = frozenset(
     {
         "name",
@@ -63,6 +61,38 @@ _EXECUTABLE_MARKDOWN_KEYS = frozenset(
         "vm_file",
         "vm_files",
         "vm_source",
+    }
+)
+
+_SELF_CONTAINED_AGENT_FLOW_KEYS = frozenset(
+    {
+        "execution_mode",
+        "llm_profile",
+        "tools",
+        "tool_files",
+        "prompt_files",
+        "prompts",
+        "handoff_agents",
+        "composite_agents",
+        "module",
+        "entry_fn",
+        "vm_entry",
+        "vm_module",
+        "vm_modules",
+        "vm_file",
+        "vm_files",
+        "vm_source",
+        "pre",
+        "pre_steps",
+        "steps",
+        "exec",
+        "exec_steps",
+        "post",
+        "post_steps",
+        "deterministic_handler",
+        "handler",
+        "handoff_policies",
+        "default_handoff_policy",
     }
 )
 
@@ -133,9 +163,11 @@ class WorkspaceCatalog:
         self._load_workspace_namespace_prompts(namespace_roots)
         self._load_workspace_namespace_tools(namespace_roots)
         self._load_workspace_namespace_programs(namespace_roots)
+        self._load_workspace_namespace_agent_programs(namespace_roots)
 
         self._load_workspace_tools_only()
         self._load_workspace_flows_only()
+        self._load_workspace_executable_agents_only()
         self._validate_loaded_flow_references()
 
         logger.info(
@@ -335,9 +367,9 @@ class WorkspaceCatalog:
                 continue
             name = path.name
             parts = name.split(".")
-            if name.endswith(".agent.md") or name.endswith(".agent.yaml") or name.endswith(".tool.md"):
+            if name.endswith(".agent.yaml") or name.endswith(".tool.md"):
                 continue
-            if name.endswith(".prompt.md"):
+            if name.endswith(".prompt.md") or name.endswith(".agent.md"):
                 if len(parts) < 4:
                     continue
             elif name.endswith(TOOL_MODULE_SUFFIX):
@@ -454,6 +486,34 @@ class WorkspaceCatalog:
                         exc,
                         exc_info=True,
                     )
+
+    def _load_workspace_namespace_agent_programs(
+        self,
+        namespaces: list[WorkspaceNamespace],
+    ) -> None:
+        for namespace in namespaces:
+            for agent_path in sorted(namespace.path.glob("*.agent.md")):
+                if not self._namespace_pack_file_matches(namespace, agent_path, suffix=".agent.md"):
+                    continue
+                if self._catalog_resource_is_ignored(namespace.path, agent_path):
+                    continue
+                default_name = namespace_asset_name(
+                    namespace.path,
+                    agent_path,
+                    suffix=".agent.md",
+                    filename_prefix=namespace.filename_prefix,
+                )
+                if not default_name:
+                    continue
+                self._load_executable_markdown_agent(
+                    agent_path=agent_path,
+                    authoring_namespace=namespace.name,
+                    registration_root=namespace.path,
+                    fallback_dirs=self._workspace_namespace_prompt_fallback_dirs(namespace.path),
+                    default_agent_name=default_name,
+                    default_flow_name=default_name,
+                    target_source="namespace",
+                )
 
     def _load_workspace_root_prompts(self, resource_root: ResourceRoot) -> None:
         resource_filter = self._resource_root_filter(resource_root)
@@ -655,6 +715,10 @@ class WorkspaceCatalog:
                 continue
             self._load_workspace_root_markdown_flow(resource_root, flow_file)
 
+    def _load_workspace_executable_agents_only(self) -> None:
+        for resource_root in self._resource_roots:
+            self._load_workspace_root_executable_agents(resource_root)
+
     def _iter_workspace_namespace_program_paths(self, namespace_root: Path) -> list[Path]:
         return sorted(
             path
@@ -834,12 +898,13 @@ class WorkspaceCatalog:
         flow_file: Path,
     ) -> None:
         default_name = self._workspace_resource_name(flows_root, flow_file.with_suffix(""))
+        namespace_name = resource_root_namespace(resource_root)
         try:
             document = load_markdown_asset_document(
                 flow_file,
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=self.prompts,
-                context_namespace=WORKSPACE_NAMESPACE,
+                context_namespace=namespace_name,
             )
             definition = compile_markdown_flow_definition(document, default_name=default_name)
             flow_name = str(definition.get("name") or default_name).strip() or default_name
@@ -850,18 +915,14 @@ class WorkspaceCatalog:
             )
             self._load_flow_definition_tool_files(
                 definition=definition,
-                namespace_name=WORKSPACE_NAMESPACE,
+                namespace_name=namespace_name,
                 registration_root=resource_root.path,
                 source_dir=flow_file.parent,
-                owner_name=f"{WORKSPACE_NAMESPACE}.{flow_name}",
+                owner_name=f"{namespace_name}.{flow_name}",
             )
 
-            prompt_definition = dict(definition)
-            if "prompt_files" not in prompt_definition and "prompts" in prompt_definition:
-                prompt_definition["prompt_files"] = prompt_definition.get("prompts")
-
             system_prompt, prompt_sources = resolve_prompt_bundle(
-                prompt_definition,
+                definition,
                 base_dir=flow_file.parent,
                 inline_keys=("system_prompt", "prompt"),
                 file_keys=("system_prompt_file", "prompt_file"),
@@ -869,7 +930,7 @@ class WorkspaceCatalog:
                 default_files=[],
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=self.prompts,
-                context_namespace=WORKSPACE_NAMESPACE,
+                context_namespace=namespace_name,
             )
 
             llm_profile = definition.get("llm_profile")
@@ -918,7 +979,7 @@ class WorkspaceCatalog:
                     entry_fn_name=definition.get("entry_fn"),
                     namespace_root=flow_file.parent,
                     agent_name=flow_name,
-                    namespace_name=WORKSPACE_NAMESPACE,
+                    namespace_name=namespace_name,
                 )
                 if flow_instance is None and any(definition.get(k) for k in ("nodes", "mermaid", "graph", "dot")):
                     raise ValueError("Graph flows no longer supported. Use StackVM instead.")
@@ -989,6 +1050,246 @@ class WorkspaceCatalog:
             return
         self._load_workspace_markdown_flow(resource_root, resource_root.path, flow_file)
 
+    def _load_workspace_root_executable_agents(self, resource_root: ResourceRoot) -> None:
+        resource_filter = self._resource_root_filter(resource_root)
+        authoring_namespace = resource_root_namespace(resource_root)
+
+        for agent_path in sorted(resource_root.path.glob("*.agent.md")):
+            if self._is_resource_root_namespace_pack_asset(resource_root.path, agent_path):
+                continue
+            if resource_filter.ignores(agent_path, is_dir=False):
+                continue
+            default_name = self._flat_resource_asset_name(agent_path, suffix=".agent.md")
+            if not default_name:
+                continue
+            self._load_executable_markdown_agent(
+                agent_path=agent_path,
+                authoring_namespace=authoring_namespace,
+                registration_root=resource_root.path,
+                fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                default_agent_name=default_name,
+                default_flow_name=f"agents.{default_name}",
+                target_source="workspace",
+            )
+
+        for agents_root, prefix in self._workspace_agent_roots(resource_root.path):
+            for agent_path in sorted(path for path in agents_root.rglob("*.agent.md") if path.is_file()):
+                if resource_filter.ignores(agent_path, is_dir=False):
+                    continue
+                asset_name = self._workspace_asset_name(agents_root, agent_path, suffix=".agent.md")
+                default_name = self._prefix_asset_name(prefix, asset_name)
+                if not default_name:
+                    continue
+                self._load_executable_markdown_agent(
+                    agent_path=agent_path,
+                    authoring_namespace=authoring_namespace,
+                    registration_root=resource_root.path,
+                    fallback_dirs=self._workspace_prompt_fallback_dirs(),
+                    default_agent_name=default_name,
+                    default_flow_name=f"agents.{default_name}",
+                    target_source="workspace",
+                )
+
+    def _workspace_agent_roots(self, resource_root_path: Path) -> list[tuple[Path, str | None]]:
+        roots: list[tuple[Path, str | None]] = []
+        seen: set[Path] = set()
+
+        agents_root = resource_root_path / "agents"
+        if agents_root.is_dir():
+            resolved = agents_root.resolve()
+            seen.add(resolved)
+            roots.append((agents_root, None))
+
+        for path in sorted(candidate for candidate in resource_root_path.iterdir() if candidate.is_dir()):
+            if not path.name.startswith("agent."):
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            roots.append((path, path.name[len("agent."):].strip() or None))
+
+        return roots
+
+    def _load_executable_markdown_agent(
+        self,
+        *,
+        agent_path: Path,
+        authoring_namespace: str,
+        registration_root: Path,
+        fallback_dirs: tuple[Path, ...],
+        default_agent_name: str,
+        default_flow_name: str,
+        target_source: str,
+    ) -> None:
+        try:
+            document = load_markdown_asset_document(
+                agent_path,
+                fallback_dirs=fallback_dirs,
+                prompt_registry=self.prompts,
+                context_namespace=authoring_namespace,
+            )
+            definition = compile_markdown_agent_definition(document, default_name=default_agent_name)
+            if not self._is_self_contained_agent_candidate(definition):
+                return
+
+            flow_name = str(definition.get("flow") or default_flow_name).strip() or default_flow_name
+            self._apply_adjacent_markdown_resource_defaults(
+                definition=definition,
+                registration_root=registration_root,
+                markdown_path=agent_path,
+            )
+            self._load_flow_definition_tool_files(
+                definition=definition,
+                namespace_name=authoring_namespace,
+                registration_root=registration_root,
+                source_dir=agent_path.parent,
+                owner_name=f"{authoring_namespace}.{flow_name}",
+            )
+            flow_def, target_namespace, local_flow_name = self._build_flow_definition_from_agent_markdown(
+                definition=definition,
+                flow_name=flow_name,
+                authoring_namespace=authoring_namespace,
+                registration_root=registration_root,
+                agent_path=agent_path,
+                target_source=target_source,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed loading executable markdown agent '%s': %s",
+                agent_path,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        try:
+            self.flows.register(target_namespace, local_flow_name, flow_def)
+        except RegistryError as exc:
+            logger.warning(
+                "Executable markdown agent flow '%s.%s' from '%s' collides with an existing registration: %s",
+                target_namespace,
+                local_flow_name,
+                agent_path,
+                exc,
+            )
+
+    def _is_self_contained_agent_candidate(self, definition: Dict[str, Any]) -> bool:
+        return any(definition.get(key) for key in _SELF_CONTAINED_AGENT_FLOW_KEYS)
+
+    def _build_flow_definition_from_agent_markdown(
+        self,
+        *,
+        definition: Dict[str, Any],
+        flow_name: str,
+        authoring_namespace: str,
+        registration_root: Path,
+        agent_path: Path,
+        target_source: str,
+    ) -> tuple[FlowDefinition, str, str]:
+        if "." in flow_name:
+            target_namespace, local_flow_name = flow_name.split(".", 1)
+        else:
+            target_namespace, local_flow_name = authoring_namespace, flow_name
+
+        system_prompt, prompt_sources = resolve_prompt_bundle(
+            definition,
+            base_dir=agent_path.parent,
+            inline_keys=("inline_prompt", "prompt", "system_prompt"),
+            file_keys=("system_prompt_file", "prompt_file"),
+            files_key="prompt_files",
+            default_files=[],
+            fallback_dirs=self._workspace_prompt_fallback_dirs(),
+            prompt_registry=self.prompts,
+            context_namespace=authoring_namespace,
+        )
+        llm_profile = definition.get("llm_profile")
+        tools = coerce_str_list(definition.get("tools"))
+        handoff_agents = coerce_str_list(definition.get("handoff_agents"))
+        composite_agents = coerce_str_list(definition.get("composite_agents"))
+        execution_mode = str(
+            definition.get("execution_mode")
+            or ("vm" if any(definition.get(key) for key in ("vm_source", "vm_file", "vm_module", "vm_files", "vm_modules")) else "llm")
+        ).strip() or "llm"
+        deterministic_handler = definition.get("deterministic_handler") or definition.get("handler")
+        pre_handlers = list(
+            dict.fromkeys(
+                coerce_str_list(definition.get("pre")) + coerce_str_list(definition.get("pre_steps"))
+            )
+        )
+        step_handlers = list(
+            dict.fromkeys(
+                coerce_str_list(definition.get("steps"))
+                + coerce_str_list(definition.get("exec"))
+                + coerce_str_list(definition.get("exec_steps"))
+            )
+        )
+        post_handlers = list(
+            dict.fromkeys(
+                coerce_str_list(definition.get("post")) + coerce_str_list(definition.get("post_steps"))
+            )
+        )
+
+        raw_handoff_policies = definition.get("handoff_policies", {})
+        if not isinstance(raw_handoff_policies, dict):
+            raw_handoff_policies = {}
+        handoff_policies = {
+            str(target): dict(policy)
+            for target, policy in raw_handoff_policies.items()
+            if isinstance(target, str) and isinstance(policy, dict)
+        }
+        raw_default_handoff_policy = definition.get("default_handoff_policy", {})
+        if not isinstance(raw_default_handoff_policy, dict):
+            raw_default_handoff_policy = {}
+
+        flow_instance = None
+        if execution_mode.lower() != "vm":
+            flow_instance = self._load_agent_flow(
+                module_ref=definition.get("module"),
+                entry_fn_name=definition.get("entry_fn"),
+                namespace_root=agent_path.parent,
+                agent_name=local_flow_name,
+                namespace_name=authoring_namespace,
+            )
+            if flow_instance is None and any(definition.get(k) for k in ("nodes", "mermaid", "graph", "dot")):
+                raise ValueError("Graph flows no longer supported. Use StackVM instead.")
+
+        flow_def = FlowDefinition(
+            name=local_flow_name,
+            description=str(definition.get("description", "")),
+            llm_profile=str(llm_profile) if llm_profile else None,
+            tools=[str(item) for item in tools if isinstance(item, str)],
+            handoff_agents=[str(item) for item in handoff_agents if isinstance(item, str)],
+            execution_mode=execution_mode,
+            deterministic_handler=str(deterministic_handler).strip() if deterministic_handler else None,
+            composite_agents=[str(item) for item in composite_agents if isinstance(item, str)],
+            system_prompt=system_prompt,
+            prompt_sources=prompt_sources,
+            pre_handlers=pre_handlers,
+            step_handlers=step_handlers,
+            post_handlers=post_handlers,
+            handoff_policies=handoff_policies,
+            default_handoff_policy=dict(raw_default_handoff_policy),
+            module=str(definition["module"]).strip() if definition.get("module") else None,
+            entry_fn=str(definition["entry_fn"]).strip() if definition.get("entry_fn") else None,
+            flow_instance=flow_instance,
+            vm_entry=str(definition["vm_entry"]).strip() if definition.get("vm_entry") else None,
+            vm_module=str(definition["vm_module"]).strip() if definition.get("vm_module") else None,
+            vm_modules=coerce_str_list(definition.get("vm_modules")),
+            vm_file=str(definition["vm_file"]).strip() if definition.get("vm_file") else None,
+            vm_files=coerce_str_list(definition.get("vm_files")),
+            vm_source=str(definition["vm_source"]).strip() if definition.get("vm_source") else None,
+            metadata={
+                **dict(definition.get("metadata") or {}),
+                "namespace": authoring_namespace,
+                "namespace_root": str(registration_root),
+                "markdown_path": str(agent_path.resolve()),
+                "agent_markdown_path": str(agent_path.resolve()),
+                "agent_source": target_source,
+            },
+        )
+        return flow_def, target_namespace, local_flow_name
+
     def _apply_adjacent_markdown_resource_defaults(
         self,
         *,
@@ -1000,7 +1301,7 @@ class WorkspaceCatalog:
         if not base_name:
             return
 
-        prompt_keys = ("prompt_file", "system_prompt_file", "prompt_files", "prompts")
+        prompt_keys = ("prompt_file", "system_prompt_file", "prompt_files")
         if not any(definition.get(key) for key in prompt_keys):
             prompt_candidate = markdown_path.with_name(f"{base_name}.prompt.md")
             if prompt_candidate.is_file() and not self._catalog_resource_is_ignored(registration_root, prompt_candidate):
@@ -1399,19 +1700,8 @@ class WorkspaceCatalog:
         if not isinstance(composite_agents, list):
             composite_agents = []
 
-        if definition.get("tool_packs"):
-            logger.warning(
-                "Namespace '%s' agent '%s' uses deprecated 'tool_packs'. Please migrate to 'tools'.",
-                namespace_name,
-                flow_name,
-            )
-
-        prompt_definition = dict(definition)
-        if "prompt_files" not in prompt_definition and "prompts" in prompt_definition:
-            prompt_definition["prompt_files"] = prompt_definition.get("prompts")
-
         system_prompt, prompt_sources = resolve_prompt_bundle(
-            prompt_definition,
+            definition,
             base_dir=namespace_root,
             inline_keys=("system_prompt", "prompt"),
             file_keys=("system_prompt_file", "prompt_file"),
@@ -1619,7 +1909,7 @@ class WorkspaceCatalog:
 
         Returns the Flow instance if the factory is found and callable, ``None`` otherwise.
         On any exception, logs at ERROR and returns ``None`` (agent still registers
-        without a flow_instance, using the legacy LLM path).
+        without a flow_instance, using the default LLM path).
         """
         if not module_ref or not entry_fn_name:
             return None
@@ -1701,8 +1991,6 @@ class WorkspaceCatalog:
                 return True
 
         prompt_files = definition.get("prompt_files")
-        if not prompt_files and isinstance(definition.get("prompts"), list):
-            prompt_files = definition.get("prompts")
         if isinstance(prompt_files, list):
             for prompt_ref in prompt_files:
                 if not isinstance(prompt_ref, str) or not prompt_ref.strip():
@@ -1752,17 +2040,14 @@ class WorkspaceCatalog:
         return self._resource_root_filters[resource_root.path.resolve()]
 
     def _resource_root_namespaces(self, resource_root: ResourceRoot) -> tuple[str, ...]:
-        namespaces = [resource_root_namespace(resource_root)]
-        if is_default_resource_root(resource_root):
-            namespaces.append(WORKSPACE_NAMESPACE)
-        return tuple(namespaces)
+        return (resource_root_namespace(resource_root),)
 
     def _is_resource_root_namespace_pack_asset(self, root: Path, asset_path: Path) -> bool:
         prefixes = self._resource_root_namespace_packs.get(root.resolve())
         if not prefixes:
             return False
         name = asset_path.name
-        if name.endswith(".agent.md") or name.endswith(".agent.yaml"):
+        if name.endswith(".agent.yaml"):
             return False
         first_segment = name.split(".", 1)[0].strip()
         if first_segment not in prefixes:

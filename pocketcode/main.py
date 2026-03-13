@@ -21,6 +21,11 @@ from pocketcode.cli.runtime_events import format_runtime_event
 from pocketcode.cli.user_interaction import request_interaction_from_console
 from pocketcode.cli.command_handler import handle_command
 from pocketcode.config.loader import load_settings, resolve_settings_path
+from pocketcode.core.workspace_migration import (
+    WorkspaceMigrationRequiredError,
+    ensure_workspace_migration,
+    migrate_workspace,
+)
 from pocketcode.core.engine import PocketCodeEngine
 
 logger = logging.getLogger(__name__)
@@ -366,15 +371,13 @@ def run() -> None:
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="Pocketcode AI Assistant CLI")
-    parser.add_argument(
-        "--config",
-        default=None,
-        help=(
-            "Deprecated. Pocketcode always loads config from ./pocketcode.yml in the workspace root."
-        ),
-    )
     parser.add_argument("--flow", help="Initial flow name override.")
     parser.add_argument("--llm", help="Global LLM profile override.")
+    parser.add_argument(
+        "--migrate-workspace",
+        action="store_true",
+        help="Rewrite unsupported workspace state into canonical Pocketcode forms and exit.",
+    )
     parser.add_argument(
         "--prompt",
         help="Run one request non-interactively and exit.",
@@ -407,10 +410,20 @@ def run() -> None:
             force_basic_cli = True
 
     try:
-        if args.config:
-            print("Ignoring --config. Pocketcode always loads configuration from ./pocketcode.yml.")
-        resolved_config_path = resolve_settings_path(args.config, os.getcwd())
+        if args.prompt and args.prompt.strip() == "/migrate workspace":
+            report = migrate_workspace(os.getcwd())
+            print(json.dumps(report.as_dict(), indent=2, sort_keys=False))
+            return
+        if args.migrate_workspace:
+            report = migrate_workspace(os.getcwd())
+            print(json.dumps(report.as_dict(), indent=2, sort_keys=False))
+            return
+        ensure_workspace_migration(os.getcwd(), auto_apply=True)
+        resolved_config_path = resolve_settings_path(None, os.getcwd())
         config = load_settings(settings_path=resolved_config_path, workspace_root=os.getcwd())
+    except WorkspaceMigrationRequiredError as exc:
+        print(str(exc))
+        sys.exit(1)
     except Exception as exc:
         failed_path = os.path.join(os.getcwd(), "pocketcode.yml")
         print(f"Failed to load configuration from '{failed_path}': {exc}")
@@ -483,7 +496,7 @@ def run() -> None:
         return
 
     try:
-        from pocketcode.cli.textual_app import run_textual_cli
+        from pocketcode.cli.textual_ui import run_textual_cli
     except ModuleNotFoundError as exc:
         if getattr(exc, "name", "") == "textual":
             print("Interactive mode requires the 'textual' package.")

@@ -4,12 +4,12 @@ import logging
 
 from textual import events
 from textual.widget import Widget
-from textual.widgets import Button, Input, OptionList, RichLog, Select, SelectionList, Switch, TextArea
+from textual.widgets import Button, Input, OptionList, RichLog, SelectionList
 
 from pocketcode.cli.user_interaction import interaction_placeholder
 from pocketcode.core.user_interaction import normalize_interaction_request
 
-from .shared import LOADING_OPTION, SKILL_GROUP_PREFIX
+from .shared import LOADING_OPTION
 
 logger = logging.getLogger(__name__)
 
@@ -416,17 +416,7 @@ class TextualAppInteractionMixin:
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
-        if button_id == "open-view-button":
-            self.action_pick_view()
-        elif button_id == "control-center-button":
-            self.action_pick_asset()
-        elif button_id in {"edit-asset-button", "edit-asset-button-secondary"}:
-            self.action_edit_asset()
-        elif button_id in {"clone-asset-button", "clone-asset-button-secondary"}:
-            self.action_clone_asset()
-        elif button_id == "reload-button":
-            self.action_reload_runtime()
-        elif button_id == "debug-next-button":
+        if button_id == "debug-next-button":
             self.action_debug_next()
         elif button_id == "debug-continue-button":
             self.action_debug_continue()
@@ -448,53 +438,6 @@ class TextualAppInteractionMixin:
             self._hide_inline_debugger_breakpoint_editor()
         elif button_id in INLINE_PROMPT_SUBMIT_IDS:
             self._submit_inline_pending_input()
-        elif button_id == "inspector-skill-save-button":
-            self._save_inspector_skill_selection()
-        elif button_id == "inspector-tool-save-button":
-            self._save_inspector_tool_selection()
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if self._syncing_controls:
-            return
-
-        if event.select.value != event.value:
-            return
-
-        widget_id = event.select.id or ""
-        value = str(event.value)
-        if value == LOADING_OPTION:
-            return
-        try:
-            if widget_id == "workspace-view-select":
-                self._apply_workspace_view_selection(value)
-            elif widget_id == "theme-select":
-                self._apply_theme_selection(value)
-            elif widget_id == "profile-select":
-                self._apply_profile_selection(value)
-            elif widget_id == "llm-select":
-                self._apply_llm_selection(value)
-            elif widget_id == "session-confirm-select":
-                self._apply_session_confirmation_selection(value)
-            elif widget_id == "debugger-inline-type-select":
-                self._set_inline_debugger_breakpoint_type(value)
-            self._commit_engine_ui_update()
-        except Exception as exc:
-            self._write_error(str(exc))
-            self._commit_engine_ui_update()
-
-    def on_switch_changed(self, event: Switch.Changed) -> None:
-        if self._syncing_controls:
-            return
-
-        switch_id = event.switch.id or ""
-        if switch_id == "auto-confirm-switch":
-            if hasattr(self._engine, "set_last_used_auto_confirm_tools"):
-                self._engine.set_last_used_auto_confirm_tools(bool(event.value))
-            else:
-                self._engine.auto_confirm_tools = bool(event.value)
-            state = "enabled" if event.value else "disabled"
-            self._write_info(f"Auto-confirm tools {state}.")
-            self._commit_engine_ui_update()
 
     def on_key(self, event) -> None:
         if event.key != "space" or not isinstance(self.focused, SelectionList):
@@ -519,22 +462,6 @@ class TextualAppInteractionMixin:
                 self._inline_prompt_selected_value = str(option_id)
             self._commit_ui_update()
             return
-        if event.option_list.id != "profile-list":
-            return
-        option_index = getattr(event, "option_index", getattr(event, "index", None))
-        if option_index is None or option_index >= len(self._profile_list_names):
-            return
-        profile_name = self._profile_list_names[option_index]
-        try:
-            if hasattr(self._engine, "set_last_used_active_profile"):
-                self._engine.set_last_used_active_profile(profile_name)
-            else:
-                self._engine.set_active_agent_profile(profile_name)
-            self._write_info(f"Activated agent profile: {profile_name}")
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._commit_engine_ui_update()
 
     def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
         list_id = event.selection_list.id or ""
@@ -550,107 +477,16 @@ class TextualAppInteractionMixin:
                 for label, value, _ in self._inline_prompt_checklist_options
             )
             self._commit_ui_update()
-            return
-        if list_id not in {"skill-list", "inspector-tools"} or event.selection_list.disabled:
-            return
-        option_index = getattr(event, "selection_index", getattr(event, "index", None))
-        if option_index is None:
-            return
-        option = event.selection_list.get_option_at_index(option_index)
-        value = str(option.value)
-        if value == LOADING_OPTION:
-            return
-        if list_id == "inspector-tools":
-            self._handle_inspector_tool_toggle(event, value)
-            return
-        skill_groups = self._skill_group_members(self._engine.list_skills()) if hasattr(self._engine, "list_skills") else {}
-        try:
-            if self._is_skill_group_value(value):
-                group_name = value[len(SKILL_GROUP_PREFIX):]
-                member_values = skill_groups.get(group_name, ())
-                if value in event.selection_list.selected:
-                    for member_value in member_values:
-                        self._engine.enable_skill(member_value)
-                    self._write_info(f"Enabled skill group: {group_name} ({len(member_values)} skills).")
-                else:
-                    for member_value in member_values:
-                        self._engine.disable_skill(member_value)
-                    self._write_info(f"Disabled skill group: {group_name} ({len(member_values)} skills).")
-            elif value in event.selection_list.selected:
-                self._engine.enable_skill(value)
-                self._write_info(f"Enabled skill: {value}")
-            else:
-                self._engine.disable_skill(value)
-                self._write_info(f"Disabled skill: {value}")
-            active_profile = self._engine.active_agent_profile
-            selected_skills = sorted(self._active_skill_name_set())
-            if active_profile is not None and hasattr(self._engine, "set_last_used_profile_skills"):
-                self._engine.set_last_used_profile_skills(active_profile.name, selected_skills)
-            elif hasattr(self._engine, "set_last_used_skills"):
-                self._engine.set_last_used_skills(selected_skills)
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._commit_engine_ui_update(refresh_suggestions=True)
-
-    def _handle_inspector_tool_toggle(self, event: SelectionList.SelectionToggled, value: str) -> None:
-        active_profile = self._engine.active_agent_profile
-        if active_profile is None:
-            self._write_error("No active agent profile selected.")
-            self._commit_engine_ui_update()
-            return
-        current_agent = str(getattr(active_profile, "agent", "") or self._engine.get_current_agent() or "")
-        available_tools, _, grouped_values, _ = self._build_tool_picker_model(
-            agent_name=current_agent,
-            active_profile=active_profile,
-        )
-        if not available_tools:
-            self._write_error("No tools are available for the active agent.")
-            self._commit_engine_ui_update()
-            return
-
-        selected_tools = set(available_tools if active_profile.tools is None else active_profile.tools)
-        try:
-            if self._is_skill_group_value(value):
-                group_name = value[len(SKILL_GROUP_PREFIX):]
-                member_values = grouped_values.get(value, ())
-                if value in event.selection_list.selected:
-                    selected_tools.update(member_values)
-                    self._write_info(f"Enabled tool group: {group_name} ({len(member_values)} tools).")
-                else:
-                    selected_tools.difference_update(member_values)
-                    self._write_info(f"Disabled tool group: {group_name} ({len(member_values)} tools).")
-            elif value in event.selection_list.selected:
-                selected_tools.add(value)
-                self._write_info(f"Enabled tool: {value}")
-            else:
-                selected_tools.discard(value)
-                self._write_info(f"Disabled tool: {value}")
-            tools = None if len(selected_tools) >= len(available_tools) else sorted(selected_tools)
-            self._engine.set_last_used_profile_tools(active_profile.name, tools)
-        except Exception as exc:
-            self._write_error(str(exc))
-        finally:
-            self._commit_engine_ui_update(refresh_suggestions=True)
+        return
 
     def action_pick_view(self) -> None:
         self._open_view_picker()
 
-    def action_edit_asset(self) -> None:
-        self._open_edit_asset_picker()
-
-    def action_clone_asset(self) -> None:
-        self._open_clone_asset_picker()
-
-    def action_pick_asset(self) -> None:
-        self._open_asset_picker()
-
     def action_toggle_right_panel(self) -> None:
         next_visible = not self._cli_state.right_panel_visible
         with self._batch_ui_update():
-            self._set_cli_workspace_view("balanced")
             self._set_cli_right_panel_visible(next_visible)
-            self._write_info(f"Inspector panel {'shown' if next_visible else 'hidden'}.")
+            self._write_info(f"Details panel {'shown' if next_visible else 'hidden'}.")
 
     def action_reload_runtime(self) -> None:
         try:

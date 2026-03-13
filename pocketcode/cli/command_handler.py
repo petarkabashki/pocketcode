@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import shlex
 from typing import Any, Dict, Optional
@@ -7,17 +8,17 @@ from typing import Any, Dict, Optional
 from pocketcode.core.engine import PocketCodeEngine
 from pocketcode.cli.stackvm_commands import handle_stackvm_command, print_stackvm_help
 from pocketcode.core.command_runtime import CommandResult
+from pocketcode.core.workspace_migration import migrate_workspace
 
 logger = logging.getLogger(__name__)
 
 TEXTUAL_ONLY_COMMANDS = {"/copy", "/copy-all", "/view"}
-TEXTUAL_VIEWS = ("chat", "control", "run")
+TEXTUAL_VIEWS = ("chat", "run")
 TEXTUAL_COMMAND_SUGGESTIONS = [
     "/view",
     "/view list",
     "/view show",
     "/view switch chat",
-    "/view switch control",
     "/view switch run",
 ]
 
@@ -35,10 +36,10 @@ BASE_COMMAND_SUGGESTIONS = [
     "/llms",
     "/llm",
     "/llm-flow",
-    "/llm-agent",
     "/llm-handoff",
     "/tools",
     "/reload",
+    "/migrate",
     "/debug",
     "/stop",
     "/cancel",
@@ -69,7 +70,6 @@ BASE_COMMAND_SUGGESTIONS = [
     "/ap",
     "/lm",
     "/lf",
-    "/la",
     "/lh",
     "/st",
     "/c",
@@ -211,7 +211,7 @@ def _handle_view_command(args: list[str], cli_context: Dict[str, Any], interface
 
     target_view = args[1].lower() if subcommand in {"switch", "go"} and len(args) > 1 else subcommand
     if target_view not in TEXTUAL_VIEWS:
-        print("Usage: /view [list|show|switch <chat|control|run>]")
+        print("Usage: /view [list|show|switch <chat|run>]")
         return None
     if not callable(set_view):
         print("Textual view switching is unavailable.")
@@ -283,6 +283,15 @@ def handle_command(
         print("Reloaded resource roots, namespaces, agents, tools, skills, and LLM profile mappings.")
         return None
 
+    if command == "/migrate":
+        if len(args) != 1 or args[0].strip().lower() != "workspace":
+            print("Usage: /migrate workspace")
+            return None
+        report = migrate_workspace(getattr(engine, "_workspace_root"))
+        engine.reload()
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=False))
+        return None
+
     if command == "/debug":
         return _handle_debug_command(args=args, cli_context=cli_context, interface_name=interface_name, active_run=active_run)
 
@@ -344,7 +353,6 @@ def handle_command(
         "/flow",
         "/llm",
         "/llm-flow",
-        "/llm-agent",
         "/llm-handoff",
         "/set",
     }:
@@ -397,7 +405,6 @@ def _normalize_command(command: str) -> str:
         "/ap": "/agent",
         "/lm": "/llm",
         "/lf": "/llm-flow",
-        "/la": "/llm-agent",
         "/lh": "/llm-handoff",
     }
     return aliases.get(command, command)
@@ -560,8 +567,6 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
             return None
         command = f"/{args[0].lower()}"
         args = args[1:]
-        if command == "/llm-agent":
-            command = "/llm-flow"
 
     if command == "/flow":
         if not args:
@@ -616,7 +621,7 @@ def _handle_set_command(command: str, args: list[str], engine: PocketCodeEngine)
             print(f"Error: {exc}")
         return None
 
-    if command in {"/llm-flow", "/llm-agent"}:
+    if command == "/llm-flow":
         if len(args) < 2:
             print("Usage: /llm-flow <flow_name> <profile_name|none>")
             return None
@@ -901,6 +906,7 @@ Pocketcode Commands:
   /debug <request text>          Run one request under the interactive debugger.
   /prompts                       List registered prompts.
   /skill <cmd> [opts]            Inspect runtime skills. Run '/skill help'.
+  /migrate workspace             Rewrite unsupported workspace state into canonical forms.
   /reload                        Reload resource roots and runtime catalogs.
   /stop, /cancel                 Request cancellation of the active run.
   /status [verbose|steps]        Show runtime status and optional step trace.
@@ -911,7 +917,7 @@ Pocketcode Commands:
   /stackvm <cmd> [opts]          Manage StackVM flows, scripts, and agents. Run '/stackvm help'.
   /exit, /quit                   Exit Pocketcode.
 
-Compatibility aliases:
+Command aliases:
   /flows     -> /list flows
   /prompts   -> /list prompts
   /skills    -> /list skills
@@ -920,7 +926,6 @@ Compatibility aliases:
   /tools     -> /list tools
   /llm       -> /set llm
   /llm-flow  -> /set llm-flow
-  /llm-agent -> /set llm-flow
   /llm-handoff -> /set llm-handoff
 
 Shortcut aliases:
@@ -929,7 +934,6 @@ Shortcut aliases:
   /ap   /agent
   /lm   /llm
   /lf   /llm-flow
-  /la   /llm-flow
   /lh   /llm-handoff
   /st   /status
     /c    /cancel
@@ -948,12 +952,9 @@ Textual-only commands:
 Textual UI shortcuts:
   Tab                           Complete current prompt input.
   F2                            Open previous main-input entries and load one back into the prompt.
-  F5                            Open the global view selector (Chat, Control, Run).
-  F3                            Open the popup edit selector (agent, LLM, tools, tool policies, flow assets, tool assets).
-  F4                            Open the popup clone selector (agent, LLM, flow assets, tool assets).
-  F6                            Open the Control Center (agent, LLM, skills, tools, policies, presets, confirm, system settings).
+  F5                            Open the global view selector (Chat, Run).
   Ctrl+P / Ctrl+N               Cycle backward or forward through previous main-input entries.
-  F10                           Toggle the right inspector panel.
+  F10                           Toggle the right details panel.
   Ctrl+Shift+A                  Copy full response console output.
   Ctrl+Y                        Copy last assistant response.
   Ctrl+Q                        Quit Textual UI.
@@ -1294,7 +1295,7 @@ def _handle_agent_command(
                 print("No agent is currently active.")
                 return None
         print(f"Agent: {profile.name}")
-        print(f"  Flow     : {profile.agent}")
+        print(f"  Flow     : {profile.flow}")
         print(f"  Desc     : {profile.description or '\u2014'}")
         print(f"  LLM      : {profile.llm_profile or '(inherit)'}")
         print(f"  Tools    : {', '.join(profile.tools) if profile.tools is not None else '(all)'}")

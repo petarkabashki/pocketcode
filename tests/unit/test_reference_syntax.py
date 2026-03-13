@@ -1,7 +1,6 @@
 from pocketcode.core.reference_syntax import (
     parse_prompt_reference,
     parse_reference,
-    normalize_registry_reference_compat,
     typed_reference_kind,
 )
 
@@ -18,7 +17,7 @@ class TestParseReference:
         assert reference.as_registry_key() == "core.read_file"
         assert reference.as_typed() == "tool:core.read_file"
 
-    def test_normalizes_legacy_and_hash_forms(self):
+    def test_normalizes_old_hash_and_typed_forms(self):
         reference = parse_reference("prompt:resource_root.pocketcode#review", allowed_kinds={"prompt"})
 
         assert reference.kind == "prompt"
@@ -69,9 +68,11 @@ class TestTypedReferenceKind:
         assert typed_reference_kind("agent:core.react") == "agent"
 
 
-class TestCompatibilityNormalization:
-    def test_compat_normalizer_keeps_legacy_normalization(self):
-        assert normalize_registry_reference_compat("core::read_file", allowed_kinds={"tool"}) == "core.read_file"
-
-    def test_compat_normalizer_preserves_invalid_typed_input_for_callers(self):
-        assert normalize_registry_reference_compat("prompt:core.review", allowed_kinds={"tool"}) == "prompt:core.review"
+class TestStrictNormalization:
+    def test_rejects_double_colon_references(self):
+        try:
+            parse_reference("core::read_file", allowed_kinds={"tool"})
+        except ValueError as exc:
+            assert "unsupported '::' separators" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for unsupported :: separator")

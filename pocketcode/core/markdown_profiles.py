@@ -22,7 +22,12 @@ from pocketcode.core.reference_syntax import (
     validate_prompt_source,
     validate_registry_reference,
 )
-from pocketcode.core.resource_roots import ResourceRoot, discover_resource_roots, primary_resource_root
+from pocketcode.core.resource_roots import (
+    ResourceRoot,
+    discover_resource_roots,
+    primary_resource_root,
+    resource_root_namespace,
+)
 from pocketcode.core.tool_conventions import iter_tool_module_files
 
 logger = logging.getLogger(__name__)
@@ -258,25 +263,11 @@ class SkillManager:
 
     def _iter_skill_dirs(self, resource_root: ResourceRoot) -> list[Path]:
         candidates: list[Path] = []
-        seen: set[Path] = set()
 
         skills_dir = resource_root.path / "skills"
         if skills_dir.is_dir():
             for path in sorted(candidate for candidate in skills_dir.iterdir() if candidate.is_dir()):
-                resolved = path.resolve()
-                if resolved in seen:
-                    continue
-                seen.add(resolved)
                 candidates.append(path)
-
-        for path in sorted(candidate for candidate in resource_root.path.iterdir() if candidate.is_dir()):
-            if not path.name.startswith("skill."):
-                continue
-            resolved = path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            candidates.append(path)
 
         return candidates
 
@@ -295,11 +286,14 @@ class SkillManager:
     def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
         return (self._primary_resource_root.path / "prompts",)
 
+    def _default_context_namespace(self) -> str:
+        return resource_root_namespace(self._primary_resource_root)
+
     def _qualify_registry_reference_or_raise(self, registry: Any, reference: str, *, field_name: str) -> str:
         if registry is None:
             return reference
         try:
-            return registry.qualify(reference, context_namespace="workspace")
+            return registry.qualify(reference, context_namespace=self._default_context_namespace())
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"{field_name} could not be resolved: {reference} ({exc})") from exc
 
@@ -311,7 +305,7 @@ class SkillManager:
                 resolve_prompt_reference(
                     prompt_ref,
                     prompt_registry=self._prompt_registry,
-                    context_namespace="workspace",
+                    context_namespace=self._default_context_namespace(),
                 )
             except Exception as exc:  # noqa: BLE001
                 raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
@@ -322,7 +316,7 @@ class SkillManager:
                 prompt_file=prompt_ref,
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=self._prompt_registry,
-                context_namespace="workspace",
+                context_namespace=self._default_context_namespace(),
             )
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc

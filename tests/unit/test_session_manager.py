@@ -10,14 +10,14 @@ class TestSessionManagerScaffold:
 
         record = manager.create_session(
             state={
-                "active_agent": "core::agent",
+                "active_agent": "core.agent",
                 "debugger_breakpoints": ["until tool core.write_file"],
             }
         )
         loaded = manager.load_session(record.session_id)
 
         assert loaded.session_id == record.session_id
-        assert loaded.active_agent == "core::agent"
+        assert loaded.active_agent == "core.agent"
         assert loaded.debugger_breakpoints == ["until tool core.write_file"]
         assert manager.storage_dir == tmp_path / ".pocketstate" / "sessions"
 
@@ -57,12 +57,12 @@ class TestSessionHistoryLifecycle:
 
         updated = manager.update_session(
             record.session_id,
-            active_agent="core::review",
+            active_agent="core.review",
             active_profile="review.safe",
             enabled_skills=["python-testing"],
         )
 
-        assert updated.active_agent == "core::review"
+        assert updated.active_agent == "core.review"
         assert updated.active_profile == "review.safe"
         assert updated.enabled_skills == ["python-testing"]
 

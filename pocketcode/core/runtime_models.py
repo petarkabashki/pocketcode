@@ -83,8 +83,8 @@ class CompositeAgent:
         Absent keys mean "no opinion at this tier". Default ``{}``.
     source : str
         Provenance: ``"synthesised"``, ``"namespace"``, or ``"workspace"``.
-        ``"namespace"`` is the current compatibility label for non-workspace
-        resource-root assets.
+        ``"namespace"`` marks synthesized overlays backed by configured
+        namespace roots and non-workspace resource roots.
     source_path : Path | None
         Absolute path to the flat Markdown or YAML profile file. ``None`` for
         synthesised and non-workspace resource-root-backed agents.
@@ -104,16 +104,6 @@ class CompositeAgent:
     tool_confirmation: Dict[str, Any] = field(default_factory=dict)
     source: str = "synthesised"
     source_path: Optional[Path] = None
-
-    @property
-    def agent(self) -> str:
-        """Backward-compatible alias for the target flow name."""
-        return self.flow
-
-    @agent.setter
-    def agent(self, value: str) -> None:
-        self.flow = value
-
 
 @dataclass
 class FlowDefinition:

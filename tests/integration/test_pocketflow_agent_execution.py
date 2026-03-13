@@ -65,11 +65,11 @@ def test_pocketflow_agent_execution():
 
 # ---------------------------------------------------------------------------
 # SC-004: Full round-trip handoff sequence
-# coder::coder → architect::architect → coder::coder
+# coder.coder → architect.architect → coder.coder
 # ---------------------------------------------------------------------------
 
 class _coderNode(Node):
-    """Simulates coder::coder: first turn hands off to architect, second turn finalizes."""
+    """Simulates coder.coder: first turn hands off to architect, second turn finalizes."""
 
     def exec(self, prep_res: Any) -> str:
         return "coder-exec"
@@ -91,7 +91,7 @@ class _coderNode(Node):
 
 
 class _ArchitectNode(Node):
-    """Simulates architect::architect: produces a final answer and returns."""
+    """Simulates architect.architect: produces a final answer and returns."""
 
     def exec(self, prep_res: Any) -> str:
         return "arch-exec"
@@ -103,8 +103,8 @@ class _ArchitectNode(Node):
 
 def test_sc004_handoff_roundtrip():
     """
-    SC-004: Verify coder::coder → architect::architect → coder::coder round-trip
-    completes without error using fully-qualified legacy `namespace::agent` handoff references.
+    SC-004: Verify coder.coder → architect.architect → coder.coder round-trip
+    completes without error using canonical dotted handoff references.
     """
     catalog = MagicMock(spec=WorkspaceCatalog)
     llm_router = MagicMock(spec=LlmRouter)
@@ -117,7 +117,7 @@ def test_sc004_handoff_roundtrip():
         runtime_config={},
     )
 
-    # Build a real NamespaceRegistry so that :: notation resolves correctly.
+    # Build a real NamespaceRegistry so dotted qualification resolves correctly.
     agents: NamespaceRegistry[AgentDefinition] = NamespaceRegistry()
 
     coder_agent = AgentDefinition(
@@ -321,10 +321,10 @@ def test_stackvm_agent_execution_with_builtin_tool_once_macro():
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
     tool_runtime.describe_tools.return_value = [
-        {"name": "workspace.echo", "description": "Echo text", "schema": {"type": "object"}}
+        {"name": "resource_root.pocketcode.echo", "description": "Echo text", "schema": {"type": "object"}}
     ]
     tool_runtime.execute_tool.return_value = {"success": True, "text": "echoed from tool"}
-    catalog.resolve_tools_for_agent.return_value = ["workspace.echo"]
+    catalog.resolve_tools_for_agent.return_value = ["resource_root.pocketcode.echo"]
 
     runtime = AgentRuntime(
         catalog=catalog,
@@ -337,9 +337,9 @@ def test_stackvm_agent_execution_with_builtin_tool_once_macro():
         name="vm-tool-once-agent",
         execution_mode="vm",
         vm_source=(
-            '"workspace.echo" [ "{text: ping}" yaml> ] [ "last_tool_result.text" shared@ answer ] tool-once'
+            '"resource_root.pocketcode.echo" [ "{text: ping}" yaml> ] [ "last_tool_result.text" shared@ answer ] tool-once'
         ),
-        tools=["workspace.echo"],
+        tools=["resource_root.pocketcode.echo"],
         metadata={},
     )
 
@@ -621,10 +621,10 @@ def test_stackvm_agent_tool_roundtrip():
     llm_router.default_profile_name = "default"
     tool_runtime = MagicMock(spec=ToolRuntime)
     tool_runtime.describe_tools.return_value = [
-        {"name": "workspace.echo", "description": "Echo text", "schema": {"type": "object"}}
+        {"name": "resource_root.pocketcode.echo", "description": "Echo text", "schema": {"type": "object"}}
     ]
     tool_runtime.execute_tool.return_value = {"success": True, "text": "echoed from tool"}
-    catalog.resolve_tools_for_agent.return_value = ["workspace.echo"]
+    catalog.resolve_tools_for_agent.return_value = ["resource_root.pocketcode.echo"]
 
     runtime = AgentRuntime(
         catalog=catalog,
@@ -636,8 +636,8 @@ def test_stackvm_agent_tool_roundtrip():
     agent_def = AgentDefinition(
         name="vm-tool-agent",
         execution_mode="vm",
-        vm_source='last-tool-result none? [ "workspace.echo" "text: ping" yaml> tool-request ] [ "last_tool_result.text" shared@ answer ] if',
-        tools=["workspace.echo"],
+        vm_source='last-tool-result none? [ "resource_root.pocketcode.echo" "text: ping" yaml> tool-request ] [ "last_tool_result.text" shared@ answer ] if',
+        tools=["resource_root.pocketcode.echo"],
         metadata={},
     )
 
@@ -656,7 +656,7 @@ def test_stackvm_agent_tool_roundtrip():
     assert shared_store.get("final_output") == "echoed from tool"
     warnings = shared_store.get("last_vm_validation_warnings")
     assert isinstance(warnings, list) and len(warnings) == 1
-    assert warnings[0]["code"] == "legacy-tool-loop"
+    assert warnings[0]["code"] == "manual-tool-loop"
     assert warnings[0]["message"] == (
         "StackVM source uses the manual 'last-tool-result none?' tool loop pattern. "
         "Prefer the built-in 'tool-once' macro for tool-first flows."
@@ -885,7 +885,7 @@ def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt
     )
 
     vm_agent = AgentDefinition(
-        name="vm-legacy-prompt-route-agent",
+        name="vm-manual-prompt-route-agent",
         execution_mode="vm",
         vm_source=(
             '"{kind: buttons, prompt: Choose action, options: [{id: approve, label: Approve, value: approve}, '
@@ -895,10 +895,10 @@ def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt
         metadata={},
     )
 
-    catalog.agents = {"vm-legacy-prompt-route-agent": vm_agent}
+    catalog.agents = {"vm-manual-prompt-route-agent": vm_agent}
 
     shared_store = {
-        "active_agent": "vm-legacy-prompt-route-agent",
+        "active_agent": "vm-manual-prompt-route-agent",
         "initial_request": "route me",
         "interaction_handler": lambda request: {
             "kind": request.get("kind", "buttons"),
@@ -914,7 +914,7 @@ def test_stackvm_agent_manual_prompt_interaction_switch_route_warns_about_prompt
     assert shared_store.get("final_output") == "Delegated"
     warnings = shared_store.get("last_vm_validation_warnings")
     assert isinstance(warnings, list) and len(warnings) == 1
-    assert warnings[0]["code"] == "legacy-prompt-route"
+    assert warnings[0]["code"] == "manual-prompt-route"
     assert warnings[0]["message"] == (
         "StackVM source uses the manual 'prompt-interaction' plus 'switch' routing pattern. "
         "Prefer the built-in 'prompt-route' macro for exact-match interaction routing."
@@ -1117,7 +1117,7 @@ def test_llm_agent_before_llm_hook_can_short_circuit_with_final_answer():
 
     hooks = NamespaceRegistry()
     hooks.register(
-        "workspace",
+        "resource_root.pocketcode",
         "shortcut.answer",
         HookDefinition(
             name="shortcut.answer",
@@ -1147,7 +1147,7 @@ def test_llm_agent_before_llm_hook_can_short_circuit_with_final_answer():
         system_prompt="Normal system prompt.",
         metadata={},
     )
-    agents.register("workspace", "hooked-agent", agent_def)
+    agents.register("resource_root.pocketcode", "hooked-agent", agent_def)
 
     profile = SimpleNamespace(
         name="hooked-profile",
@@ -1156,7 +1156,7 @@ def test_llm_agent_before_llm_hook_can_short_circuit_with_final_answer():
         llm_profile=None,
         inline_prompt="",
         extra_prompts=[],
-        hooks=["workspace.shortcut.answer"],
+        hooks=["resource_root.pocketcode.shortcut.answer"],
         tools=None,
     )
     shared_store = {

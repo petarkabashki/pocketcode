@@ -9,7 +9,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import SuggestFromList
-from textual.widgets import Button, ContentSwitcher, Footer, Input, OptionList, RichLog, Select, SelectionList, Static, Switch, TextArea
+from textual.widgets import Button, ContentSwitcher, Footer, Input, OptionList, RichLog, Select, SelectionList, Static
 
 from pocketcode.cli.command_handler import list_command_suggestions
 from pocketcode.core.engine import PocketCodeEngine
@@ -17,12 +17,8 @@ from pocketcode.core.run_handle import RunHandle
 
 from .shared import (
     DEFAULT_MAIN_INPUT_PLACEHOLDER,
-    INHERIT_POLICY,
-    LOADING_OPTION,
     THEME_CSS,
-    THEME_OPTIONS,
     TextualUIState,
-    WORKSPACE_VIEWS,
 )
 from .store import (
     AppendConsoleLineAction,
@@ -65,10 +61,7 @@ class TextualAppBase(App[None]):
         Binding("tab", "complete_input", "Complete Input", priority=True),
         Binding("ctrl+p", "history_previous", "Previous Entry", show=False, priority=True),
         Binding("ctrl+n", "history_next", "Next Entry", show=False, priority=True),
-        Binding("f3", "edit_asset", "Edit", priority=True),
-        Binding("f4", "clone_asset", "Clone", priority=True),
         Binding("f5", "pick_view", "Views", priority=True),
-        Binding("f6", "pick_asset", "Control", priority=True),
         Binding("ctrl+up", "focus_previous_rich_surface", "Prev Panel"),
         Binding("ctrl+down", "focus_next_rich_surface", "Next Panel"),
         Binding("ctrl+left", "focus_previous_compactable_block", "Prev Block"),
@@ -327,28 +320,6 @@ class TextualAppBase(App[None]):
         margin-top: 1;
     }
 
-    #profile-list,
-    #skill-list,
-    #inspector-tools {
-        height: 12;
-        margin-bottom: 0;
-        border: round #334155;
-        background: #020617;
-    }
-
-    #profile-tools-summary {
-        height: 12;
-        border: round #334155;
-        background: #020617;
-    }
-
-    #profile-policy-summary {
-        height: 6;
-        border: round #334155;
-        background: #020617;
-        color: #e2e8f0;
-    }
-
     #run-preview,
     #inspector-context,
     #inspector-prompts {
@@ -387,10 +358,8 @@ class TextualAppBase(App[None]):
         self._runtime_state: TextualRuntimeState = make_initial_runtime_state()
         self._suggestions: list[str] = []
         self._queued_textual_actions: list[tuple[Any, ...]] = []
-        self._profile_list_names: list[str] = []
-        self._syncing_controls = False
-        self._select_state_cache: dict[str, tuple[tuple[tuple[str, str], ...], str]] = {}
         self._text_state_cache: dict[str, str] = {}
+        self._select_state_cache: dict[str, tuple[tuple[tuple[str, str], ...], str]] = {}
         self._rich_surface_line_span_cache: dict[str, tuple[Any, ...]] = {}
         self._output_render_cache: tuple[str, tuple[OutputBlock, ...]] | None = None
         self._run_preview_render_cache: tuple[str, tuple[Any, ...]] | None = None
@@ -413,10 +382,7 @@ class TextualAppBase(App[None]):
         self._suppress_history_input_reset = False
         self._control_presentation = (
             "modal"
-            if str(
-                system_settings.get("control_presentation")
-                or ("modal" if system_settings.get("user_input_popups") else "inline")
-            ).strip().lower()
+            if str(system_settings.get("control_presentation") or "inline").strip().lower()
             == "modal"
             else "inline"
         )
@@ -440,7 +406,7 @@ class TextualAppBase(App[None]):
         self._inline_prompt_checklist_options: tuple[tuple[str, str, bool], ...] = ()
         self._cli_state: TextualCliState = make_initial_cli_state(
             theme_name=str(system_settings.get("theme_name") or "ocean"),
-            workspace_view=str(system_settings.get("workspace_view") or system_settings.get("workspace_mode") or "balanced"),
+            workspace_view=str(system_settings.get("workspace_view") or "balanced"),
             current_view="chat",
             right_panel_visible=True,
             engine=self._engine,
@@ -478,43 +444,6 @@ class TextualAppBase(App[None]):
                             yield Static("", id="inline-prompt-summary-chat", classes="inline-prompt-summary")
                             with Horizontal(id="inline-prompt-actions-chat", classes="inline-prompt-actions button-row"):
                                 yield Button("Submit", id="inline-prompt-submit-chat", variant="primary")
-                    with VerticalScroll(id="view-control", classes="view view-scroll"):
-                        yield Static("Runtime controls apply immediately.", classes="hint")
-                        yield Static("Workspace View", classes="field-label")
-                        yield Select(
-                            [(item["label"], key) for key, item in WORKSPACE_VIEWS.items()],
-                            id="workspace-view-select",
-                            allow_blank=False,
-                            value=self._cli_state.workspace_view,
-                        )
-                        yield Static("Theme Preset", classes="field-label")
-                        yield Select(
-                            [(label, key) for key, label in THEME_OPTIONS.items()],
-                            id="theme-select",
-                            allow_blank=False,
-                            value=self._cli_state.theme_name,
-                        )
-                        yield Static("Active Agent", classes="field-label")
-                        yield Select([("loading...", LOADING_OPTION)], id="profile-select", allow_blank=False)
-                        yield Static("Global LLM Override", classes="field-label")
-                        yield Select([("loading...", LOADING_OPTION)], id="llm-select", allow_blank=False)
-                        yield Static("Session Confirmation Default", classes="field-label")
-                        yield Select(
-                            [
-                                ("inherit", INHERIT_POLICY),
-                                ("allow", "allow"),
-                                ("confirm", "confirm"),
-                                ("deny", "deny"),
-                            ],
-                            id="session-confirm-select",
-                            allow_blank=False,
-                        )
-                        yield Static("Auto-Confirm Tools", classes="field-label")
-                        yield Switch(value=False, id="auto-confirm-switch")
-                        with Horizontal(classes="button-row"):
-                            yield Button("Switch View", id="open-view-button", variant="primary")
-                            yield Button("Control Center", id="control-center-button", variant="primary")
-                            yield Button("Reload Runtime", id="reload-button", variant="primary")
                     with VerticalScroll(id="view-run", classes="view view-scroll"):
                         yield Static("Last run summary and effective runtime state.", classes="hint")
                         with Horizontal(id="debugger-controls", classes="button-row hidden"):
@@ -570,22 +499,12 @@ class TextualAppBase(App[None]):
                     placeholder=DEFAULT_MAIN_INPUT_PLACEHOLDER,
                 )
             with VerticalScroll(id="right-panel", classes="view"):
-                yield Static("Inspector", classes="panel-title")
+                yield Static("Details", classes="panel-title")
                 yield RichLog(id="inspector-summary", auto_scroll=False, wrap=True, markup=False, classes="card")
                 yield Static("Session Context", classes="section-title")
                 yield RichLog(id="inspector-context", auto_scroll=False, wrap=True, markup=False)
-                yield Static("Saved Sessions", classes="section-title")
+                yield Static("Session History", classes="section-title")
                 yield RichLog(id="inspector-sessions", auto_scroll=False, wrap=True, markup=False)
-                yield Static("Available Agent Profiles", classes="section-title")
-                yield OptionList(id="profile-list")
-                with Horizontal(classes="section-header"):
-                    yield Static("Skills", classes="section-title")
-                    yield Button("Save", id="inspector-skill-save-button", classes="section-save-button")
-                yield SelectionList(id="skill-list")
-                with Horizontal(classes="section-header"):
-                    yield Static("Allowed Tools", classes="section-title")
-                    yield Button("Save", id="inspector-tool-save-button", classes="section-save-button")
-                yield SelectionList(id="inspector-tools")
                 yield Static("Prompt Sources", classes="section-title")
                 yield RichLog(id="inspector-prompts", auto_scroll=False, wrap=True, markup=False)
         yield Static(id="footer-hint")

@@ -54,18 +54,18 @@ def create_flow() -> Flow:
 
 Composite agent schema:
 ```yaml
-name: my_namespace::my_flow
-flow: my_namespace::my_flow
+name: my_namespace.my_flow
+flow: my_namespace.my_flow
 description: Optional profile description.
 llm_profile: inherit-or-profile-name
 tools:
-  - core::read_file
+  - core.read_file
 extra_prompts:
   - prompt:resource_root.pocketcode.review
 tool_confirmation:
   default: confirm
   overrides:
-    core::execute_command: deny
+    core.execute_command: deny
 ```
 
 Skill layout:

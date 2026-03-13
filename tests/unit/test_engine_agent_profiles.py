@@ -65,7 +65,7 @@ class _SkillManagerStub:
 
 class _CatalogWithToolResolution:
     def __init__(self):
-        self.agents = {"coder::coder": object()}
+        self.agents = {"coder.coder": object()}
         self.resolve_call_count = 0
 
     def resolve_tools_for_agent(self, agent_name: str):
@@ -76,7 +76,7 @@ class _CatalogWithToolResolution:
 class _CatalogWithQualifiedTools:
     def __init__(self):
         self.agents = {
-            "coder::coder": type("Defn", (), {"metadata": {"namespace": "core"}, "default_agent_profile": None})()
+            "coder.coder": type("Defn", (), {"metadata": {"namespace": "core"}, "default_agent_profile": None})()
         }
         self.tools = NamespaceRegistry()
         self.tools.register("core", "read_file", lambda **kw: {"ok": True})
@@ -105,7 +105,7 @@ class TestEngineAgentProfiles:
             {
                 "coder.safe": AgentProfile(
                     name="coder.safe",
-                    flow="coder::coder",
+                    flow="coder.coder",
                     tools=["read_file", "tool:missing.read_file"],
                     extra_prompts=[
                         "prompt:resource_root.pocketcode.keep",
@@ -150,9 +150,9 @@ class TestEngineAgentProfiles:
         assert skill.tool_refs == ["read_file", "core.read_file"]
         assert skill.extra_prompts == ["prompt:review", "prompt:resource_root.pocketcode.keep"]
 
-    def test_get_system_settings_normalizes_legacy_default_agent(self):
+    def test_get_system_settings_normalizes_old_default_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        engine._runtime_config = {"default_agent": "core::react", "textual": {}}
+        engine._runtime_config = {"default_agent": "core.react", "textual": {}}
         engine._llm_config = {"default_profile": "fast"}
         registry = NamespaceRegistry()
         registry.register("core", "react", object())
@@ -176,15 +176,15 @@ class TestEngineAgentProfiles:
 
     def test_set_active_agent_profile_switches_current_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        profile = AgentProfile(name="coder.safe", flow="coder::coder", source="workspace")
+        profile = AgentProfile(name="coder.safe", flow="coder.coder", source="workspace")
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object()}})()
         engine.current_agent = None
         engine.active_agent_profile = None
 
         engine.set_active_agent_profile("coder.safe")
 
-        assert engine.current_agent == "coder::coder"
+        assert engine.current_agent == "coder.coder"
         assert engine.active_agent_profile is profile
 
     def test_set_agent_accepts_typed_flow_reference(self):
@@ -207,8 +207,8 @@ class TestEngineAgentProfiles:
         engine._catalog = type("Plugins", (), {"agents": registry})()
         engine._agent_profile_manager = _ProfileManagerStub(
             {
-                "coder.safe": AgentProfile(name="coder.safe", flow="coder::coder"),
-                "asker.fast": AgentProfile(name="asker.fast", flow="asker::asker"),
+                "coder.safe": AgentProfile(name="coder.safe", flow="coder.coder"),
+                "asker.fast": AgentProfile(name="asker.fast", flow="asker.asker"),
             }
         )
 
@@ -360,7 +360,7 @@ class TestEngineAgentProfiles:
         else:
             raise AssertionError("Expected ValueError for mismatched front matter name.")
 
-    def test_update_markdown_flow_asset_accepts_legacy_graph_metadata_without_validation(self, tmp_path):
+    def test_update_markdown_flow_asset_accepts_old_graph_metadata_without_validation(self, tmp_path):
         flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text("---\nname: sample_flow\n---\nbody\n", encoding="utf-8")
@@ -440,7 +440,7 @@ class TestEngineAgentProfiles:
             engine.update_markdown_asset(
                 "flow",
                 "sample_flow",
-                markdown_text="---\nname: sample_flow\ntools:\n  - workspace.missing_tool\n---\nbody\n",
+                markdown_text="---\nname: sample_flow\ntools:\n  - resource_root.pocketcode.missing_tool\n---\nbody\n",
             )
         except ValueError as exc:
             assert "sample_flow.md: tools[0] could not be resolved" in str(exc)
@@ -467,7 +467,7 @@ class TestEngineAgentProfiles:
             engine.update_markdown_asset(
                 "flow",
                 "sample_flow",
-                markdown_text="---\nname: sample_flow\nhandoff_agents:\n  - workspace.missing_flow\n---\nbody\n",
+                markdown_text="---\nname: sample_flow\nhandoff_agents:\n  - resource_root.pocketcode.missing_flow\n---\nbody\n",
             )
         except ValueError as exc:
             assert "sample_flow.md: handoff_agents[0] could not be resolved" in str(exc)
@@ -587,7 +587,7 @@ class TestEngineAgentProfiles:
             engine.update_markdown_asset(
                 "agent",
                 "review",
-                markdown_text="---\nname: review\nflow: plug.agent\ntools:\n  - workspace.missing_tool\n---\nbody\n",
+                markdown_text="---\nname: review\nflow: plug.agent\ntools:\n  - resource_root.pocketcode.missing_tool\n---\nbody\n",
             )
         except ValueError as exc:
             assert "review.agent.md: tools[0] could not be resolved" in str(exc)
@@ -627,7 +627,7 @@ class TestEngineAgentProfiles:
         else:
             raise AssertionError("Expected ValueError for missing prompt resource.")
 
-    def test_clone_markdown_flow_asset_preserves_legacy_graph_metadata(self, tmp_path):
+    def test_clone_markdown_flow_asset_preserves_old_graph_metadata(self, tmp_path):
         flow_path = tmp_path / ".pocketcode" / "sample_flow.md"
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         flow_path.write_text(
@@ -796,7 +796,7 @@ class TestEngineAgentProfiles:
 
     def test_set_active_agent_profile_rejects_unknown_target_agent(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        profile = AgentProfile(name="ghost.safe", flow="ghost::ghost", source="workspace")
+        profile = AgentProfile(name="ghost.safe", flow="ghost.ghost", source="workspace")
         engine._agent_profile_manager = _ProfileManagerStub({"ghost.safe": profile})
         engine._catalog = type("Plugins", (), {"agents": {}})()
         engine.current_agent = None
@@ -811,10 +811,10 @@ class TestEngineAgentProfiles:
 
     def test_status_exposes_selected_flow_agent_and_llm(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        engine.current_agent = "coder::coder"
+        engine.current_agent = "coder.coder"
         engine.active_agent_profile = AgentProfile(
             name="coder.safe",
-            flow="coder::coder",
+            flow="coder.coder",
             llm_profile="smart",
         )
         engine.enabled_skills = []
@@ -827,14 +827,14 @@ class TestEngineAgentProfiles:
         engine._tool_confirmation_config = {}
         engine.last_run_summary = {}
         engine._copy_session_confirmation_overrides = lambda: {}
-        engine.list_flows = lambda: ["coder::coder"]
+        engine.list_flows = lambda: ["coder.coder"]
         engine.list_available_agents = lambda: ["coder.safe"]
         engine.list_skills = lambda: []
         engine.list_llm_profiles = lambda: ["default", "fast", "smart"]
 
         status = engine.status()
 
-        assert status["selected_flow"] == "coder::coder"
+        assert status["selected_flow"] == "coder.coder"
         assert status["selected_agent"] == "coder.safe"
         assert status["selected_llm_profile"] == "smart"
 
@@ -842,29 +842,29 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._agent_profile_manager = _ProfileManagerStub(
             {
-                "coder.safe": AgentProfile(name="coder.safe", flow="coder::coder"),
-                "asker.fast": AgentProfile(name="asker.fast", flow="asker::asker"),
+                "coder.safe": AgentProfile(name="coder.safe", flow="coder.coder"),
+                "asker.fast": AgentProfile(name="asker.fast", flow="asker.asker"),
             }
         )
 
-        assert engine.list_agent_profiles("coder::coder") == ["coder.safe"]
+        assert engine.list_agent_profiles("coder.coder") == ["coder.safe"]
         assert engine.list_agent_profiles() == ["asker.fast", "coder.safe"]
 
     def test_update_agent_profile_persists_workspace_profile(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(
             name="coder.safe",
-            flow="coder::coder",
+            flow="coder.coder",
             llm_profile=None,
             extra_prompts=["prompts/base.md"],
-            tools=["filesystem::read_file"],
-            tool_confirmation={"overrides": {"filesystem::delete_file": "deny"}},
+            tools=["filesystem.read_file"],
+            tool_confirmation={"overrides": {"filesystem.delete_file": "deny"}},
             source="workspace",
             source_path=Path("/tmp/coder.safe.yaml"),
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -879,7 +879,7 @@ class TestEngineAgentProfiles:
         updated = engine.update_agent_profile(
             "coder.safe",
             llm_profile="gemini_fast",
-            tools=["filesystem::read_file", "search::web_search"],
+            tools=["filesystem.read_file", "search.web_search"],
             extra_prompts=["prompts/base.md", "prompts/review.md"],
             tool_confirmation_default="confirm",
         )
@@ -901,17 +901,17 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(
             name="coder.safe",
-            flow="coder::coder",
+            flow="coder.coder",
             llm_profile=None,
             extra_prompts=[],
-            tools=["filesystem::read_file"],
-            tool_confirmation={"default": "confirm", "overrides": {"filesystem::delete_file": "deny"}},
+            tools=["filesystem.read_file"],
+            tool_confirmation={"default": "confirm", "overrides": {"filesystem.delete_file": "deny"}},
             source="workspace",
             source_path=Path("/tmp/coder.safe.yaml"),
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -926,12 +926,12 @@ class TestEngineAgentProfiles:
         engine.update_agent_profile(
             "coder.safe",
             llm_profile=None,
-            tools=["filesystem::read_file"],
+            tools=["filesystem.read_file"],
             extra_prompts=[],
             tool_confirmation_default="confirm",
             tool_confirmation_overrides={
-                "filesystem::delete_file": "allow",
-                "search::web_search": "deny",
+                "filesystem.delete_file": "allow",
+                "search.web_search": "deny",
             },
         )
 
@@ -976,7 +976,7 @@ class TestEngineAgentProfiles:
                 "default_policy": "confirm",
                 "tool_policies": {
                     "tool:filesystem.delete_file": "deny",
-                    "search::web_search": "allow",
+                    "search.web_search": "allow",
                 },
                 "agent_policies": {
                     "agent:coder.coder": {
@@ -1038,15 +1038,15 @@ class TestEngineAgentProfiles:
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(
             name="coder.safe",
-            flow="coder::coder",
+            flow="coder.coder",
             skills=["python-lint"],
-            tools=["filesystem::read_file"],
+            tools=["filesystem.read_file"],
             source="workspace",
             source_path=tmp_path / ".pocketcode" / "agents" / "coder.safe.yaml",
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1089,20 +1089,20 @@ class TestEngineAgentProfiles:
         assert manager.saved_profile is not None
         assert manager.saved_profile.skills == ["python-testing"]
         textual = engine._config["runtime"]["textual"]
-        assert "last_used" not in textual or "agent_profiles" not in textual.get("last_used", {})
+        assert textual["last_used"]["agent_profiles"]["coder.safe"]["skills"] == ["python-testing"]
 
     def test_save_agent_profile_tools_persists_workspace_profile_and_clears_matching_override(self, tmp_path):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         profile = AgentProfile(
             name="coder.safe",
-            flow="coder::coder",
+            flow="coder.coder",
             tools=None,
             source="workspace",
             source_path=tmp_path / ".pocketcode" / "agents" / "coder.safe.yaml",
         )
         manager = _EditableProfileManagerStub({"coder.safe": profile})
         engine._agent_profile_manager = manager
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1115,7 +1115,7 @@ class TestEngineAgentProfiles:
                     "last_used": {
                         "agent_profiles": {
                             "coder.safe": {
-                                "tools": ["filesystem::read_file"],
+                                "tools": ["filesystem.read_file"],
                             }
                         }
                     }
@@ -1133,13 +1133,13 @@ class TestEngineAgentProfiles:
         engine._tool_confirmation_config = {}
         engine._maybe_refresh_runtime_components = lambda: None
 
-        refreshed = engine.save_agent_profile_tools("coder.safe", ["filesystem::read_file"])
+        refreshed = engine.save_agent_profile_tools("coder.safe", ["filesystem.read_file"])
 
         assert refreshed is manager.saved_profile
         assert manager.saved_profile is not None
         assert manager.saved_profile.tools == ["filesystem.read_file"]
         textual = engine._config["runtime"]["textual"]
-        assert "last_used" not in textual or "agent_profiles" not in textual.get("last_used", {})
+        assert textual["last_used"]["agent_profiles"]["coder.safe"]["tools"] == ["filesystem.read_file"]
 
     def test_list_tools_for_agent_caches_unfiltered_results(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
@@ -1149,8 +1149,8 @@ class TestEngineAgentProfiles:
         engine._skill_manager = _SkillManagerStub({})
         engine._agent_tools_cache = {}
 
-        first = engine.list_tools_for_agent("coder::coder")
-        second = engine.list_tools_for_agent("coder::coder")
+        first = engine.list_tools_for_agent("coder.coder")
+        second = engine.list_tools_for_agent("coder.coder")
 
         assert first == ["tool.a", "tool.b"]
         assert second == ["tool.a", "tool.b"]
@@ -1174,7 +1174,7 @@ class TestEngineAgentProfiles:
         )()
         engine.active_agent_profile = AgentProfile(
             name="coder.safe",
-            flow="coder::coder",
+            flow="coder.coder",
             tools=["core.read_file"],
         )
         engine.enabled_skills = []
@@ -1217,7 +1217,7 @@ class TestEngineAgentProfiles:
         engine._tool_confirmation_config = {"default_policy": None, "tool_policies": {}, "agent_policies": {}}
         engine._llm_router = object()
         engine.enabled_skills = []
-        engine.current_agent = "coder::coder"
+        engine.current_agent = "coder.coder"
         engine.active_agent_profile = None
 
         engine.enable_skill("python-testing")
@@ -1236,7 +1236,7 @@ class TestEngineAgentProfiles:
                         "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
                         "default_profile": "fast",
                     },
-                    "runtime": {"default_agent": "coder::coder"},
+                    "runtime": {"default_agent": "coder.coder"},
                 },
                 sort_keys=False,
             ),
@@ -1250,11 +1250,11 @@ class TestEngineAgentProfiles:
                 "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
                 "default_profile": "fast",
             },
-            "runtime": {"default_agent": "coder::coder"},
+            "runtime": {"default_agent": "coder.coder"},
         }
         engine._runtime_config = engine._config["runtime"]
         engine._llm_config = engine._config["llm"]
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object(), "asker::asker": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object(), "asker.asker": object()}})()
         engine._llm_router = type(
             "Router",
             (),
@@ -1265,13 +1265,13 @@ class TestEngineAgentProfiles:
         saved_path = engine.save_system_settings(
             theme_name="forest",
             workspace_view="review",
-            default_agent="asker::asker",
+            default_agent="asker.asker",
             default_llm_profile="fast",
             control_presentation="modal",
         )
 
         saved = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
-        assert saved["runtime"]["default_agent"] == "asker::asker"
+        assert saved["runtime"]["default_agent"] == "asker.asker"
         assert saved["runtime"]["textual"] == {
             "theme_name": "forest",
             "workspace_view": "review",
@@ -1289,7 +1289,7 @@ class TestEngineAgentProfiles:
                         "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
                         "default_profile": "fast",
                     },
-                    "runtime": {"default_agent": "core::react"},
+                    "runtime": {"default_agent": "core.react"},
                 },
                 sort_keys=False,
             ),
@@ -1303,7 +1303,7 @@ class TestEngineAgentProfiles:
                 "profiles": {"fast": {"provider": "gemini", "model": "gemini-2.5-flash"}},
                 "default_profile": "fast",
             },
-            "runtime": {"default_agent": "core::react"},
+            "runtime": {"default_agent": "core.react"},
         }
         engine._runtime_config = engine._config["runtime"]
         engine._llm_config = engine._config["llm"]
@@ -1320,7 +1320,7 @@ class TestEngineAgentProfiles:
         saved_path = engine.save_system_settings(
             theme_name="forest",
             workspace_view="review",
-            default_agent="core::react",
+            default_agent="core.react",
             default_llm_profile="fast",
             control_presentation="inline",
         )
@@ -1331,16 +1331,6 @@ class TestEngineAgentProfiles:
     def test_get_system_settings_returns_control_presentation(self):
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._runtime_config = {"textual": {"control_presentation": "modal"}}
-        engine._llm_config = {"default_profile": "fast"}
-        engine._catalog = type("Plugins", (), {"agents": {}})()
-
-        settings = engine.get_system_settings()
-
-        assert settings["control_presentation"] == "modal"
-
-    def test_get_system_settings_maps_legacy_user_input_popups_to_modal(self):
-        engine = PocketCodeEngine.__new__(PocketCodeEngine)
-        engine._runtime_config = {"textual": {"user_input_popups": True}}
         engine._llm_config = {"default_profile": "fast"}
         engine._catalog = type("Plugins", (), {"agents": {}})()
 
@@ -1392,7 +1382,7 @@ class TestEngineAgentProfiles:
         assert engine._configured_enabled_skills() == ["python-lint"]
 
     def test_set_last_used_profile_tools_updates_session_override(self, tmp_path):
-        profile = AgentProfile(name="coder.safe", flow="coder::coder", tools=["tool.read"])
+        profile = AgentProfile(name="coder.safe", flow="coder.coder", tools=["tool.read"])
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._workspace_root = tmp_path
         engine._config = {"runtime": {"textual": {}}}
@@ -1407,7 +1397,7 @@ class TestEngineAgentProfiles:
         assert not (tmp_path / "pocketcode.yml").exists()
 
     def test_set_last_used_profile_skills_updates_session_override(self, tmp_path):
-        profile = AgentProfile(name="coder.safe", flow="coder::coder", tools=["tool.read"])
+        profile = AgentProfile(name="coder.safe", flow="coder.coder", tools=["tool.read"])
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._workspace_root = tmp_path
         engine._config = {"runtime": {"textual": {"default_skills": ["python-lint"]}}}
@@ -1472,7 +1462,7 @@ class TestEngineAgentProfiles:
                 }
             }
         }
-        engine.active_agent_profile = AgentProfile(name="coder.safe", flow="coder::coder")
+        engine.active_agent_profile = AgentProfile(name="coder.safe", flow="coder.coder")
         engine.session_profile_overrides = {"coder.safe": {"skills": ["azure-prepare", "missing-skill"]}}
         engine._skill_manager = _SkillManagerStub(
             {
@@ -1498,7 +1488,7 @@ class TestEngineAgentProfiles:
         }
         engine.active_agent_profile = AgentProfile(
             name="coder.safe",
-            flow="coder::coder",
+            flow="coder.coder",
             skills=["azure-prepare", "missing-skill"],
         )
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": engine.active_agent_profile})
@@ -1531,13 +1521,13 @@ class TestEngineAgentProfiles:
         assert saved["runtime"]["textual"]["last_used"]["global_llm_profile"] == "smart"
 
     def test_save_and_apply_textual_selection_preset_round_trips_runtime_state(self, tmp_path):
-        profile = AgentProfile(name="coder.safe", flow="coder::coder", source="workspace")
+        profile = AgentProfile(name="coder.safe", flow="coder.coder", source="workspace")
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._workspace_root = tmp_path
         engine._config = {"runtime": {"textual": {}}}
         engine._runtime_config = engine._config["runtime"]
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object()}})()
         engine._skill_manager = _SkillManagerStub({"python-testing": SkillDefinition(name="python-testing")})
         engine._llm_router = type(
             "Router",
@@ -1545,7 +1535,7 @@ class TestEngineAgentProfiles:
             {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
         )()
         engine._refresh_runtime_components = lambda: None
-        engine.current_agent = "coder::coder"
+        engine.current_agent = "coder.coder"
         engine.active_agent_profile = profile
         engine.global_llm_override = "smart"
         engine.enabled_skills = ["python-testing"]
@@ -1575,13 +1565,13 @@ class TestEngineAgentProfiles:
         assert "review-set" in saved["runtime"]["textual"]["selection_presets"]
 
     def test_save_textual_selection_preset_canonicalizes_profile_tool_refs(self, tmp_path):
-        profile = AgentProfile(name="coder.safe", flow="coder::coder", source="workspace")
+        profile = AgentProfile(name="coder.safe", flow="coder.coder", source="workspace")
         engine = PocketCodeEngine.__new__(PocketCodeEngine)
         engine._workspace_root = tmp_path
         engine._config = {"runtime": {"textual": {}}}
         engine._runtime_config = engine._config["runtime"]
         engine._agent_profile_manager = _ProfileManagerStub({"coder.safe": profile})
-        engine._catalog = type("Plugins", (), {"agents": {"coder::coder": object()}})()
+        engine._catalog = type("Plugins", (), {"agents": {"coder.coder": object()}})()
         engine._skill_manager = _SkillManagerStub({"python-testing": SkillDefinition(name="python-testing")})
         engine._llm_router = type(
             "Router",
@@ -1589,7 +1579,7 @@ class TestEngineAgentProfiles:
             {"resolve_profile_config": staticmethod(lambda name: {"profile_name": name})},
         )()
         engine._refresh_runtime_components = lambda: None
-        engine.current_agent = "coder::coder"
+        engine.current_agent = "coder.coder"
         engine.active_agent_profile = profile
         engine.global_llm_override = "smart"
         engine.enabled_skills = ["python-testing"]
@@ -1602,7 +1592,7 @@ class TestEngineAgentProfiles:
         }
         engine.session_profile_overrides = {
             "coder.safe": {
-                "tools": ["tool:filesystem.read_file", "search::web_search"],
+                "tools": ["tool:filesystem.read_file", "search.web_search"],
                 "tool_confirmation_overrides": {
                     "tool:filesystem.delete_file": "deny",
                 },

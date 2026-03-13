@@ -37,7 +37,6 @@ from pocketcode.core.prompt_loader import (
 from pocketcode.core.reference_syntax import (
     normalize_prompt_source,
     normalize_registry_reference,
-    normalize_registry_reference_compat,
     parse_prompt_reference,
     parse_reference,
     validate_prompt_source,
@@ -50,7 +49,7 @@ from pocketcode.core.runtime_observability import (
     observe_runtime_event,
 )
 from pocketcode.core.runtime_models import AgentProfile, FlowDefinition
-from pocketcode.core.resource_roots import primary_resource_root
+from pocketcode.core.resource_roots import primary_resource_root, resource_root_namespace
 from pocketcode.core.runtime_storage import load_entry_history, normalize_entry_history, save_entry_history
 from pocketcode.core.runtime_storage import checkpoint_storage_dir
 from pocketcode.core.session_manager import SessionManager
@@ -1037,7 +1036,7 @@ class PocketCodeEngine:
             profile = self.get_agent_profile(target_name)
             if profile is None:
                 raise ValueError(f"Unknown agent profile '{target_name}'.")
-            flow_name, definition = self._resolve_stackvm_flow_definition(profile.agent)
+            flow_name, definition = self._resolve_stackvm_flow_definition(profile.flow)
             compiled = self._load_and_compile_stackvm_flow(definition=definition, entry=normalized_entry)
             return {
                 "target_kind": "agent",
@@ -1087,7 +1086,7 @@ class PocketCodeEngine:
             profile = self.get_agent_profile(target_name)
             if profile is None:
                 raise ValueError(f"Unknown agent profile '{target_name}'.")
-            flow_name, definition = self._resolve_stackvm_flow_definition(profile.agent)
+            flow_name, definition = self._resolve_stackvm_flow_definition(profile.flow)
             return self._run_stackvm_flow_definition(
                 flow_name=flow_name,
                 definition=definition,
@@ -1389,12 +1388,12 @@ class PocketCodeEngine:
                 )
                 self._drop_loaded_profile(raw_profile.name)
                 continue
-            normalized_agent_name = self._normalize_agent_name(profile.agent)
+            normalized_agent_name = self._normalize_agent_name(profile.flow)
             if not normalized_agent_name or normalized_agent_name not in agents_registry:
                 logger.warning(
                     "Agent profile '%s' targets unknown agent '%s'. Removing it from the loaded registry.",
                     profile.name,
-                    profile.agent,
+                    profile.flow,
                 )
                 self._drop_loaded_profile(profile.name)
                 continue
@@ -1639,7 +1638,7 @@ class PocketCodeEngine:
         return None
 
     def list_agents(self) -> List[str]:
-        """Backward-compatible alias for registered flow names."""
+        """Return registered agent/flow names."""
         return sorted(self._catalog.agents.keys())
 
     def list_flows(self) -> List[str]:
@@ -1694,7 +1693,7 @@ class PocketCodeEngine:
         }
 
     def get_current_agent(self):
-        """Backward-compatible alias for the current flow name."""
+        """Return the current agent/flow selection."""
         return self.current_agent
 
     def get_current_flow(self):
@@ -1715,12 +1714,10 @@ class PocketCodeEngine:
             textual_config = {}
         control_presentation = self._normalize_textual_control_presentation(
             textual_config.get("control_presentation")
-            if "control_presentation" in textual_config
-            else ("modal" if textual_config.get("user_input_popups") else "inline")
         )
         return {
             "theme_name": str(textual_config.get("theme_name") or "ocean"),
-            "workspace_view": str(textual_config.get("workspace_view") or textual_config.get("workspace_mode") or "balanced"),
+            "workspace_view": str(textual_config.get("workspace_view") or "balanced"),
             "default_agent": self._normalize_agent_name(self._runtime_config.get("default_agent")),
             "default_llm_profile": self._llm_config.get("default_profile"),
             "control_presentation": control_presentation,
@@ -1758,7 +1755,6 @@ class PocketCodeEngine:
         default_agent: Optional[str],
         default_llm_profile: Optional[str],
         control_presentation: str = "inline",
-        user_input_popups: bool | None = None,
     ) -> Path:
         normalized_default_agent = self._normalize_agent_name(default_agent)
         catalog = self._runtime_catalog()
@@ -1768,9 +1764,7 @@ class PocketCodeEngine:
                 raise KeyError(f"Unknown agent '{default_agent}'.")
         if default_llm_profile:
             self._llm_router.resolve_profile_config(default_llm_profile)
-        normalized_control_presentation = self._normalize_textual_control_presentation(
-            "modal" if user_input_popups is True else control_presentation
-        )
+        normalized_control_presentation = self._normalize_textual_control_presentation(control_presentation)
 
         runtime_section = self._config.setdefault("runtime", {})
         if not isinstance(runtime_section, dict):
@@ -1792,8 +1786,6 @@ class PocketCodeEngine:
         textual_section["theme_name"] = str(theme_name)
         textual_section["workspace_view"] = str(workspace_view)
         textual_section["control_presentation"] = normalized_control_presentation
-        textual_section.pop("workspace_mode", None)
-        textual_section.pop("user_input_popups", None)
         runtime_section["textual"] = textual_section
 
         if default_llm_profile:
@@ -1823,7 +1815,7 @@ class PocketCodeEngine:
         self.active_agent_profile = value
 
     def set_agent(self, agent_name: Optional[str]) -> None:
-        """Backward-compatible alias for selecting the current flow."""
+        """Select the current agent/flow."""
         normalized_agent_name = self._normalize_agent_name(agent_name)
         if not normalized_agent_name:
             self.current_agent = None
@@ -1852,10 +1844,10 @@ class PocketCodeEngine:
                 f"Unknown agent profile '{name}'. "
                 f"Available: {available}"
             )
-        normalized_profile_agent = self._normalize_agent_name(profile.agent)
+        normalized_profile_agent = self._normalize_agent_name(profile.flow)
         if not normalized_profile_agent or normalized_profile_agent not in self._catalog.agents:
             raise ValueError(
-                f"Agent profile '{name}' targets unknown agent '{profile.agent}'."
+                f"Agent profile '{name}' targets unknown agent '{profile.flow}'."
         )
         self.current_agent = normalized_profile_agent
         self.active_agent_profile = self._apply_session_profile_overrides(profile)
@@ -1870,7 +1862,7 @@ class PocketCodeEngine:
         if not cleaned:
             return None
 
-        canonical_candidate = normalize_registry_reference_compat(
+        canonical_candidate = normalize_registry_reference(
             cleaned,
             allowed_kinds={"agent", "flow"},
         )
@@ -2079,7 +2071,7 @@ class PocketCodeEngine:
             profiles = [
                 profile
                 for profile in profiles
-                if self._normalize_agent_name(profile.agent) == normalized_agent_name
+                if self._normalize_agent_name(profile.flow) == normalized_agent_name
             ]
         return sorted({p.name for p in profiles})
 
@@ -2432,11 +2424,8 @@ class PocketCodeEngine:
         document = self._parse_workspace_markdown_asset_text_document(markdown_text, target_path=target_path)
         flow_definition = compile_markdown_flow_definition(document, default_name=target_path.stem)
 
-        prompt_definition = dict(flow_definition)
-        if "prompt_files" not in prompt_definition and "prompts" in prompt_definition:
-            prompt_definition["prompt_files"] = prompt_definition.get("prompts")
         resolve_prompt_bundle(
-            prompt_definition,
+            flow_definition,
             base_dir=target_path.parent,
             inline_keys=("system_prompt", "prompt"),
             file_keys=("system_prompt_file", "prompt_file"),
@@ -2444,7 +2433,7 @@ class PocketCodeEngine:
             default_files=[],
             fallback_dirs=self._workspace_prompt_fallback_dirs(),
             prompt_registry=getattr(self._catalog, "prompts", None),
-            context_namespace="workspace",
+            context_namespace=self._default_resource_context_namespace(),
         )
 
         self._validate_live_registry_reference_list(
@@ -2488,11 +2477,14 @@ class PocketCodeEngine:
             expand_includes=True,
             fallback_dirs=self._workspace_prompt_fallback_dirs(),
             prompt_registry=getattr(self._catalog, "prompts", None),
-            context_namespace="workspace",
+            context_namespace=self._default_resource_context_namespace(),
         )
 
     def _workspace_prompt_fallback_dirs(self) -> tuple[Path, ...]:
         return (primary_resource_root(self._workspace_root).path / "prompts",)
+
+    def _default_resource_context_namespace(self) -> str:
+        return resource_root_namespace(primary_resource_root(self._workspace_root))
 
     def _validate_live_registry_reference(
         self,
@@ -2507,7 +2499,7 @@ class PocketCodeEngine:
         self._qualify_registry_reference_or_raise(
             registry,
             normalized_reference,
-            context_namespace="workspace",
+            context_namespace=self._default_resource_context_namespace(),
             error_prefix=field_name,
         )
         return normalized_reference
@@ -2554,7 +2546,7 @@ class PocketCodeEngine:
                 resolve_prompt_reference(
                     prompt_ref,
                     prompt_registry=getattr(self._catalog, "prompts", None),
-                    context_namespace="workspace",
+                    context_namespace=self._default_resource_context_namespace(),
                 )
             except Exception as exc:  # noqa: BLE001
                 raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
@@ -2566,7 +2558,7 @@ class PocketCodeEngine:
                 prompt_file=prompt_ref,
                 fallback_dirs=self._workspace_prompt_fallback_dirs(),
                 prompt_registry=getattr(self._catalog, "prompts", None),
-                context_namespace="workspace",
+                context_namespace=self._default_resource_context_namespace(),
             )
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"{field_name} could not be resolved: {prompt_ref} ({exc})") from exc
@@ -2949,7 +2941,6 @@ class PocketCodeEngine:
             cli_context=cli_context,
             event_handler=None,
             interaction_handler=None,
-            user_input_handler=None,
             run_handle=None,
         )
         shared_store["active_agent"] = flow_name
@@ -3186,7 +3177,6 @@ class PocketCodeEngine:
             ),
             skills=normalized,
         )
-        self._clear_legacy_textual_profile_skills_override(profile_name, normalized)
         self._clear_session_profile_skills_override(profile_name, normalized)
         self._refresh_active_profile(profile_name)
         return refreshed
@@ -3213,7 +3203,6 @@ class PocketCodeEngine:
             ),
             skills=list(profile.skills) if profile.skills is not None else None,
         )
-        self._clear_legacy_textual_profile_tools_override(profile_name, normalized_tools)
         self._clear_session_profile_tools_override(profile_name, normalized_tools)
         self._refresh_active_profile(profile_name)
         return refreshed
@@ -3301,7 +3290,7 @@ class PocketCodeEngine:
             active_profile = self.active_agent_profile
             if (
                 active_profile is not None
-                and self._normalize_agent_name(active_profile.agent) == normalized_agent_name
+                and self._normalize_agent_name(active_profile.flow) == normalized_agent_name
                 and active_profile.tools is not None
             ):
                 tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
@@ -3390,7 +3379,7 @@ class PocketCodeEngine:
                 p = self._resolved_agent_profile(raw_profile.name)
                 if p is None:
                     continue
-                if self._normalize_agent_name(p.agent) == normalized_agent_name:
+                if self._normalize_agent_name(p.flow) == normalized_agent_name:
                     profile = p
                     break
         return profile
@@ -3439,7 +3428,7 @@ class PocketCodeEngine:
         active_profile = self.active_agent_profile
         if (
             active_profile is not None
-            and self._normalize_agent_name(active_profile.agent) == normalized_agent_name
+            and self._normalize_agent_name(active_profile.flow) == normalized_agent_name
             and active_profile.tools is not None
         ):
             tool_names = [tool_name for tool_name in tool_names if tool_name in active_profile.tools]
@@ -3471,7 +3460,6 @@ class PocketCodeEngine:
             cli_context=cli_context,
             event_handler=None,
             interaction_handler=handle.request_interaction if bridge_user_input else None,
-            user_input_handler=handle.request_user_input if bridge_user_input else None,
             run_handle=handle,
         )
         initialize_runtime_observability(shared_store)
@@ -3527,7 +3515,6 @@ class PocketCodeEngine:
         cli_context: Dict[str, Any],
         event_handler: Any = None,
         interaction_handler: Any = None,
-        user_input_handler: Any = None,
         run_handle: RunHandle | None = None,
     ) -> Dict[str, Any]:
         initial_agent = self.current_agent or self._runtime_config.get("default_agent")
@@ -3582,8 +3569,6 @@ class PocketCodeEngine:
             shared_store["runtime_event_handler"] = event_handler
         if callable(interaction_handler):
             shared_store["interaction_handler"] = interaction_handler
-        if callable(user_input_handler):
-            shared_store["user_input_handler"] = user_input_handler
         if run_handle is not None:
             shared_store["run_cancel_requested"] = lambda: run_handle.is_cancel_requested
             shared_store["run_cancel_reason"] = lambda: run_handle.cancel_reason
@@ -4750,7 +4735,7 @@ class PocketCodeEngine:
         return normalized
 
     def _normalize_tool_key_for_persistence(self, tool_name: Any) -> str:
-        return normalize_registry_reference_compat(tool_name, allowed_kinds={"tool"})
+        return normalize_registry_reference(tool_name, allowed_kinds={"tool"})
 
     def _normalize_agent_key_for_persistence(self, agent_name: Any) -> str:
         normalized = self._normalize_agent_name(agent_name)
@@ -4859,26 +4844,6 @@ class PocketCodeEngine:
         profile_state.pop("tools", None)
         self._cleanup_session_profile_state(profile_name)
         self._update_active_session_snapshot()
-
-    def _clear_legacy_textual_profile_skills_override(self, profile_name: str, skill_names: List[str]) -> None:
-        profile_state = self._textual_profile_state(profile_name, create=False)
-        if not profile_state:
-            return
-        if self._normalize_skill_names(profile_state.get("skills", []), strict=False) != list(skill_names):
-            return
-        profile_state.pop("skills", None)
-        self._cleanup_textual_profile_state(profile_name)
-
-    def _clear_legacy_textual_profile_tools_override(self, profile_name: str, tools: Optional[List[str]]) -> None:
-        profile_state = self._textual_profile_state(profile_name, create=False)
-        if not profile_state or "tools" not in profile_state:
-            return
-        raw_tools = profile_state.get("tools")
-        profile_tools = self._normalize_tool_list(raw_tools) if isinstance(raw_tools, list) else None
-        if profile_tools != self._normalize_tool_list(tools):
-            return
-        profile_state.pop("tools", None)
-        self._cleanup_textual_profile_state(profile_name)
 
     def _build_agent_path(self, shared_store: Dict[str, Any]) -> List[str]:
         trace = shared_store.get("agent_trace", [])

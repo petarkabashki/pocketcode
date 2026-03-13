@@ -35,13 +35,13 @@ prompt_files:
       "lower_req" store-get "fix" contains? or
       "lower_req" store-get "debug" contains? or
       "lower_req" store-get "refactor" contains? or
-    ] [ "coder::coder" ]
+    ] [ "coder.coder" ]
     [ "lower_req" store-get "architect" contains?
       "lower_req" store-get "design" contains? or
       "lower_req" store-get "plan" contains? or
       "lower_req" store-get "structure" contains? or
       "lower_req" store-get "scaffold" contains? or
-    ] [ "architect::architect" ]
+    ] [ "architect.architect" ]
     [ "lower_req" store-get "ask" contains?
       "lower_req" store-get "question" contains? or
       "lower_req" store-get "explain" contains? or
@@ -49,8 +49,8 @@ prompt_files:
       "lower_req" store-get "what" contains? or
       "lower_req" store-get "how" contains? or
       "lower_req" store-get "why" contains? or
-    ] [ "asker::ask" ]
-    [ True ] [ "coder::coder" ]
+    ] [ "asker.ask" ]
+    [ True ] [ "coder.coder" ]
   ] cond
   handoff
 ] "route" define

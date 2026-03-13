@@ -57,10 +57,10 @@ def parse_reference(
         if not target:
             raise ValueError(f"Typed reference '{kind}:' is missing a target.")
 
-    # Legacy compatibility: older configs and tests still use ``namespace::name``.
-    # The canonical registry key format is dotted ``namespace.name``.
     if "::" in target:
-        target = target.replace("::", ".")
+        raise ValueError(
+            f"Reference '{ref}' uses unsupported '::' separators. Use dotted registry ids like 'namespace.name'."
+        )
 
     if "#" in target:
         container, name = target.split("#", 1)
@@ -95,16 +95,6 @@ def parse_prompt_reference(prompt_ref: str) -> ResourceReference:
 
 def normalize_registry_reference(ref: str, *, allowed_kinds: Iterable[str] | None = None) -> str:
     return parse_reference(ref, allowed_kinds=allowed_kinds).as_registry_key()
-
-
-def normalize_registry_reference_compat(ref: str, *, allowed_kinds: Iterable[str] | None = None) -> str:
-    cleaned = str(ref or "").strip()
-    if not cleaned:
-        return ""
-    try:
-        return normalize_registry_reference(cleaned, allowed_kinds=allowed_kinds)
-    except ValueError:
-        return cleaned
 
 
 def normalize_prompt_reference(prompt_ref: str) -> str:

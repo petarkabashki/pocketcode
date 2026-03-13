@@ -1,16 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pocketcode.core_tools import filesystem as core_filesystem
 from pocketcode.core_tools import file_ops as core_file_ops
+from pocketcode.core.workspace_migration import _is_workspace_compat_shim
 from pocketcode.core.workspace_module_loader import load_workspace_module
 
 
-architect_filesystem = load_workspace_module(
-    ".pocketcode", "architect.filesystem.tool.py"
-)
-coder_filesystem = load_workspace_module(
-    ".pocketcode", "coder.filesystem.tool.py"
-)
 workspace_file_ops = load_workspace_module(
     ".pocketcode", "file_ops.tool.py"
 )
@@ -52,20 +49,14 @@ class TestFilesystemHelpers:
 
 
 class TestFilesystemToolCompatibility:
-    def test_write_file_tool_alias_matches_write_to_file_tool(self):
-        assert issubclass(core_filesystem.WriteFileTool, core_filesystem.WriteToFileTool)
+    def test_workspace_shims_are_removed(self):
+        assert not (_workspace_root() / "architect.filesystem.tool.py").exists()
+        assert not (_workspace_root() / "coder.filesystem.tool.py").exists()
 
-    def test_architect_filesystem_module_reexports_core_symbols(self):
-        assert architect_filesystem.ReadFileTool is core_filesystem.ReadFileTool
-        assert architect_filesystem.WriteToFileTool is core_filesystem.WriteToFileTool
-        assert architect_filesystem.WriteFileTool is core_filesystem.WriteFileTool
-        assert architect_filesystem.glob_files is core_filesystem.glob_files
-
-    def test_coder_filesystem_module_reexports_core_symbols(self):
-        assert coder_filesystem.ReadFileTool is core_filesystem.ReadFileTool
-        assert coder_filesystem.WriteToFileTool is core_filesystem.WriteToFileTool
-        assert coder_filesystem.WriteFileTool is core_filesystem.WriteFileTool
-        assert coder_filesystem.create_directory is core_filesystem.create_directory
+    def test_shim_marker_detection_matches_removed_shims(self, tmp_path):
+        shim_path = tmp_path / "shim.tool.py"
+        shim_path.write_text('"""Compatibility re-export."""\n', encoding="utf-8")
+        assert _is_workspace_compat_shim(shim_path) is True
 
     def test_workspace_file_ops_module_reexports_core_symbols(self):
         assert workspace_file_ops.extract_text(text="x\ny\n", start_line=2)["content"] == "y"
@@ -81,6 +72,10 @@ class TestFilesystemToolCompatibility:
             "apply_staged_edit",
             "cancel_staged_edit",
         }
+
+
+def _workspace_root():
+    return Path(__file__).resolve().parents[2] / ".pocketcode"
 
 
 class TestFileOpsHelpers:

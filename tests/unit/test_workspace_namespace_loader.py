@@ -29,7 +29,7 @@ Shared rules
     _write(
         namespace_root / "reviewer.md",
         """---
-description: Review the current workspace.
+description: Review the current resource_root.pocketcode.
 tool_files:
   - echo.tool.py
 prompt_files:
@@ -52,7 +52,7 @@ Review carefully.
     assert manager.prompts.resolve("github.shared") == "Shared rules"
 
     flow_def = manager.agents.resolve("github.reviewer")
-    assert flow_def.description == "Review the current workspace."
+    assert flow_def.description == "Review the current resource_root.pocketcode."
     assert flow_def.tools == ["github.echo_text"]
     assert "Review carefully." in flow_def.system_prompt
     assert "Shared rules" in flow_def.system_prompt
@@ -156,7 +156,7 @@ description: Default memory hook.
     manager = WorkspaceCatalog(config={}, workspace_root=tmp_path)
     manager.load()
 
-    hook_def = manager.hooks.resolve("workspace.memory.default")
+    hook_def = manager.hooks.resolve("resource_root.pocketcode.memory.default")
     assert hook_def.name == "memory.default"
     assert hook_def.description == "Default memory hook."
     assert hook_def.phases == {"before_llm": '"hook.before_llm" "memory" shared!'}
