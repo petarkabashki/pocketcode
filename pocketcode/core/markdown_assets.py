@@ -157,6 +157,36 @@ def compile_markdown_agent_definition(
     return definition
 
 
+def compile_markdown_hook_definition(
+    document: MarkdownAssetDocument,
+    *,
+    default_name: str,
+) -> Dict[str, Any]:
+    definition = _mapping_copy(document.front_matter)
+    definition.setdefault("name", default_name)
+    _merge_yaml_blocks(definition, document, labels=("spec", "hook", "config"))
+
+    normalized_phases: Dict[str, str] = {}
+    raw_phases = definition.get("phases")
+    if isinstance(raw_phases, dict):
+        for phase_name, phase_source in raw_phases.items():
+            if isinstance(phase_name, str) and isinstance(phase_source, str) and phase_source.strip():
+                normalized_phases[phase_name.strip()] = phase_source.strip()
+
+    for block in document.find_blocks(languages=("vm", "stackvm")):
+        phase_name = block.label.strip()
+        if phase_name and block.content.strip():
+            normalized_phases[phase_name] = block.content.strip()
+
+    definition["phases"] = normalized_phases
+
+    description_sections = _collect_prompt_sections(document, include_body=True)
+    if description_sections and not str(definition.get("description") or "").strip():
+        definition["description"] = "\n\n".join(section for section in description_sections if section).strip()
+
+    return definition
+
+
 def compile_markdown_tool_definition(
     document: MarkdownAssetDocument,
     *,
@@ -334,6 +364,8 @@ def serialize_markdown_agent_definition(agent: Any) -> str:
         front_matter["description"] = str(agent.description)
     if getattr(agent, "llm_profile", None):
         front_matter["llm_profile"] = str(agent.llm_profile)
+    if getattr(agent, "hooks", None) is not None:
+        front_matter["hooks"] = list(agent.hooks)
     if getattr(agent, "skills", None) is not None:
         front_matter["skills"] = list(agent.skills)
     if getattr(agent, "tools", None) is not None:

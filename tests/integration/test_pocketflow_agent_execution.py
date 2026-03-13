@@ -1,9 +1,11 @@
 import asyncio
+from pathlib import Path
+from types import SimpleNamespace
 import pytest
 from typing import Any, Dict
 from pocketflow import Node, Flow
 from pocketcode.core.agent_runtime import AgentRuntime
-from pocketcode.core.runtime_models import AgentDefinition
+from pocketcode.core.runtime_models import AgentDefinition, HookDefinition
 from pocketcode.core.workspace_catalog import WorkspaceCatalog
 from pocketcode.core.namespace_registry import NamespaceRegistry
 from pocketcode.core.llm_router import LlmRouter
@@ -1105,3 +1107,66 @@ def test_stackvm_agent_failure_branch_handoff():
     assert shared_store.get("handoff_history") == ["fallback.agent"]
     assert shared_store.get("last_tool_result") == {"success": False, "error": "missing file"}
     assert shared_store.get("final_output") == "architect plan ready"
+
+
+def test_llm_agent_before_llm_hook_can_short_circuit_with_final_answer():
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+    tool_runtime.describe_tools.return_value = []
+
+    hooks = NamespaceRegistry()
+    hooks.register(
+        "workspace",
+        "shortcut.answer",
+        HookDefinition(
+            name="shortcut.answer",
+            phases={"before_llm": '"hooked answer" answer'},
+        ),
+    )
+
+    agents = NamespaceRegistry()
+    catalog = SimpleNamespace(
+        agents=agents,
+        hooks=hooks,
+        workspace_root=Path("/tmp"),
+        resolve_tools_for_agent=lambda _agent_name: [],
+        _holder=SimpleNamespace(get=lambda: None),
+    )
+
+    runtime = AgentRuntime(
+        catalog=catalog,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    agent_def = AgentDefinition(
+        name="hooked-agent",
+        execution_mode="llm",
+        system_prompt="Normal system prompt.",
+        metadata={},
+    )
+    agents.register("workspace", "hooked-agent", agent_def)
+
+    profile = SimpleNamespace(
+        name="hooked-profile",
+        agent="hooked-agent",
+        flow="hooked-agent",
+        llm_profile=None,
+        inline_prompt="",
+        extra_prompts=[],
+        hooks=["workspace.shortcut.answer"],
+        tools=None,
+    )
+    shared_store = {
+        "active_agent": "hooked-agent",
+        "active_agent_profile": profile,
+        "initial_request": "say hi",
+        "active_skills": [],
+    }
+
+    runtime.run(shared_store)
+
+    assert shared_store.get("final_output") == "hooked answer"
+    llm_router.generate.assert_not_called()

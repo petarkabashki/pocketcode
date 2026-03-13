@@ -171,7 +171,7 @@ When selection presets are saved, any registry-backed tool references embedded i
 
 PocketCoder distinguishes between the workspace root and one or more discovered `resource_root` folders inside it.
 
-The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain recognized resource collections or flat convention files such as `*.md`, `*.agent.md`, `*.agent.yaml`, `*.tool.md`, `*.prompt.md`, or `*.tool.py`. Recognized collections now include `agents/`, `prompts/`, `tools/`, `skills/`, `llm-profiles/`, and typed collection folders such as `agent.<group>/`, `tool.<group>/`, and `skill.<name>/`.
+The runtime auto-discovers resource roots from top-level hidden directories whose names begin with `.pocket` and that contain recognized resource collections or flat convention files such as `*.md`, `*.agent.md`, `*.agent.yaml`, `*.hook.md`, `*.hook.yaml`, `*.tool.md`, `*.prompt.md`, or `*.tool.py`. Recognized collections now include `agents/`, `hooks/`, `prompts/`, `tools/`, `skills/`, `llm-profiles/`, and typed collection folders such as `agent.<group>/`, `hook.<group>/`, `tool.<group>/`, and `skill.<name>/`.
 
 Examples:
 
@@ -185,14 +185,18 @@ Each resource root can provide this extension surface:
 ├── <flow>.md
 ├── <flow>.prompt.md
 ├── <flow>.tool.py
+├── <hook>.hook.md
+├── <hook>.hook.yaml
 ├── <tool>.tool.md
 ├── <tool>.tool.py
 ├── agents/
+├── hooks/
 ├── prompts/
 ├── tools/
 ├── llm-profiles/
 ├── skills/
 ├── agent.<group>/
+├── hook.<group>/
 ├── tool.<group>/
 ├── skill.<name>/
 └── vm/
@@ -201,8 +205,10 @@ Each resource root can provide this extension surface:
 Additional collection conventions:
 
 - `prompts/**/*.md` registers prompts using the path under `prompts/`, with `/` converted to `.`
+- `hooks/**/*.hook.md` and `hooks/**/*.hook.yaml` load workspace hook definitions recursively
 - `tools/**/*.tool.md` and `tools/**/*.tool.py` load direct workspace tools recursively
 - `agents/**/*.agent.md` and `agents/**/*.agent.yaml` load workspace agent profiles recursively
+- `hook.<group>/` is an extra recursive hook root; hook files default to `<group>.<relative_name>`
 - `tool.<group>/` is an extra recursive tool root; Markdown tool wrappers default to `<group>.<relative_name>`
 - `agent.<group>/` is an extra recursive agent root; Markdown agent profiles default to `<group>.<relative_name>`
 - `skill.<name>/` is equivalent to `skills/<name>/` for a single skill bundle
@@ -297,6 +303,10 @@ These files are the editable workspace-backed copies used by the Textual clone/e
 
 Workspace agent profiles are loaded from every discovered `<resource_root>/<name>.agent.yaml`, `<resource_root>/<name>.agent.md`, `<resource_root>/agents/**/*.agent.yaml`, `<resource_root>/agents/**/*.agent.md`, and typed `agent.<group>/` collection. New or cloned profiles are written to the primary resource root using the grouped `agent.<group>/...` convention. For example, `review.safe` writes to `agent.review/safe.agent.md`, while `review` writes to `agent.review/review.agent.md`.
 
+Workspace hook definitions are loaded from every discovered `<resource_root>/<name>.hook.yaml`, `<resource_root>/<name>.hook.md`, `<resource_root>/hooks/**/*.hook.yaml`, `<resource_root>/hooks/**/*.hook.md`, and typed `hook.<group>/` collection. In grouped collections, hook names default from the dotted relative path, for example `hook.memory/default.hook.md` becomes `memory.default`.
+
+Current hook files store a `name`, optional `description`, and a `phases` mapping keyed by runtime lifecycle phase. Markdown hook files can also provide phase bodies through fenced blocks such as ```` ```vm before_llm ````.
+
 Current YAML schema:
 
 ```yaml
@@ -304,6 +314,8 @@ name: my-review-profile
 flow: core.react
 description: Restrictive review profile
 llm_profile: fast-review
+hooks:
+  - workspace.memory.default
 skills:
   - python-testing
 tools:
@@ -321,11 +333,12 @@ Notes:
 
 - `flow` is required.
 - `skills` is optional. When omitted, the profile falls back to the global Textual skill selection order.
+- `hooks` is optional. When omitted, the profile inherits the parent hook list or synthesised default chain.
 - `tools` is optional. When omitted, the profile inherits the flow tool set.
 - `extra_prompts` are resolved relative to the profile file first, then against plugin and workspace fallback roots.
 - workspace Markdown-backed profiles use the same front matter fields and store their inline guidance in the Markdown body.
 - `{{ include:... }}` and `{{ import:prompt:... }}` directives inside Markdown-backed agent bodies are expanded during load.
-- saving a workspace agent profile rewrites registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries to canonical dotted ids; `prompt:` entries remain typed and file-path prompt entries remain unchanged.
+- saving a workspace agent profile rewrites registry-backed `flow`, `hooks`, `tools`, and `tool_confirmation.overrides` entries to canonical dotted ids; `prompt:` entries remain typed and file-path prompt entries remain unchanged.
 - saving a Markdown-backed workspace agent profile preserves Markdown format rather than converting it to YAML.
 
 Workspace Markdown asset authoring now uses:

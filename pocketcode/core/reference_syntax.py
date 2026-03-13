@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-TYPED_REFERENCE_PREFIXES = frozenset({"agent", "flow", "prompt", "tool"})
+TYPED_REFERENCE_PREFIXES = frozenset({"agent", "flow", "hook", "prompt", "tool"})
 
 
 @dataclass(frozen=True)

@@ -136,3 +136,27 @@ def test_workspace_paths_can_mix_multiple_namespace_roots(tmp_path):
 
     assert "github.review" in manager.flows
     assert "legacy.planner" in manager.flows
+
+
+def test_resource_root_registers_hooks_from_grouped_collection(tmp_path):
+    resource_root = tmp_path / ".pocketcode"
+    _write(
+        resource_root / "hook.memory" / "default.hook.md",
+        """---
+name: memory.default
+description: Default memory hook.
+---
+
+```vm before_llm
+"hook.before_llm" "memory" shared!
+```
+""",
+    )
+
+    manager = WorkspaceCatalog(config={}, workspace_root=tmp_path)
+    manager.load()
+
+    hook_def = manager.hooks.resolve("workspace.memory.default")
+    assert hook_def.name == "memory.default"
+    assert hook_def.description == "Default memory hook."
+    assert hook_def.phases == {"before_llm": '"hook.before_llm" "memory" shared!'}

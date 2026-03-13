@@ -724,6 +724,13 @@ class PocketCodeEngine:
                     field_name="tools",
                     context_agent=normalized_agent_name,
                 )
+            if profile.hooks is not None:
+                profile.hooks = self._qualify_existing_hook_refs(
+                    profile.hooks,
+                    owner_name=profile.name,
+                    field_name="hooks",
+                    context_plugin=context_plugin,
+                )
             profile.extra_prompts = self._filter_existing_prompt_refs(
                 profile.extra_prompts,
                 owner_name=profile.name,
@@ -809,6 +816,43 @@ class PocketCodeEngine:
                 continue
             if resolved and resolved not in qualified:
                 qualified.append(resolved)
+        return qualified
+
+    def _qualify_existing_hook_refs(
+        self,
+        refs: List[str],
+        *,
+        owner_name: str,
+        field_name: str,
+        context_plugin: str | None,
+    ) -> List[str]:
+        qualified: List[str] = []
+        for candidate in refs:
+            try:
+                normalized = parse_reference(candidate, allowed_kinds={"hook"})
+            except ValueError as exc:
+                logger.warning(
+                    "Dropping invalid %s reference '%s' from '%s': %s",
+                    field_name,
+                    candidate,
+                    owner_name,
+                    exc,
+                )
+                continue
+
+            target = normalized.as_registry_key()
+            try:
+                qualified_name = self._plugins.hooks.qualify(target, context_plugin=context_plugin)
+            except RegistryError:
+                logger.warning(
+                    "Dropping unknown %s reference '%s' from '%s'.",
+                    field_name,
+                    candidate,
+                    owner_name,
+                )
+                continue
+            if qualified_name not in qualified:
+                qualified.append(qualified_name)
         return qualified
 
     def _filter_existing_prompt_refs(
@@ -1661,6 +1705,17 @@ class PocketCodeEngine:
                 registry=self._plugins.tools,
                 allowed_kinds={"tool"},
                 field_name_prefix=f"{target_path.name}: tools",
+            )
+
+        hooks_raw = raw.get("hooks")
+        if hooks_raw is not None:
+            if not isinstance(hooks_raw, list):
+                raise ValueError(f"{target_path.name}: hooks must be a list when provided.")
+            self._validate_live_registry_reference_list(
+                hooks_raw,
+                registry=self._plugins.hooks,
+                allowed_kinds={"hook"},
+                field_name_prefix=f"{target_path.name}: hooks",
             )
 
         extra_prompts = raw.get("extra_prompts") or []

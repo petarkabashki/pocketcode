@@ -21,6 +21,7 @@ from pocketcode.core.markdown_profiles import parse_markdown_front_matter
 from pocketcode.core.discovery_rules import DiscoveryFilter
 from pocketcode.core.markdown_assets import (
     build_markdown_tool_wrapper,
+    compile_markdown_hook_definition,
     compile_markdown_flow_definition,
     compile_markdown_tool_definition,
     load_markdown_asset_document,
@@ -33,7 +34,7 @@ from pocketcode.core.resource_roots import (
     resource_root_for_path,
     resource_root_namespace,
 )
-from pocketcode.core.runtime_models import Agent, FlowDefinition
+from pocketcode.core.runtime_models import Agent, FlowDefinition, HOOK_PHASES, HookDefinition
 from pocketcode.core.tool_conventions import TOOL_MODULE_SUFFIX, iter_convention_tool_files
 from pocketcode.core.workspace_namespaces import WorkspaceNamespace, namespace_asset_name
 
@@ -76,6 +77,7 @@ class WorkspaceCatalog:
         self.tools: NamespaceRegistry[Any] = NamespaceRegistry()
         self.flows: NamespaceRegistry[FlowDefinition] = NamespaceRegistry()
         self.agents = self.flows
+        self.hooks: NamespaceRegistry[HookDefinition] = NamespaceRegistry()
         self.prompts: NamespaceRegistry[str] = NamespaceRegistry()
         self.llm_profiles: Dict[str, Dict[str, Any]] = {}
         self.namespace_roots: Dict[str, Path] = {}
@@ -102,6 +104,7 @@ class WorkspaceCatalog:
         self.tools = NamespaceRegistry()
         self.flows = NamespaceRegistry()
         self.agents = self.flows
+        self.hooks = NamespaceRegistry()
         self.prompts = NamespaceRegistry()
         self.llm_profiles.clear()
         self.namespace_roots.clear()
@@ -126,6 +129,7 @@ class WorkspaceCatalog:
         self._register_catalog_namespaces(namespace_roots)
 
         self._load_workspace_prompts_only()
+        self._load_workspace_hooks_only()
         self._load_workspace_namespace_prompts(namespace_roots)
         self._load_workspace_namespace_tools(namespace_roots)
         self._load_workspace_namespace_programs(namespace_roots)
@@ -135,8 +139,9 @@ class WorkspaceCatalog:
         self._validate_loaded_flow_references()
 
         logger.info(
-            "Workspace catalog load complete. namespaces=%d, tools=%d, flows=%d, llm_profiles=%d",
+            "Workspace catalog load complete. namespaces=%d, hooks=%d, tools=%d, flows=%d, llm_profiles=%d",
             len(self.namespace_roots),
+            len(self.hooks),
             len(self.tools),
             len(self.flows),
             len(self.llm_profiles),
@@ -250,6 +255,10 @@ class WorkspaceCatalog:
     def _load_workspace_tools_only(self) -> None:
         for resource_root in self._resource_roots:
             self._load_workspace_root_tools(resource_root)
+
+    def _load_workspace_hooks_only(self) -> None:
+        for resource_root in self._resource_roots:
+            self._load_workspace_root_hooks(resource_root)
 
     def _load_workspace_flows_only(self) -> None:
         for resource_root in self._resource_roots:
@@ -488,6 +497,13 @@ class WorkspaceCatalog:
                             exc,
                         )
 
+    def _load_workspace_root_hooks(self, resource_root: ResourceRoot) -> None:
+        resource_filter = self._resource_root_filter(resource_root)
+        for hook_path, default_name in self._iter_workspace_hook_files(resource_root):
+            if resource_filter.ignores(hook_path, is_dir=False):
+                continue
+            self._load_workspace_root_hook(resource_root, hook_path, default_name=default_name)
+
     def _load_workspace_root_tools(self, resource_root: ResourceRoot) -> None:
         resource_filter = self._resource_root_filter(resource_root)
 
@@ -569,10 +585,69 @@ class WorkspaceCatalog:
                         tool_file,
                     )
 
+    def _load_workspace_root_hook(
+        self,
+        resource_root: ResourceRoot,
+        hook_file: Path,
+        *,
+        default_name: str | None = None,
+    ) -> None:
+        if default_name is None:
+            if hook_file.name.endswith(".hook.md"):
+                default_name = self._flat_resource_asset_name(hook_file, suffix=".hook.md")
+            elif hook_file.name.endswith(".hook.yaml"):
+                default_name = self._flat_resource_asset_name(hook_file, suffix=".hook.yaml")
+        try:
+            if hook_file.suffix.lower() == ".md":
+                document = load_markdown_asset_document(hook_file)
+                definition = compile_markdown_hook_definition(document, default_name=default_name or hook_file.stem)
+            else:
+                import yaml
+
+                definition = yaml.safe_load(hook_file.read_text(encoding="utf-8")) or {}
+            if not isinstance(definition, dict):
+                raise ValueError("Hook definition root must be a mapping.")
+            hook_name = str(definition.get("name") or default_name or hook_file.stem).strip()
+            if not hook_name:
+                raise ValueError("Hook definition is missing a name.")
+            raw_phases = definition.get("phases")
+            if not isinstance(raw_phases, dict):
+                raw_phases = {}
+            phases = {
+                str(phase_name).strip(): str(phase_source).strip()
+                for phase_name, phase_source in raw_phases.items()
+                if str(phase_name).strip() in HOOK_PHASES and isinstance(phase_source, str) and phase_source.strip()
+            }
+            if not phases:
+                raise ValueError(f"Hook '{hook_name}' defines no supported hook phases.")
+            hook_definition = HookDefinition(
+                name=hook_name,
+                description=str(definition.get("description", "")),
+                phases=phases,
+                source="workspace" if resource_root.origin == "workspace" else "namespace",
+                source_path=hook_file.resolve(),
+                metadata={"resource_root": str(resource_root.path)},
+            )
+        except Exception as exc:
+            logger.error("Failed loading workspace hook '%s': %s", hook_file, exc, exc_info=True)
+            return
+
+        for namespace in self._resource_root_namespaces(resource_root):
+            try:
+                self.hooks.register(namespace, hook_definition.name, hook_definition)
+            except RegistryError as exc:
+                logger.warning(
+                    "Resource-root hook '%s' from '%s' collides with an existing registration in '%s': %s",
+                    hook_definition.name,
+                    hook_file,
+                    namespace,
+                    exc,
+                )
+
     def _load_workspace_root_flows(self, resource_root: ResourceRoot) -> None:
         resource_filter = self._resource_root_filter(resource_root)
         for flow_file in sorted(resource_root.path.glob("*.md")):
-            if flow_file.name.endswith(".prompt.md") or flow_file.name.endswith(".tool.md") or flow_file.name.endswith(".agent.md") or flow_file.name.endswith(".agent.yaml"):
+            if flow_file.name.endswith(".prompt.md") or flow_file.name.endswith(".tool.md") or flow_file.name.endswith(".agent.md") or flow_file.name.endswith(".agent.yaml") or flow_file.name.endswith(".hook.md") or flow_file.name.endswith(".hook.yaml"):
                 continue
             if self._is_resource_root_namespace_pack_asset(resource_root.path, flow_file):
                 continue
@@ -587,6 +662,7 @@ class WorkspaceCatalog:
             if not path.name.endswith(".prompt.md")
             if not path.name.endswith(".tool.md")
             if not path.name.endswith(".agent.md")
+            if not path.name.endswith(".hook.md")
         )
 
     def _workspace_namespace_program_name(self, namespace: WorkspaceNamespace, program_path: Path) -> str:
@@ -1127,6 +1203,50 @@ class WorkspaceCatalog:
         if not asset_name:
             return prefix
         return f"{prefix}.{asset_name}"
+
+    def _iter_workspace_hook_files(self, resource_root: ResourceRoot) -> list[tuple[Path, str | None]]:
+        files: list[tuple[Path, str | None]] = []
+        seen: set[Path] = set()
+
+        for path in sorted(resource_root.path.glob("*.hook.yaml")):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append((path, None))
+
+        for path in sorted(resource_root.path.glob("*.hook.md")):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append((path, None))
+
+        hook_roots: list[tuple[Path, str | None]] = []
+        hooks_root = resource_root.path / "hooks"
+        if hooks_root.is_dir():
+            hook_roots.append((hooks_root, None))
+        for path in sorted(candidate for candidate in resource_root.path.iterdir() if candidate.is_dir()):
+            if path.name.startswith("hook."):
+                hook_roots.append((path, path.name[len("hook."):].strip() or None))
+
+        for hook_root, prefix in hook_roots:
+            for path in sorted(candidate for candidate in hook_root.rglob("*.hook.yaml") if candidate.is_file()):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                asset_name = self._workspace_asset_name(hook_root, path, suffix=".hook.yaml")
+                files.append((path, self._prefix_asset_name(prefix, asset_name)))
+            for path in sorted(candidate for candidate in hook_root.rglob("*.hook.md") if candidate.is_file()):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                asset_name = self._workspace_asset_name(hook_root, path, suffix=".hook.md")
+                files.append((path, self._prefix_asset_name(prefix, asset_name)))
+
+        return files
 
     def _iter_workspace_tool_exports(self, module: types.ModuleType) -> Iterable[tuple[str, Any]]:
         exports = getattr(module, "TOOLS", None)

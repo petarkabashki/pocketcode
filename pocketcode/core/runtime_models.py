@@ -5,6 +5,26 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+HOOK_PHASES = (
+    "before_turn",
+    "before_llm",
+    "after_llm",
+    "before_tool",
+    "after_tool",
+    "after_turn",
+)
+
+
+@dataclass
+class HookDefinition:
+    name: str
+    description: str = ""
+    phases: Dict[str, str] = field(default_factory=dict)
+    source: str = "workspace"
+    source_path: Optional[Path] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class CompositeAgent:
     """A named configuration bundle that governs how a flow is invoked.
@@ -33,6 +53,8 @@ class CompositeAgent:
     extra_prompts : List[str]
         Ordered list of file paths whose contents are appended to the system
         prompt each turn. Default ``[]``.
+    hooks : List[str] | None
+        Ordered list of hook asset references mixed into the profile.
     skills : List[str] | None
         Default enabled skill names for this profile. ``None`` means fall back
         to global Textual skill defaults.
@@ -55,6 +77,7 @@ class CompositeAgent:
     llm_profile: Optional[str] = None
     inline_prompt: str = ""
     extra_prompts: List[str] = field(default_factory=list)
+    hooks: Optional[List[str]] = None
     skills: Optional[List[str]] = None
     tools: Optional[List[str]] = None
     tool_confirmation: Dict[str, Any] = field(default_factory=dict)

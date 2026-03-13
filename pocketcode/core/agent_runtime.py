@@ -24,7 +24,7 @@ from pocketcode.core.stackvm_expander import expand_stackvm_ast
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
 from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast
 from pocketcode.core.stackvm_validator import collect_stackvm_authoring_warnings, validate_stackvm_ast
-from pocketcode.core.runtime_models import AgentDefinition
+from pocketcode.core.runtime_models import AgentDefinition, HOOK_PHASES, HookDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
 
 logger = logging.getLogger(__name__)
@@ -165,6 +165,7 @@ class AgentRuntime:
 
     def _run_agent_turn(self, agent_name: str, shared_store: Dict[str, Any]) -> str:
         agent_definition = self._plugins.agents[agent_name]
+        active_profile = self._get_active_profile_for_agent(agent_name, shared_store)
 
         shared_store["active_agent"] = agent_name
         shared_store.setdefault("agent_trace", []).append({"agent": agent_name})
@@ -174,6 +175,15 @@ class AgentRuntime:
             agent=agent_name,
             execution_mode=agent_definition.execution_mode,
         )
+        hook_transition = self._run_agent_hooks(
+            phase="before_turn",
+            agent_name=agent_name,
+            agent_definition=agent_definition,
+            active_profile=active_profile,
+            shared_store=shared_store,
+        )
+        if hook_transition is not None:
+            return hook_transition
 
         # Inject namespace context if available for this agent
         transition: str | None = None
@@ -243,8 +253,111 @@ class AgentRuntime:
             agent_definition=agent_definition,
             transition=transition,
         )
+        after_turn_transition = self._run_agent_hooks(
+            phase="after_turn",
+            agent_name=agent_name,
+            agent_definition=agent_definition,
+            active_profile=active_profile,
+            shared_store=shared_store,
+        )
+        if after_turn_transition is not None:
+            return after_turn_transition
 
         return str(transition or "continue")
+
+    def _resolve_hook_definitions(
+        self,
+        *,
+        active_profile: Any,
+        agent_name: str,
+    ) -> list[HookDefinition]:
+        hook_refs = list(getattr(active_profile, "hooks", None) or [])
+        if not hook_refs:
+            return []
+        context_plugin = self._resolve_profile_plugin_name(active_profile) or self._context_plugin_for_agent(agent_name)
+        resolved: list[HookDefinition] = []
+        seen: set[str] = set()
+        for hook_ref in hook_refs:
+            try:
+                qualified_name = self._plugins.hooks.qualify(str(hook_ref), context_plugin=context_plugin)
+                if qualified_name in seen:
+                    continue
+                seen.add(qualified_name)
+                hook_definition = self._plugins.hooks.resolve(qualified_name)
+                resolved.append(hook_definition)
+            except Exception:
+                logger.warning("Skipping unresolved hook '%s' for agent '%s'.", hook_ref, agent_name)
+        return resolved
+
+    def _run_agent_hooks(
+        self,
+        *,
+        phase: str,
+        agent_name: str,
+        agent_definition: AgentDefinition,
+        active_profile: Any,
+        shared_store: Dict[str, Any],
+    ) -> str | None:
+        if phase not in HOOK_PHASES:
+            return None
+        hook_definitions = self._resolve_hook_definitions(active_profile=active_profile, agent_name=agent_name)
+        if not hook_definitions:
+            return None
+        for hook_definition in hook_definitions:
+            vm_source = (hook_definition.phases or {}).get(phase)
+            if not vm_source:
+                continue
+            shared_store["active_hook"] = hook_definition.name
+            shared_store["active_hook_phase"] = phase
+            transition = self._execute_hook_vm(
+                hook_definition=hook_definition,
+                vm_source=vm_source,
+                agent_name=agent_name,
+                agent_definition=agent_definition,
+                shared_store=shared_store,
+            )
+            if transition in {"call_tool", "handoff", "final_answer", "ask_user", "error"}:
+                return transition
+        return None
+
+    def _execute_hook_vm(
+        self,
+        *,
+        hook_definition: HookDefinition,
+        vm_source: str,
+        agent_name: str,
+        agent_definition: AgentDefinition,
+        shared_store: Dict[str, Any],
+    ) -> str | None:
+        tool_names = list(shared_store.get("active_allowed_tools") or self._plugins.resolve_tools_for_agent(agent_name))
+        tool_definitions = self._tool_runtime.describe_tools(tool_names)
+        llm_profile = self._resolve_llm_profile(agent_name, agent_definition, shared_store)
+        system_prompt = self._build_agent_system_prompt(agent_name=agent_name)
+        overlay_prompt = self._resolve_overlay_prompt_content(
+            active_profile=self._get_active_profile_for_agent(agent_name, shared_store),
+            shared_store=shared_store,
+        )
+        if overlay_prompt:
+            system_prompt = f"{system_prompt}\n\n{overlay_prompt}"
+        result = StackVmExecutionResult()
+        vm = AgentStackVM(shared_store=shared_store)
+        vm.register_host_words(
+            host_context=StackVmHostContext(
+                agent_name=agent_name,
+                llm_router=self._llm_router,
+                tool_runtime=self._tool_runtime,
+                llm_profile=llm_profile,
+                system_prompt=system_prompt,
+                tool_definitions=tool_definitions,
+            ),
+            result=result,
+        )
+        try:
+            asyncio.run(vm.eval(vm_source))
+        except Exception as exc:
+            logger.warning("Hook '%s' phase '%s' failed: %s", hook_definition.name, shared_store.get("active_hook_phase"), exc)
+            return "error"
+        return result.transition
 
     def _run_pocketflow_agent(
         self,
@@ -563,6 +676,15 @@ class AgentRuntime:
         shared_store: Dict[str, Any],
     ) -> str:
         active_profile = self._get_active_profile_for_agent(agent_name, shared_store)
+        hook_transition = self._run_agent_hooks(
+            phase="before_llm",
+            agent_name=agent_name,
+            agent_definition=agent_definition,
+            active_profile=active_profile,
+            shared_store=shared_store,
+        )
+        if hook_transition is not None:
+            return hook_transition
         allowed_tools = self._resolve_effective_tool_names(
             agent_name=agent_name,
             active_profile=active_profile,
@@ -699,14 +821,39 @@ class AgentRuntime:
         shared_store["last_agent_decision"] = decision
         shared_store["last_agent_decision_yaml"] = self._to_yaml(decision)
 
-        return self._apply_agent_decision(
+        transition = self._apply_agent_decision(
             decision=decision,
             agent_name=agent_name,
             shared_store=shared_store,
         )
+        hook_transition = self._run_agent_hooks(
+            phase="after_llm",
+            agent_name=agent_name,
+            agent_definition=agent_definition,
+            active_profile=active_profile,
+            shared_store=shared_store,
+        )
+        return hook_transition or transition
 
     def _run_tool_call(self, shared_store: Dict[str, Any]) -> None:
         self._raise_if_cancelled(shared_store)
+        active_agent = str(shared_store.get("active_agent") or "").strip()
+        agent_definition = self._plugins.agents.get(active_agent) if active_agent else None
+        active_profile = (
+            self._get_active_profile_for_agent(active_agent, shared_store)
+            if active_agent and agent_definition is not None
+            else None
+        )
+        if active_agent and agent_definition is not None and active_profile is not None:
+            hook_transition = self._run_agent_hooks(
+                phase="before_tool",
+                agent_name=active_agent,
+                agent_definition=agent_definition,
+                active_profile=active_profile,
+                shared_store=shared_store,
+            )
+            if hook_transition in {"final_answer", "ask_user", "handoff", "call_tool", "error"}:
+                return
         pending_tool = shared_store.get("pending_tool", {})
         if not isinstance(pending_tool, dict):
             pending_tool = {}
@@ -758,6 +905,14 @@ class AgentRuntime:
             success=not (isinstance(result, dict) and result.get("success") is False),
             result=result,
         )
+        if active_agent and agent_definition is not None and active_profile is not None:
+            self._run_agent_hooks(
+                phase="after_tool",
+                agent_name=active_agent,
+                agent_definition=agent_definition,
+                active_profile=active_profile,
+                shared_store=shared_store,
+            )
 
     def _run_handoff(self, shared_store: Dict[str, Any]) -> None:
         source_agent = str(shared_store.get("active_agent")) if shared_store.get("active_agent") else None
@@ -1332,6 +1487,17 @@ class AgentRuntime:
                 parts.append(skill_extra)
 
         return "\n\n".join(part for part in parts if part)
+
+    def _context_plugin_for_agent(self, agent_name: str | None) -> str | None:
+        if not agent_name:
+            return None
+        agent_definition = self._plugins.agents.get(agent_name)
+        if agent_definition is None:
+            return None
+        return namespace_name_from_metadata(
+            getattr(agent_definition, "metadata", {}) or {},
+            fallback_qualified_name=agent_name,
+        )
 
     def _resolve_effective_tool_names(
         self,

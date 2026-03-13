@@ -12,8 +12,9 @@ The current stack is:
 
 1. flow definition
 2. active agent
-3. optional enabled skills
-4. session overrides from the CLI or Textual UI
+3. active hook overlays referenced by the agent
+4. optional enabled skills
+5. session overrides from the CLI or Textual UI
 
 ## Flow Authoring
 
@@ -108,6 +109,7 @@ Agents can change:
 - `llm_profile`
 - `inline_prompt`
 - `extra_prompts`
+- `hooks`
 - `skills`
 - `tools`
 - `tool_confirmation`
@@ -136,7 +138,7 @@ Current behavior:
 
 - authored agents stay sparse and do not automatically copy flow defaults into their stored fields
 - `flow` may be omitted when `extends` is present
-- omitted `llm_profile`, `skills`, and `tools` inherit from the parent agent
+- omitted `llm_profile`, `hooks`, `skills`, and `tools` inherit from the parent agent
 - parent and child `inline_prompt` / `extra_prompts` are appended in that order
 - `tool_confirmation` merges with child values winning
 - synthesised default agents still carry the flow's base `llm_profile` and `tools`
@@ -144,7 +146,7 @@ Current behavior:
 This gives the runtime a two-part model:
 
 1. executable flow
-2. inheritable agent overlay chain
+2. inheritable agent overlay chain with reusable hook refs
 
 ### Self-Contained Hybrid Agents
 
@@ -174,6 +176,8 @@ name: my-review-profile
 flow: core.react
 description: Review-focused profile
 llm_profile: fast-review
+hooks:
+  - workspace.memory.default
 skills:
   - python-testing
 tools:
@@ -192,6 +196,8 @@ Current inheriting schema:
 ```yaml
 name: my-review-profile-safe
 extends: my-review-profile
+hooks:
+  - workspace.shortcut.cache
 tools:
   - core.read_file
 tool_confirmation:
@@ -201,6 +207,7 @@ tool_confirmation:
 Notes:
 
 - `flow` is required unless `extends` is present.
+- `hooks` omitted means inherit the parent hook list when `extends` is used; otherwise they inherit the synthesised default chain.
 - `skills` omitted means fall back to the global Textual skill defaults for that session.
 - `tools` omitted means inherit the parent agent tools when `extends` is used; otherwise they inherit the flow tool surface through the synthesised default chain.
 - `tools: []` means allow no base tools.

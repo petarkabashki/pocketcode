@@ -17,6 +17,7 @@ An agent is a named configuration object that governs how a flow behaves during 
 An authored agent can control:
 
 - which LLM profile to use
+- which reusable hooks are mixed into runtime lifecycle phases
 - which tools are permitted
 - which extra prompt files are appended to the flow prompt
 - which default and per-tool confirmation policies apply
@@ -38,6 +39,7 @@ Current fields:
 | `llm_profile` | `str \| None` | `None` | LLM profile override |
 | `inline_prompt` | `str` | `""` | Inline prompt text appended after the flow prompt |
 | `extra_prompts` | `List[str]` | `[]` | Additional prompt references; each entry may be a file path or a `prompt:` resource reference |
+| `hooks` | `List[str] \| None` | `None` | Ordered hook refs mixed into the agent lifecycle; `None` means inherit |
 | `skills` | `List[str] \| None` | `None` | Default enabled skills; `None` means use global skill defaults |
 | `tools` | `List[str] \| None` | `None` | Tool allowlist; `None` means inherit flow tool surface |
 | `tool_confirmation` | `dict` | `{}` | Confirmation defaults and per-tool overrides |
@@ -45,6 +47,7 @@ Current fields:
 | `source_path` | `Path \| None` | `None` | Source file path for workspace-backed agents |
 
 - `tools` entries resolve through the shared registry, so they accept canonical dotted ids and typed `tool:` references.
+- `hooks` entries resolve through the shared registry, so they accept canonical dotted ids and typed `hook:` references.
 
 ## Source And Precedence
 
@@ -65,6 +68,7 @@ Current inheritance rules are:
 
 - `flow`: inherited from `extends` when omitted
 - `llm_profile`: inherited when omitted
+- `hooks`: inherited when omitted; explicit lists replace the parent list
 - `skills`: inherited when omitted; explicit lists replace the parent list
 - `tools`: inherited when omitted; explicit lists replace the parent list
 - `extra_prompts`: appended after parent `extra_prompts`
@@ -112,6 +116,9 @@ The agent-profile system uses these workspace paths:
 - `<resource_root>/agents/**/*.agent.md` and `<resource_root>/agents/**/*.agent.yaml` for recursive workspace agent collections
 - `<resource_root>/agent.<group>/**/*.agent.md` and `<resource_root>/agent.<group>/**/*.agent.yaml` for typed grouped agent collections; Markdown agent files default their name to `<group>.<relative_name>` when `name` is omitted
 - `<resource_root>/llm-profiles/` for workspace LLM profile YAML files
+- `<resource_root>/<name>.hook.md` and `<resource_root>/<name>.hook.yaml` for flat direct hook assets
+- `<resource_root>/hooks/**/*.hook.md` and `<resource_root>/hooks/**/*.hook.yaml` for recursive hook collections
+- `<resource_root>/hook.<group>/**/*.hook.md` and `<resource_root>/hook.<group>/**/*.hook.yaml` for typed grouped hook collections; hook files default their name to `<group>.<relative_name>` when `name` is omitted
 - `<resource_root>/<name>.tool.md` and `<resource_root>/<name>.tool.py` for flat direct tool assets under `resource_root.<name>`; the default `.pocketcode/` root is also aliased under `workspace`
 - `<resource_root>/tools/**/*.tool.md` and `<resource_root>/tools/**/*.tool.py` for recursive tool collections
 - `<resource_root>/tool.<group>/**/*.tool.md` and `<resource_root>/tool.<group>/**/*.tool.py` for typed grouped tool collections; Markdown tool files default their name to `<group>.<relative_name>` when `name` is omitted
@@ -121,6 +128,8 @@ The agent-profile system uses these workspace paths:
 - `runtime.workspace_paths[*]` for namespace-owned executable `*.md` flows, `*.prompt.md` prompts, and `*.tool.py` tools from plain namespace roots such as `.github/`
 
 Built-in `core` is loaded from the package resource root under `pocketcode/.pocketcore/`. The package-owned Python implementations for that namespace live under `pocketcode/core_tools/`.
+
+Current hook phases are `before_turn`, `before_llm`, `after_llm`, `before_tool`, `after_tool`, and `after_turn`. Hook phase bodies are StackVM source.
 
 ## Workspace LLM Profile Schema
 
@@ -183,6 +192,8 @@ name: my-agent
 flow: core.react
 description: Optional description
 llm_profile: fast-review
+hooks:
+  - workspace.memory.default
 skills:
   - python-testing
 tools:
@@ -201,6 +212,8 @@ Example inheriting YAML form:
 ```yaml
 name: my-agent-safe
 extends: my-agent
+hooks:
+  - workspace.shortcut.cache
 tools:
   - core.read_file
 tool_confirmation:
@@ -226,15 +239,16 @@ Notes:
 
 - `flow` is required unless `extends` is present or the Markdown file is self-contained.
 - `extends` is accepted in YAML and Markdown and is stored internally as `base_agent`.
+- `hooks` omitted means inherit the parent hook list or synthesised default chain.
 - `skills` omitted means fall back to the global Textual skill selection order.
 - `tools` omitted means inherit the target flow tool surface.
 - agent-facing runtime controls such as flow selection, tool listing, and per-agent LLM overrides normalize typed `flow:` or `agent:` references before registry lookup.
 - `extra_prompts` entries beginning with `prompt:` resolve through the prompt registry.
 - path-based `extra_prompts` are resolved relative to the profile file first, then through namespace and resource-root prompt fallback roots. Paths such as `prompts/review.md` are also accepted when the resource-root prompt fallback path is active.
 - workspace Markdown-backed agent bodies are loaded into `inline_prompt` after include and import expansion using the same workspace prompt registry and `<resource_root>/prompts/` fallback resolution used by workspace Markdown flows.
-- workspace-backed agent files now validate and normalize typed refs while loading; malformed `flow`, `extends`, `tools`, or `extra_prompts` entries cause that agent file to be skipped with a warning instead of failing later during runtime resolution.
+- workspace-backed agent files now validate and normalize typed refs while loading; malformed `flow`, `extends`, `hooks`, `tools`, or `extra_prompts` entries cause that agent file to be skipped with a warning instead of failing later during runtime resolution.
 - workspace Markdown agent edits and clones now validate `include` and `import` prompt references before reload through the shared engine asset API, so broken prompt-file references fail during authoring instead of only after a later registry reload.
-- that same pre-reload validation now resolves the target `flow`, validates `extends` against currently loaded executable or authored agents, and checks explicit `tools` and `prompt:` entries in `extra_prompts` against the live registries.
+- that same pre-reload validation now resolves the target `flow`, validates `extends` against currently loaded executable or authored agents, and checks explicit `hooks`, `tools`, and `prompt:` entries in `extra_prompts` against the live registries.
 - when a workspace-backed agent profile is saved or updated, registry-backed `flow`, `tools`, and `tool_confirmation.overrides` entries are written back in canonical dotted form, while `prompt:` sources remain typed and plain path-based prompt entries remain plain paths; Markdown-backed profiles are preserved as Markdown on save.
 - after the engine has loaded flows, tools, and prompts, authored agents are resolved through inheritance and validated again against the live registries; resolvable tool refs are canonicalized, invalid prompt-resource refs are removed with a warning, and agents whose effective target flow is no longer available are dropped from the loaded registry.
 

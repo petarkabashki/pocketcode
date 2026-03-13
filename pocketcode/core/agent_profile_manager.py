@@ -83,6 +83,7 @@ class CompositeAgentManager:
                 description=f"Synthesised default agent for {qname}.",
                 llm_profile=getattr(defn, "llm_profile", None),
                 extra_prompts=[],
+                hooks=None,
                 skills=None,
                 tools=list(getattr(defn, "tools", None) or []) or None,
                 tool_confirmation={},
@@ -515,6 +516,23 @@ class CompositeAgentManager:
             skills_raw = raw.get("skills") if has_skills_key else None
             if skills_raw is not None and not isinstance(skills_raw, list):
                 skills_raw = None
+            has_hooks_key = "hooks" in raw
+            hooks_raw = raw.get("hooks") if has_hooks_key else None
+            if hooks_raw is not None and not isinstance(hooks_raw, list):
+                hooks_raw = None
+            normalized_hooks = None
+            if has_hooks_key and hooks_raw is not None:
+                normalized_hooks = [str(hook_ref) for hook_ref in hooks_raw if isinstance(hook_ref, str)]
+                for index, hook_ref in enumerate(normalized_hooks):
+                    validate_registry_reference(
+                        hook_ref,
+                        allowed_kinds={"hook"},
+                        field_name=f"{yaml_file.name}: hooks[{index}]",
+                    )
+                normalized_hooks = [
+                    normalize_registry_reference(hook_ref, allowed_kinds={"hook"})
+                    for hook_ref in normalized_hooks
+                ]
 
             extra_prompts = [str(p) for p in raw.get("extra_prompts", []) if isinstance(p, str)]
             for index, prompt_ref in enumerate(extra_prompts):
@@ -542,6 +560,7 @@ class CompositeAgentManager:
                 description=str(raw.get("description", "")),
                 llm_profile=str(raw["llm_profile"]) if raw.get("llm_profile") else None,
                 extra_prompts=extra_prompts,
+                hooks=normalized_hooks if has_hooks_key and normalized_hooks is not None else None,
                 skills=(
                     [str(skill) for skill in skills_raw if isinstance(skill, str)]
                     if has_skills_key and skills_raw is not None
@@ -596,6 +615,12 @@ class CompositeAgentManager:
             data["llm_profile"] = agent.llm_profile
         if agent.skills is not None:
             data["skills"] = list(agent.skills)
+        if agent.hooks is not None:
+            data["hooks"] = [
+                normalize_registry_reference(str(hook_name), allowed_kinds={"hook"})
+                for hook_name in agent.hooks
+                if str(hook_name).strip()
+            ]
         if agent.tools is not None:
             data["tools"] = [
                 normalize_registry_reference(str(tool_name), allowed_kinds={"tool"})
@@ -680,6 +705,7 @@ class CompositeAgentManager:
                 llm_profile=agent.llm_profile,
                 inline_prompt=agent.inline_prompt,
                 extra_prompts=list(agent.extra_prompts),
+                hooks=None if agent.hooks is None else list(agent.hooks),
                 skills=None if agent.skills is None else list(agent.skills),
                 tools=None if agent.tools is None else list(agent.tools),
                 tool_confirmation={
@@ -712,6 +738,7 @@ class CompositeAgentManager:
             llm_profile=agent.llm_profile if agent.llm_profile is not None else base_agent.llm_profile,
             inline_prompt="\n\n".join(merged_prompt_parts),
             extra_prompts=[*list(base_agent.extra_prompts), *list(agent.extra_prompts)],
+            hooks=list(agent.hooks) if agent.hooks is not None else (list(base_agent.hooks) if base_agent.hooks is not None else None),
             skills=list(agent.skills) if agent.skills is not None else (list(base_agent.skills) if base_agent.skills is not None else None),
             tools=list(agent.tools) if agent.tools is not None else (list(base_agent.tools) if base_agent.tools is not None else None),
             tool_confirmation=merged_confirmation,
