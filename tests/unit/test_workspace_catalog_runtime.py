@@ -29,9 +29,11 @@ def test_examples_root_loads_stackvm_example_namespaces(tmp_path):
     manager.load()
 
     review_def = manager.agents.resolve("stackvm_example.review")
+    normalize_def = manager.agents.resolve("stackvm_tool_normalize_example.normalize")
     handoff_def = manager.agents.resolve("stackvm_handoff_example.delegate")
     assert review_def.execution_mode == "vm"
     assert review_def.vm_modules == ["vm/common"]
+    assert normalize_def.vm_module_prefixes == {"vm/common": "common"}
     assert review_def.vm_files == ["vm/tool_loop.md"]
     assert handoff_def.flow_instance is not None
 

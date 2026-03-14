@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pocketcode.core.agent_stack_vm import (
     AgentStackVM,
+    StackVmIllegalChildEffectError,
     StackVmExecutionResult,
     StackVmHostContext,
 )
@@ -33,6 +34,7 @@ name: tail
         vm_entry=None,
         vm_module="common",
         vm_modules=[],
+        vm_module_prefixes={},
         vm_file="vm/tail.md",
         vm_files=[],
         base_dir=tmp_path,
@@ -56,6 +58,7 @@ def test_load_stackvm_program_source_resolves_slash_style_refs_without_suffix(tm
         vm_entry="route",
         vm_module="vm/router",
         vm_modules=[],
+        vm_module_prefixes={},
         vm_file=None,
         vm_files=[],
         base_dir=tmp_path,
@@ -64,6 +67,173 @@ def test_load_stackvm_program_source_resolves_slash_style_refs_without_suffix(tm
 
     assert '[ "resolved" answer ] "route" define' in source
     assert str(vm_root / "router.vm") in source_files
+
+
+def test_load_stackvm_program_source_applies_module_prefixes_to_user_words_and_macros(tmp_path: Path):
+    vm_root = tmp_path / "vm"
+    vm_root.mkdir(parents=True, exist_ok=True)
+    (vm_root / "common.vm").write_text(
+        '\n'.join(
+            [
+                '[ "base" ] "payload-data" define',
+                '[ value ] [ value common.decorate ] "wrap" defmacro',
+                '[ value ] [ [ value unquote ] common.decorate ] syntax-quote "emit" defmacro',
+                '[ "value:" swap concat ] "decorate" define',
+                '[ payload-data ] "message" define',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    source, _ = load_stackvm_program_source(
+        vm_source=None,
+        vm_entry="route",
+        vm_module="common",
+        vm_modules=[],
+        vm_module_prefixes={"common": "common"},
+        vm_file=None,
+        vm_files=[],
+        base_dir=tmp_path,
+        search_roots=[tmp_path],
+    )
+
+    assert '"common.payload-data" define' in source
+    assert '"common.decorate" define' in source
+    assert '"common.wrap" defmacro' in source
+    assert '"common.emit" defmacro' in source
+    assert 'common.payload-data' in source
+    assert 'common.decorate' in source
+    assert 'value unquote' in source
+
+
+def test_load_stackvm_program_source_links_explicit_module_exports_and_imports(tmp_path: Path):
+    vm_root = tmp_path / "vm"
+    vm_root.mkdir(parents=True, exist_ok=True)
+    (vm_root / "common.vm").write_text(
+        '\n'.join(
+            [
+                '"common" module',
+                '[ "shared payload" ] "payload-data" define',
+                '"payload-data" export',
+                '[ value ] [ [ value unquote ] common.decorate ] syntax-quote "emit" defmacro',
+                '"emit" export',
+                '[ "value:" swap concat ] "decorate" define',
+                '"decorate" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (vm_root / "router.vm").write_text(
+        '\n'.join(
+            [
+                '"router" module',
+                '"common.payload-data" import',
+                '"common.emit" import',
+                '[ payload-data "message" store-set "ok" emit ] "route" define',
+                '"route" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    source, _ = load_stackvm_program_source(
+        vm_source=None,
+        vm_entry="router.route",
+        vm_module=None,
+        vm_modules=["vm/common", "vm/router"],
+        vm_module_prefixes={},
+        vm_file=None,
+        vm_files=[],
+        base_dir=tmp_path,
+        search_roots=[tmp_path],
+    )
+
+    assert '"common.payload-data" define' in source
+    assert '"common.decorate" define' in source
+    assert '"common.emit" defmacro' in source
+    assert '"router.route" define' in source
+    assert 'common.payload-data "message" store-set' in source
+    assert '"ok" common.emit' in source
+    assert '"router" module' not in source
+    assert ' import' not in source
+    assert ' export' not in source
+
+
+def test_load_stackvm_program_source_rejects_unknown_module_imports(tmp_path: Path):
+    vm_root = tmp_path / "vm"
+    vm_root.mkdir(parents=True, exist_ok=True)
+    (vm_root / "router.vm").write_text(
+        '\n'.join(
+            [
+                '"router" module',
+                '"common.missing" import',
+                '[ missing ] "route" define',
+                '"route" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        load_stackvm_program_source(
+            vm_source=None,
+            vm_entry="router.route",
+            vm_module="vm/router",
+            vm_modules=[],
+            vm_module_prefixes={},
+            vm_file=None,
+            vm_files=[],
+            base_dir=tmp_path,
+            search_roots=[tmp_path],
+        )
+    except ValueError as exc:
+        assert "imports unknown symbol 'common.missing'" in str(exc)
+    else:
+        raise AssertionError("Expected unknown module import to fail.")
+
+
+def test_load_stackvm_program_source_rejects_module_import_cycles(tmp_path: Path):
+    vm_root = tmp_path / "vm"
+    vm_root.mkdir(parents=True, exist_ok=True)
+    (vm_root / "a.vm").write_text(
+        '\n'.join(
+            [
+                '"a" module',
+                '"b.value" import',
+                '[ value ] "route" define',
+                '"route" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (vm_root / "b.vm").write_text(
+        '\n'.join(
+            [
+                '"b" module',
+                '"a.route" import',
+                '[ route ] "value" define',
+                '"value" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        load_stackvm_program_source(
+            vm_source=None,
+            vm_entry="a.route",
+            vm_module=None,
+            vm_modules=["vm/a", "vm/b"],
+            vm_module_prefixes={},
+            vm_file=None,
+            vm_files=[],
+            base_dir=tmp_path,
+            search_roots=[tmp_path],
+        )
+    except ValueError as exc:
+        assert "import cycle detected" in str(exc)
+    else:
+        raise AssertionError("Expected module import cycle to fail.")
 
 
 def test_agent_stack_vm_structured_data_words():
@@ -312,6 +482,65 @@ def test_agent_stack_vm_fallback_restores_stack_before_running_fallback():
 
     assert vm.store["fallback_result"] == 2
     assert vm.store["remaining"] == 1
+
+
+def test_agent_stack_vm_host_words_record_last_vm_effect_metadata():
+    vm = AgentStackVM(shared_store={})
+    result = StackVmExecutionResult()
+    vm.register_host_words(
+        host_context=StackVmHostContext(
+            agent_name="vm-test",
+            llm_router=None,
+            tool_runtime=None,
+            llm_profile=None,
+            system_prompt="",
+            tool_definitions=[],
+        ),
+        result=result,
+    )
+
+    asyncio.run(vm.eval('"Need confirmation?" ask-user'))
+
+    assert result.transition == "ask_user"
+    assert result.effect == {
+        "kind": "ask_user",
+        "payload": {"question": "Need confirmation?"},
+    }
+    assert vm.store["last_vm_effect"] == result.effect
+    assert vm.store["last_vm_transition"] == "ask_user"
+    assert vm.store["vm_effect_history"] == [
+        {
+            "agent": "vm-test",
+            "transition": "ask_user",
+            "effect": {
+                "kind": "ask_user",
+                "payload": {"question": "Need confirmation?"},
+            },
+        }
+    ]
+
+
+def test_agent_stack_vm_fallback_does_not_swallow_illegal_child_effect_errors():
+    vm = AgentStackVM(shared_store={})
+    result = StackVmExecutionResult()
+    vm.register_host_words(
+        host_context=StackVmHostContext(
+            agent_name="vm-test",
+            llm_router=None,
+            tool_runtime=None,
+            llm_profile=None,
+            system_prompt="",
+            tool_definitions=[],
+        ),
+        result=result,
+    )
+
+    try:
+        asyncio.run(vm.eval('"[1]" yaml> [ [ "nope" answer ] parallel-map ] [ "recovered" answer ] fallback'))
+    except StackVmIllegalChildEffectError as exc:
+        assert "parallel-map child quotations cannot finalize answers" in str(exc)
+    else:
+        raise AssertionError("fallback should not swallow illegal child effect errors")
 
 
 def test_agent_stack_vm_parallel_map_returns_result_list():

@@ -93,7 +93,16 @@ That applies both to direct `*.md` flow assets and to self-contained `*.agent.md
 
 Markdown flow definitions may also declare `tool_files`. Each entry is resolved relative to the Markdown file first, loaded as a Python tool module, and registered into the same namespace before the flow definition is finalized. When `tool_files` is present and the flow does not declare `tools`, the exported tool names become the flow's base tool list automatically. When `tool_files` and prompt-file fields are omitted, the loader also looks for sibling `<name>.tool.py` and `<name>.prompt.md` files beside the Markdown program and wires them in automatically.
 
-StackVM-backed flows execute against the same shared-store contract used by handwritten PocketFlow flows, including `_tool_runtime`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, `results`, and other runtime-managed keys.
+StackVM-backed flows execute against the same shared-store contract used by handwritten PocketFlow flows, including `_tool_runtime`, `pending_handoff_agent`, `final_answer`, `question_to_ask`, `results`, and other runtime-managed keys. VM host words now also record:
+
+- `last_vm_effect`: the most recent typed effect payload such as an answer, asked question, handoff target, or tool request
+- `last_vm_transition`: the most recent transition string
+- `vm_effect_history`: the ordered request-level history of VM effects, with agent name, transition, and effect payload for each VM turn
+- `runtime_effect_history`: the ordered request-level history of runtime effects across VM turns and non-VM agent decisions, with source, agent name, transition, and effect payload
+
+`AgentRuntime` consumes typed VM effects as the primary transition signal for VM agents and only falls back to legacy shared-store keys when no effect metadata is present. The string transition surface is now a derived compatibility view over the typed effect rather than an independently authored runtime signal. In multi-turn VM flows such as `tool-once`, `last_vm_effect` and `last_vm_transition` reflect the most recent VM turn, while `vm_effect_history` preserves the intermediate VM-only sequence. `runtime_effect_history` is the broader shared stream and includes both VM effects and non-VM agent decision effects.
+
+The shared typed effect schema now lives in `pocketcode/core/runtime_effects.py`. StackVM host words and the broader agent decision path both use that module's constructors and transition-derivation helpers so runtime actions such as tool calls, answers, questions, handoffs, and explicit transitions share one canonical shape.
 
 ## Command Runtime Layers
 
@@ -194,9 +203,13 @@ Important fields:
 - `pre_handlers`, `step_handlers`, `post_handlers`
 - `handoff_policies`, `default_handoff_policy`
 - `module`, `entry_fn`, `flow_instance`
-- `vm_entry`, `vm_module`, `vm_modules`
+- `vm_entry`, `vm_module`, `vm_modules`, `vm_module_prefixes`
 - `vm_file`, `vm_files`, `vm_source`
 - `default_agent_profile`
+
+For StackVM-backed flows, loaded VM files are now linked before macro expansion. A file may declare `"name" module`, export local `define` or `defmacro` names with `"local-name" export`, and import exported symbols with `"other.symbol" import` or `"other.symbol" "alias" import`. The loader resolves those imports, rejects duplicate exports or import cycles, rewrites local references to fully qualified names, and then hands one combined executable program to the parser and expander.
+
+`vm_module_prefixes` remains supported as a compatibility mapping from authored module refs such as `vm/common` to a prefix such as `common`. In that mode, the loader rewrites unqualified user-defined `define` and `defmacro` names from that module into qualified names like `common.payload-data` and effectively exports all local user-defined names under that prefix. Built-in words remain unqualified.
 
 ### `CompositeAgent`
 

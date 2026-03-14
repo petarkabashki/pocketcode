@@ -1,17 +1,15 @@
 [ "title" dict-get? dup none? [ drop "untitled" ] [ ] if "item=" swap concat ] "label-item" define
 
 [
-  last-tool-result none?
+  "core.read_file"
   [
-    "core.read_file"
     "{path: parallel_payload.yaml}" yaml>
-    tool-request
   ]
   [
     last-tool-result failure?
     [ "Parallel map failed: missing tool payload file." answer ]
     [
-      payload-data "payload" store-set
+      common.payload-data "payload" store-set
       "payload" store-get "items" dict-get? dup none?
       [ drop "[]" yaml> ]
       [ ]
@@ -23,5 +21,5 @@
     ]
     if
   ]
-  if
+  tool-once
 ] "decide" define

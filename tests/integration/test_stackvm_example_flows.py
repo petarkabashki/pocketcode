@@ -54,6 +54,8 @@ def test_real_engine_runs_checked_in_stackvm_config_router_example(tmp_path):
 
     assert result == "config delegate handled: config-selected delegate"
     assert engine.last_run_summary["current_agent"] == "stackvm_config_router_example.delegate"
+    router_source = (EXAMPLES_ROOT / "stackvm_config_router_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_config_router_example_disabled_branch(tmp_path):
@@ -127,6 +129,8 @@ def test_real_engine_runs_checked_in_stackvm_nested_router_example(tmp_path):
 
     assert result == "nested delegate handled: nested delegate selected"
     assert engine.last_run_summary["current_agent"] == "stackvm_nested_router_example.delegate"
+    router_source = (EXAMPLES_ROOT / "stackvm_nested_router_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_nested_router_example_missing_target(tmp_path):
@@ -207,12 +211,15 @@ def test_real_engine_runs_checked_in_stackvm_macro_authoring_example(tmp_path):
     )
     engine = make_example_engine(tmp_path, "stackvm_macro_authoring_example.normalize")
 
-    result = engine.process_request("run macro authoring example", {})
+    shared_store = engine._build_shared_store(user_input="run macro authoring example", cli_context={})
+    result = engine._execute_request(shared_store=shared_store, cli_context={})
 
     assert result == "Macro says: from macro example"
     assert engine.last_run_summary["current_agent"] == "stackvm_macro_authoring_example.normalize"
-    router_source = (EXAMPLES_ROOT / "stackvm_macro_authoring_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "answer-from", "read-file-once"]
+    expansion_trace = shared_store["last_vm_expansion_metadata"]["expansion_trace"]
+    assert "common.read-file-once" in expansion_trace
+    assert "common.answer-from" in expansion_trace
+    assert "tool-once" in expansion_trace
 
 
 def test_real_engine_runs_checked_in_stackvm_parallel_map_example(tmp_path):
@@ -241,6 +248,8 @@ def test_real_engine_runs_checked_in_stackvm_parallel_tool_map_example(tmp_path)
 
     assert result == "parallel map from tool: item=Alpha, item=Beta, item=untitled"
     assert engine.last_run_summary["current_agent"] == "stackvm_parallel_tool_map_example.map"
+    router_source = (EXAMPLES_ROOT / "stackvm_parallel_tool_map_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_reduce_example(tmp_path):
@@ -269,6 +278,8 @@ def test_real_engine_runs_checked_in_stackvm_reduce_tool_example(tmp_path):
 
     assert result == "reduced tool summary: item=Alpha; item=untitled; item=Gamma"
     assert engine.last_run_summary["current_agent"] == "stackvm_reduce_tool_example.summarize"
+    router_source = (EXAMPLES_ROOT / "stackvm_reduce_tool_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_reduce_numeric_example(tmp_path):
@@ -288,6 +299,8 @@ def test_real_engine_runs_checked_in_stackvm_reduce_numeric_example(tmp_path):
 
     assert result == "numeric total: 10"
     assert engine.last_run_summary["current_agent"] == "stackvm_reduce_numeric_example.summarize"
+    router_source = (EXAMPLES_ROOT / "stackvm_reduce_numeric_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_threshold_router_example_low(tmp_path):
@@ -307,6 +320,8 @@ def test_real_engine_runs_checked_in_stackvm_threshold_router_example_low(tmp_pa
 
     assert result == "low route handled total: 3"
     assert engine.last_run_summary["current_agent"] == "stackvm_threshold_router_example.low_route"
+    router_source = (EXAMPLES_ROOT / "stackvm_threshold_router_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_threshold_router_example_review(tmp_path):
@@ -434,6 +449,8 @@ def test_real_engine_runs_checked_in_stackvm_normalize_handoff_example_enabled(t
 
     assert result == "enabled delegate handled: Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_normalize_handoff_example.enabled_delegate"
+    router_source = (EXAMPLES_ROOT / "stackvm_normalize_handoff_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_normalize_handoff_example_disabled(tmp_path):
@@ -478,3 +495,5 @@ def test_real_engine_runs_checked_in_stackvm_normalize_ask_example(tmp_path):
 
     assert result == "Question: Proceed with Alpha, Beta, untitled from fixture?"
     assert engine.last_run_summary["current_agent"] == "stackvm_normalize_ask_example.normalize"
+    router_source = (EXAMPLES_ROOT / "stackvm_normalize_ask_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]

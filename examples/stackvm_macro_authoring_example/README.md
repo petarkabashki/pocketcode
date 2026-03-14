@@ -5,13 +5,13 @@ This example shows a StackVM flow that keeps repeated YAML data in helper words 
 Layout:
 
 - `flows/*.md`: registers the StackVM flow
-- `flows/normalize.md`: StackVM-backed flow description and VM module wiring
-- `vm/common.vm`: helper words for the YAML request payload and parsed message extraction
-- `vm/router.vm`: user-authored macros plus the caller logic that uses them
+- `flows/normalize.md`: StackVM-backed flow description, VM module wiring, and `vm_module_prefixes` assigning the `common` helper prefix
+- `vm/common.vm`: helper words for the YAML request payload and parsed message extraction, loaded as `common.*`
+- `vm/router.vm`: user-authored macros plus the caller logic that uses qualified `common.*` helper words and macros
 
 The example demonstrates:
 
-- using a helper word instead of repeating a YAML request literal
+- using a prefixed helper module instead of repeating a YAML request literal
 - defining custom macros with `defmacro` and `syntax-quote`
 - using `unquote` to pass a request quotation and later-turn quotation into a custom wrapper macro
 - using `unquote-splice` to inline a quotation body before `answer`

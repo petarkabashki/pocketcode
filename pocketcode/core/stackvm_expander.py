@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from pocketcode.core.stackvm_parser import parse_stackvm_source
+from pocketcode.core.stackvm_parser import (
+    StackVmAstSpan,
+    StackVmSourceSpan,
+    parse_stackvm_source,
+    parse_stackvm_source_with_spans,
+    serialize_stackvm_ast,
+)
 
 
 StackVmAstNode = Any
@@ -16,6 +22,19 @@ class MacroDefinition:
     template: list[StackVmAstNode]
     template_mode: str = "plain"
     builtin: bool = False
+    definition_span: StackVmSourceSpan | None = None
+
+
+@dataclass(frozen=True)
+class StackVmExpansionFrame:
+    macro_name: str
+    builtin: bool
+    depth: int
+    call_site: str | None = None
+    definition_site: str | None = None
+    generated_by: str | None = None
+    syntax_args: list[str] = field(default_factory=list)
+    expanded_form: str = ""
 
 
 @dataclass
@@ -36,11 +55,12 @@ class StackVmExpansionResult:
     expansion_count: int = 0
     gensym_count: int = 0
     expansion_trace: list[str] = field(default_factory=list)
+    expansion_frames: list[StackVmExpansionFrame] = field(default_factory=list)
 
 
 def expand_stackvm_source(code: str, *, max_expansion_depth: int = 32) -> StackVmExpansionResult:
-    ast = parse_stackvm_source(code)
-    return expand_stackvm_ast(ast, max_expansion_depth=max_expansion_depth)
+    ast, source_spans = parse_stackvm_source_with_spans(code)
+    return expand_stackvm_ast(ast, max_expansion_depth=max_expansion_depth, source_spans=source_spans)
 
 
 def expand_stackvm_ast(
@@ -48,6 +68,7 @@ def expand_stackvm_ast(
     *,
     max_expansion_depth: int = 32,
     macros: dict[str, MacroDefinition] | None = None,
+    source_spans: list[StackVmAstSpan] | None = None,
     _depth: int = 0,
 ) -> StackVmExpansionResult:
     if _depth > max_expansion_depth:
@@ -58,6 +79,7 @@ def expand_stackvm_ast(
         registry.update(macros)
     gensym_state = {"count": 0}
     expansion_trace: list[str] = []
+    expansion_frames: list[StackVmExpansionFrame] = []
     expanded, expansion_count = _expand_sequence(
         ast,
         macros=registry,
@@ -65,7 +87,11 @@ def expand_stackvm_ast(
         depth=_depth,
         gensym_state=gensym_state,
         expansion_trace=expansion_trace,
+        expansion_frames=expansion_frames,
         macro_stack=(),
+        source_spans=source_spans,
+        generated_by=None,
+        inherited_call_site=None,
     )
     return StackVmExpansionResult(
         ast=expanded,
@@ -73,6 +99,7 @@ def expand_stackvm_ast(
         expansion_count=expansion_count,
         gensym_count=int(gensym_state["count"]),
         expansion_trace=expansion_trace,
+        expansion_frames=expansion_frames,
     )
 
 
@@ -84,12 +111,18 @@ def _expand_sequence(
     depth: int,
     gensym_state: dict[str, int],
     expansion_trace: list[str],
+    expansion_frames: list[StackVmExpansionFrame],
     macro_stack: tuple[str, ...],
+    source_spans: list[StackVmAstSpan] | None,
+    generated_by: str | None,
+    inherited_call_site: str | None,
 ) -> tuple[list[StackVmAstNode], int]:
     output: list[StackVmAstNode] = []
+    output_spans: list[StackVmAstSpan | None] = []
     expansion_count = 0
 
-    for item in items:
+    for index, item in enumerate(items):
+        item_span = source_spans[index] if source_spans and index < len(source_spans) else None
         if isinstance(item, list):
             nested, nested_expansion_count = _expand_sequence(
                 item,
@@ -98,15 +131,20 @@ def _expand_sequence(
                 depth=depth,
                 gensym_state=gensym_state,
                 expansion_trace=expansion_trace,
+                expansion_frames=expansion_frames,
                 macro_stack=macro_stack,
+                source_spans=list(item_span.children) if item_span is not None else None,
+                generated_by=generated_by,
+                inherited_call_site=inherited_call_site,
             )
             output.append(nested)
+            output_spans.append(item_span)
             expansion_count += nested_expansion_count
             continue
 
         if _is_symbol(item, "defmacro"):
             try:
-                macro = _consume_macro_definition(output)
+                macro = _consume_macro_definition(output, output_spans, definition_span=item_span.span if item_span else None)
             except StackVmMacroExpansionError:
                 raise
             except Exception as exc:
@@ -123,7 +161,9 @@ def _expand_sequence(
                         f"StackVM macro '{macro.name}' expects {len(macro.parameters)} syntax arguments."
                     )
                 args = [output.pop() for _ in macro.parameters]
+                arg_spans = [output_spans.pop() for _ in macro.parameters]
                 args.reverse()
+                arg_spans.reverse()
                 arguments = dict(zip(macro.parameters, args, strict=False))
                 substituted = _substitute_template(macro.template, arguments)
                 if macro.template_mode == "syntax":
@@ -133,6 +173,17 @@ def _expand_sequence(
                         gensym_state=gensym_state,
                     )
                 expansion_trace.append(macro.name)
+                frame = StackVmExpansionFrame(
+                    macro_name=macro.name,
+                    builtin=macro.builtin,
+                    depth=depth,
+                    call_site=_span_location(item_span.span) if item_span is not None else inherited_call_site,
+                    definition_site=_span_location(macro.definition_span),
+                    generated_by=generated_by,
+                    syntax_args=[_serialize_compact(arg) for arg in args],
+                    expanded_form=_serialize_compact(substituted),
+                )
+                expansion_frames.append(frame)
                 nested, nested_expansion_count = _expand_sequence(
                     substituted,
                     macros=macros,
@@ -140,37 +191,52 @@ def _expand_sequence(
                     depth=depth + 1,
                     gensym_state=gensym_state,
                     expansion_trace=expansion_trace,
+                    expansion_frames=expansion_frames,
                     macro_stack=(*macro_stack, macro.name),
+                    source_spans=None,
+                    generated_by=macro.name,
+                    inherited_call_site=frame.call_site,
                 )
             except StackVmMacroExpansionError:
                 raise
             except Exception as exc:
                 raise _wrap_macro_error(exc, (*macro_stack, macro.name)) from exc
             output.extend(nested)
+            output_spans.extend([None] * len(nested))
             expansion_count += 1 + nested_expansion_count
             continue
 
         output.append(item)
+        output_spans.append(item_span)
 
     return output, expansion_count
 
 
-def _consume_macro_definition(output: list[StackVmAstNode]) -> MacroDefinition:
+def _consume_macro_definition(
+    output: list[StackVmAstNode],
+    output_spans: list[StackVmAstSpan | None],
+    *,
+    definition_span: StackVmSourceSpan | None,
+) -> MacroDefinition:
     if len(output) < 3:
         raise ValueError("StackVM defmacro expects parameter list, template quotation, and macro name.")
 
     name_node = output.pop()
+    output_spans.pop()
     template_node = output.pop()
+    output_spans.pop()
     template_mode = "plain"
     if _is_symbol(template_node, "syntax-quote"):
         template_mode = "syntax"
         if not output:
             raise ValueError("StackVM defmacro syntax-quote form is missing its template quotation.")
         template_node = output.pop()
+        output_spans.pop()
 
     if not output:
         raise ValueError("StackVM defmacro is missing its parameter quotation.")
     params_node = output.pop()
+    output_spans.pop()
 
     if not isinstance(params_node, list):
         raise TypeError("StackVM defmacro expects a quotation of parameter names.")
@@ -193,6 +259,7 @@ def _consume_macro_definition(output: list[StackVmAstNode]) -> MacroDefinition:
         parameters=tuple(params),
         template=_clone_nodes(template_node),
         template_mode=template_mode,
+        definition_span=definition_span,
     )
 
 
@@ -308,6 +375,18 @@ def _wrap_macro_error(exc: Exception, macro_trace: tuple[str, ...]) -> StackVmMa
             return StackVmMacroExpansionError(exc.message, (*macro_trace, *exc.macro_trace))
         return exc
     return StackVmMacroExpansionError(str(exc), macro_trace)
+
+
+def _span_location(span: StackVmSourceSpan | None) -> str | None:
+    if span is None:
+        return None
+    return span.location
+
+
+def _serialize_compact(node: Any) -> str:
+    if isinstance(node, list):
+        return serialize_stackvm_ast(node)
+    return serialize_stackvm_ast([node])
 
 
 def _builtin_macro_definitions() -> dict[str, MacroDefinition]:

@@ -44,6 +44,16 @@ def test_expand_stackvm_source_supports_syntax_quote_and_unquote():
         ("sym", "concat"),
         ("sym", "answer"),
     ]
+    assert len(result.expansion_frames) == 1
+    frame = result.expansion_frames[0]
+    assert frame.macro_name == "emit-answer"
+    assert frame.builtin is False
+    assert frame.depth == 0
+    assert frame.call_site == "line 1, cols 103-113"
+    assert frame.definition_site == "line 1, cols 86-93"
+    assert frame.generated_by is None
+    assert frame.syntax_args == ['"hello"']
+    assert frame.expanded_form == '"hello" "SQ: " swap concat answer'
 
 
 def test_expand_stackvm_source_supports_unquote_splice():
@@ -197,3 +207,19 @@ def test_expand_stackvm_source_reports_macro_trace_for_nested_failures():
             '[ ] [ "oops" [ value unquote-splice ] ] syntax-quote "inner" defmacro '
             'outer'
         )
+
+
+def test_expand_stackvm_source_tracks_generated_nested_macro_frames():
+    result = expand_stackvm_source(
+        '[ ] [ inner ] "outer" defmacro '
+        '[ ] [ "done" answer ] "inner" defmacro '
+        'outer'
+    )
+
+    assert result.expansion_trace == ["outer", "inner"]
+    assert len(result.expansion_frames) == 2
+    assert result.expansion_frames[0].macro_name == "outer"
+    assert result.expansion_frames[0].call_site == "line 1, cols 71-75"
+    assert result.expansion_frames[1].macro_name == "inner"
+    assert result.expansion_frames[1].generated_by == "outer"
+    assert result.expansion_frames[1].call_site == "line 1, cols 71-75"

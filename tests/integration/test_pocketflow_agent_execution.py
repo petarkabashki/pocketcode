@@ -12,6 +12,18 @@ from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.tool_runtime import ToolRuntime
 from unittest.mock import MagicMock
 
+
+def assert_expansion_metadata(metadata: Dict[str, Any], *, trace: list[str], macro_names: list[str], builtin_macro_names: list[str]) -> None:
+    assert metadata["expansion_count"] == len(trace)
+    assert metadata["macro_names"] == macro_names
+    assert metadata["builtin_macro_names"] == builtin_macro_names
+    assert metadata["gensym_count"] == 0
+    assert metadata["expansion_trace"] == trace
+    assert isinstance(metadata["expansion_frames"], list)
+    assert len(metadata["expansion_frames"]) == len(trace)
+    assert [frame["macro_name"] for frame in metadata["expansion_frames"]] == trace
+
+
 class SimpleNode(Node):
     def exec(self, prep_res: Any) -> str:
         # shared is not explicitly passed to exec/post in pocketflow.py Node base classes
@@ -264,13 +276,12 @@ def test_stackvm_agent_execution_with_syntax_quote_macro():
 
     assert shared_store.get("final_output") == "Syntax macro: hello"
     assert not shared_store.get("error_message")
-    assert shared_store.get("last_vm_expansion_metadata") == {
-        "expansion_count": 1,
-        "macro_names": ["emit-answer"],
-        "builtin_macro_names": [],
-        "gensym_count": 0,
-        "expansion_trace": ["emit-answer"],
-    }
+    assert_expansion_metadata(
+        shared_store.get("last_vm_expansion_metadata"),
+        trace=["emit-answer"],
+        macro_names=["emit-answer"],
+        builtin_macro_names=[],
+    )
     assert shared_store.get("last_vm_expanded_source") == '"hello" "Syntax macro: " swap concat answer'
 
 
@@ -306,13 +317,12 @@ def test_stackvm_agent_execution_with_builtin_when_macro():
     runtime.run(shared_store)
 
     assert shared_store.get("final_output") == "builtin when worked"
-    assert shared_store.get("last_vm_expansion_metadata") == {
-        "expansion_count": 1,
-        "macro_names": ["when"],
-        "builtin_macro_names": ["when"],
-        "gensym_count": 0,
-        "expansion_trace": ["when"],
-    }
+    assert_expansion_metadata(
+        shared_store.get("last_vm_expansion_metadata"),
+        trace=["when"],
+        macro_names=["when"],
+        builtin_macro_names=["when"],
+    )
 
 
 def test_stackvm_agent_execution_with_builtin_tool_once_macro():
@@ -354,13 +364,63 @@ def test_stackvm_agent_execution_with_builtin_tool_once_macro():
 
     tool_runtime.execute_tool.assert_called_once()
     assert shared_store.get("final_output") == "echoed from tool"
-    assert shared_store.get("last_vm_expansion_metadata") == {
-        "expansion_count": 1,
-        "macro_names": ["tool-once"],
-        "builtin_macro_names": ["tool-once"],
-        "gensym_count": 0,
-        "expansion_trace": ["tool-once"],
+    assert shared_store.get("last_vm_transition") == "final_answer"
+    assert shared_store.get("last_vm_effect") == {
+        "kind": "final_answer",
+        "payload": {"answer": "echoed from tool"},
     }
+    assert shared_store.get("vm_effect_history") == [
+        {
+            "agent": "vm-tool-once-agent",
+            "transition": "call_tool",
+            "effect": {
+                "kind": "call_tool",
+                "payload": {
+                    "tool_name": "resource_root.pocketcode.echo",
+                    "arguments": {"text": "ping"},
+                    "requested_by": "vm-tool-once-agent",
+                },
+            },
+        },
+        {
+            "agent": "vm-tool-once-agent",
+            "transition": "final_answer",
+            "effect": {
+                "kind": "final_answer",
+                "payload": {"answer": "echoed from tool"},
+            },
+        },
+    ]
+    assert shared_store.get("runtime_effect_history") == [
+        {
+            "agent": "vm-tool-once-agent",
+            "source": "vm",
+            "transition": "call_tool",
+            "effect": {
+                "kind": "call_tool",
+                "payload": {
+                    "tool_name": "resource_root.pocketcode.echo",
+                    "arguments": {"text": "ping"},
+                    "requested_by": "vm-tool-once-agent",
+                },
+            },
+        },
+        {
+            "agent": "vm-tool-once-agent",
+            "source": "vm",
+            "transition": "final_answer",
+            "effect": {
+                "kind": "final_answer",
+                "payload": {"answer": "echoed from tool"},
+            },
+        },
+    ]
+    assert_expansion_metadata(
+        shared_store.get("last_vm_expansion_metadata"),
+        trace=["tool-once"],
+        macro_names=["tool-once"],
+        builtin_macro_names=["tool-once"],
+    )
 
 
 def test_stackvm_agent_execution_with_builtin_delegate_return_macro_handoffs_when_missing():
@@ -405,13 +465,38 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_handoffs_whe
 
     assert shared_store.get("handoff_history") == ["delegate.agent"]
     assert shared_store.get("final_output") == "architect plan ready"
-    assert shared_store.get("last_vm_expansion_metadata") == {
-        "expansion_count": 1,
-        "macro_names": ["delegate-return"],
-        "builtin_macro_names": ["delegate-return"],
-        "gensym_count": 0,
-        "expansion_trace": ["delegate-return"],
+    assert shared_store.get("last_vm_transition") == "handoff"
+    assert shared_store.get("last_vm_effect") == {
+        "kind": "handoff",
+        "payload": {"target_agent": "delegate.agent"},
     }
+    assert shared_store.get("vm_effect_history") == [
+        {
+            "agent": "vm-delegate-return-agent",
+            "transition": "handoff",
+            "effect": {
+                "kind": "handoff",
+                "payload": {"target_agent": "delegate.agent"},
+            },
+        }
+    ]
+    assert shared_store.get("runtime_effect_history") == [
+        {
+            "agent": "vm-delegate-return-agent",
+            "source": "vm",
+            "transition": "handoff",
+            "effect": {
+                "kind": "handoff",
+                "payload": {"target_agent": "delegate.agent"},
+            },
+        }
+    ]
+    assert_expansion_metadata(
+        shared_store.get("last_vm_expansion_metadata"),
+        trace=["delegate-return"],
+        macro_names=["delegate-return"],
+        builtin_macro_names=["delegate-return"],
+    )
 
 
 def test_stackvm_agent_execution_with_builtin_delegate_return_macro_answers_when_result_exists():
@@ -447,13 +532,12 @@ def test_stackvm_agent_execution_with_builtin_delegate_return_macro_answers_when
     runtime.run(shared_store)
 
     assert shared_store.get("final_output") == "delegate approved"
-    assert shared_store.get("last_vm_expansion_metadata") == {
-        "expansion_count": 1,
-        "macro_names": ["delegate-return"],
-        "builtin_macro_names": ["delegate-return"],
-        "gensym_count": 0,
-        "expansion_trace": ["delegate-return"],
-    }
+    assert_expansion_metadata(
+        shared_store.get("last_vm_expansion_metadata"),
+        trace=["delegate-return"],
+        macro_names=["delegate-return"],
+        builtin_macro_names=["delegate-return"],
+    )
 
 
 def test_stackvm_agent_execution_with_builtin_finalize_from_macro():
@@ -488,13 +572,12 @@ def test_stackvm_agent_execution_with_builtin_finalize_from_macro():
     runtime.run(shared_store)
 
     assert shared_store.get("final_output") == "Finalized through macro"
-    assert shared_store.get("last_vm_expansion_metadata") == {
-        "expansion_count": 1,
-        "macro_names": ["finalize-from"],
-        "builtin_macro_names": ["finalize-from"],
-        "gensym_count": 0,
-        "expansion_trace": ["finalize-from"],
-    }
+    assert_expansion_metadata(
+        shared_store.get("last_vm_expansion_metadata"),
+        trace=["finalize-from"],
+        macro_names=["finalize-from"],
+        builtin_macro_names=["finalize-from"],
+    )
 
 
 def test_stackvm_agent_execution_with_builtin_prompt_route_macro():
@@ -541,13 +624,12 @@ def test_stackvm_agent_execution_with_builtin_prompt_route_macro():
     runtime.run(shared_store)
 
     assert shared_store.get("final_output") == "Delegated"
-    assert shared_store.get("last_vm_expansion_metadata") == {
-        "expansion_count": 1,
-        "macro_names": ["prompt-route"],
-        "builtin_macro_names": ["prompt-route"],
-        "gensym_count": 0,
-        "expansion_trace": ["prompt-route"],
-    }
+    assert_expansion_metadata(
+        shared_store.get("last_vm_expansion_metadata"),
+        trace=["prompt-route"],
+        macro_names=["prompt-route"],
+        builtin_macro_names=["prompt-route"],
+    )
 
 
 def test_stackvm_agent_llm_call_records_usage_and_events():
@@ -782,6 +864,70 @@ def test_stackvm_agent_ask_user_transition():
 
     assert shared_store.get("question_to_ask") == "Need confirmation?"
     assert shared_store.get("final_output") == "Question: Need confirmation?"
+    assert shared_store.get("last_vm_transition") == "ask_user"
+    assert shared_store.get("last_vm_effect") == {
+        "kind": "ask_user",
+        "payload": {"question": "Need confirmation?"},
+    }
+    assert shared_store.get("vm_effect_history") == [
+        {
+            "agent": "vm-ask-agent",
+            "transition": "ask_user",
+            "effect": {
+                "kind": "ask_user",
+                "payload": {"question": "Need confirmation?"},
+            },
+        }
+    ]
+    assert shared_store.get("runtime_effect_history") == [
+        {
+            "agent": "vm-ask-agent",
+            "source": "vm",
+            "transition": "ask_user",
+            "effect": {
+                "kind": "ask_user",
+                "payload": {"question": "Need confirmation?"},
+            },
+        }
+    ]
+
+
+def test_agent_runtime_records_runtime_effect_history_for_non_vm_decisions():
+    catalog = MagicMock(spec=WorkspaceCatalog)
+    llm_router = MagicMock(spec=LlmRouter)
+    llm_router.default_profile_name = "default"
+    tool_runtime = MagicMock(spec=ToolRuntime)
+
+    runtime = AgentRuntime(
+        catalog=catalog,
+        llm_router=llm_router,
+        tool_runtime=tool_runtime,
+        runtime_config={},
+    )
+
+    shared_store = {}
+    transition = runtime._apply_agent_decision(
+        decision={"action": "final_answer", "answer": "done"},
+        agent_name="plain.agent",
+        shared_store=shared_store,
+    )
+
+    assert transition == "final_answer"
+    assert shared_store["last_runtime_effect"] == {
+        "kind": "final_answer",
+        "payload": {"answer": "done"},
+    }
+    assert shared_store["runtime_effect_history"] == [
+        {
+            "agent": "plain.agent",
+            "source": "agent",
+            "transition": "final_answer",
+            "effect": {
+                "kind": "final_answer",
+                "payload": {"answer": "done"},
+            },
+        }
+    ]
 
 
 def test_stackvm_agent_prompt_user_continues_when_interaction_handler_is_present():

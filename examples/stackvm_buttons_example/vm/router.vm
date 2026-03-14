@@ -5,13 +5,13 @@
     last-tool-result failure?
     [ "Could not load the payload." answer ]
     [
-      payload-data "payload" store-set
+      common.payload-data "payload" store-set
 
-      "payload" store-get normalize-item-titles
+      "payload" store-get common.normalize-item-titles
 
-      "payload" store-get store-normalized-source
+      "payload" store-get common.store-normalized-source
 
-      store-normalized-summary
+      common.store-normalized-summary
 
       [
         "{kind: buttons, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: deny, label: Deny, value: deny}]}" yaml>

@@ -5,16 +5,16 @@ This example shows a StackVM flow that reads a YAML payload through `core.read_f
 Layout:
 
 - `flows/*.md`: registers the StackVM router flow and the downstream delegates
-- `flows/router.md`: StackVM-backed aggregate-and-route flow
+- `flows/router.md`: StackVM-backed aggregate-and-route flow with `vm_module_prefixes` assigning the `common` helper prefix
 - `flows/low_route.py`: PocketFlow delegate for totals below the review threshold
 - `flows/review_route.py`: PocketFlow delegate for totals in the review band
 - `flows/high_route.py`: PocketFlow delegate for totals in the high band
-- `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: score normalization, aggregation, and threshold routing script
+- `vm/common.vm`: shared helper module for parsing the tool result into payload data, loaded as `common.*`
+- `vm/router.vm`: score normalization, aggregation, and threshold routing script using qualified `common.*` helper calls
 
 The example demonstrates:
 
-- tool-first orchestration with `tool-request`
+- tool-first orchestration with the built-in `tool-once` macro
 - pure data fan-out with `parallel-map` to normalize numeric item scores
 - pure data fan-in with `reduce` to calculate the aggregate total
 - declarative threshold routing with `cond`

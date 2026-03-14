@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pocketcode.core.stackvm_parser import (
+    parse_stackvm_source_with_spans,
     parse_stackvm_source,
     serialize_stackvm_ast,
     strip_stackvm_comments,
@@ -41,3 +42,18 @@ def test_tokenize_stackvm_source_tracks_original_positions_without_comment_token
     assert [token.raw for token in tokens] == ['"value"', "answer"]
     assert (tokens[0].line, tokens[0].column, tokens[0].end_line, tokens[0].end_column) == (2, 1, 2, 7)
     assert (tokens[1].line, tokens[1].column, tokens[1].end_line, tokens[1].end_column) == (4, 1, 4, 6)
+
+
+def test_parse_stackvm_source_with_spans_tracks_nested_form_locations():
+    ast, spans = parse_stackvm_source_with_spans('"hello"\n[ 1 [ "nested" ] ]\nanswer')
+
+    assert ast == [
+        ("str", "hello"),
+        [("int", 1), [("str", "nested")]],
+        ("sym", "answer"),
+    ]
+    assert spans[0].span.location == "line 1, cols 1-7"
+    assert spans[1].span.location == "line 2, cols 1-18"
+    assert spans[1].children[0].span.location == "line 2, col 3"
+    assert spans[1].children[1].span.location == "line 2, cols 5-16"
+    assert spans[2].span.location == "line 3, cols 1-6"

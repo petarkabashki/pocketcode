@@ -1,9 +1,7 @@
 [
-  last-tool-result none?
+  "core.read_file"
   [
-    "core.read_file"
     "{path: nested_route_config.yaml}" yaml>
-    tool-request
   ]
   [
     last-tool-result failure?
@@ -12,7 +10,7 @@
       "stackvm_nested_router_example.fallback" handoff
     ]
     [
-      config-data
+      common.config-data
       dup "config" store-set
       dup "routing.enabled" get-in? bool>
       [
@@ -53,5 +51,5 @@
     ]
     if
   ]
-  if
+  tool-once
 ] "decide" define

@@ -10,6 +10,9 @@ STACKVM_COMPILE_ONLY_FORMS = {
     "unquote",
     "unquote-splice",
     "gensym",
+    "module",
+    "export",
+    "import",
 }
 
 

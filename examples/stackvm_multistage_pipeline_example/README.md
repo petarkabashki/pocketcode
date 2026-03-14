@@ -7,10 +7,10 @@ If the first-stage checklist does not include `delegate`, the caller finalizes d
 Layout:
 
 - `flows/*.md`: registers the caller and delegate StackVM flows
-- `flows/normalize.md`: caller flow that normalizes data, collects checklist actions, and finalizes after the delegate returns
+- `flows/normalize.md`: caller flow that normalizes data, collects checklist actions, and finalizes after the delegate returns, with `vm_module_prefixes` assigning the `common` helper prefix
 - `flows/confirm_delegate.md`: delegate flow that collects a second structured decision
-- `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, asks the first question, hands off, and uses `finalize-from` in the caller-finalized paths
+- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
+- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, asks the first question, hands off, uses `finalize-from` in the caller-finalized paths, and calls qualified `common.*` helpers
 - `vm/delegate.vm`: delegate script that asks the second question and returns a final answer to the caller
 
 The example demonstrates:

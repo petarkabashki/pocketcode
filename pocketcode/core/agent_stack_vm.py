@@ -7,14 +7,28 @@ from typing import Any, Callable
 
 import yaml
 
+from pocketcode.core.runtime_effects import (
+    RuntimeEffect,
+    ask_user_effect,
+    call_tool_effect,
+    final_answer_effect,
+    handoff_effect,
+    serialize_runtime_effect,
+    transition_effect,
+    transition_from_runtime_effect,
+)
 from pocketcode.core.stackvm_expander import expand_stackvm_source
 from pocketcode.core.stackvm_validator import validate_stackvm_ast
 
 
 @dataclass
 class StackVmExecutionResult:
-    transition: str | None = None
     source_files: list[str] = field(default_factory=list)
+    effect: dict[str, Any] | None = None
+
+    @property
+    def transition(self) -> str | None:
+        return transition_from_runtime_effect(self.effect)
 
 
 @dataclass(frozen=True)
@@ -25,6 +39,9 @@ class StackVmHostContext:
     llm_profile: str | None
     system_prompt: str
     tool_definitions: list[dict[str, Any]]
+
+class StackVmIllegalChildEffectError(RuntimeError):
+    pass
 
 
 def _coerce_vm_interaction_value(response: Any) -> str:
@@ -186,18 +203,51 @@ class AgentStackVM:
     def register_host_words(self, *, host_context: StackVmHostContext, result: StackVmExecutionResult) -> None:
         self._host_context = host_context
 
-        def _set_transition(name: str) -> None:
-            result.transition = name
+        def _set_transition(name: str, *, effect: RuntimeEffect | dict[str, Any] | None = None) -> None:
+            result.effect = serialize_runtime_effect(effect or RuntimeEffect(kind=name, payload={}))
+            self.store["last_vm_effect"] = dict(result.effect) if isinstance(result.effect, dict) else None
+            self.store["last_vm_transition"] = transition_from_runtime_effect(result.effect)
+            runtime_history = self.store.setdefault("runtime_effect_history", [])
+            runtime_entry = {
+                "agent": host_context.agent_name,
+                "source": "vm",
+                "transition": transition_from_runtime_effect(result.effect),
+                "effect": dict(result.effect) if isinstance(result.effect, dict) else None,
+            }
+            if isinstance(runtime_history, list):
+                runtime_history.append(dict(runtime_entry))
+            history = self.store.setdefault("vm_effect_history", [])
+            if isinstance(history, list):
+                history.append(
+                    {
+                        "agent": host_context.agent_name,
+                        "transition": runtime_entry["transition"],
+                        "effect": dict(runtime_entry["effect"]) if isinstance(runtime_entry["effect"], dict) else None,
+                    }
+                )
+
+        def set_transition_word() -> None:
+            transition_name = str(self.stack.pop() if self.stack else "continue")
+            _set_transition(
+                transition_name,
+                effect=transition_effect(transition_name),
+            )
 
         def answer() -> None:
             answer_text = self.stack.pop() if self.stack else ""
             self.store["final_answer"] = str(answer_text)
-            _set_transition("final_answer")
+            _set_transition(
+                "final_answer",
+                effect=final_answer_effect(str(answer_text)),
+            )
 
         def ask_user() -> None:
             question = self.stack.pop() if self.stack else ""
             self.store["question_to_ask"] = str(question)
-            _set_transition("ask_user")
+            _set_transition(
+                "ask_user",
+                effect=ask_user_effect(str(question)),
+            )
 
         async def prompt_user() -> None:
             question = str(self.stack.pop() if self.stack else "")
@@ -251,7 +301,10 @@ class AgentStackVM:
         def handoff() -> None:
             target = self.stack.pop() if self.stack else ""
             self.store["pending_handoff_agent"] = str(target)
-            _set_transition("handoff")
+            _set_transition(
+                "handoff",
+                effect=handoff_effect(str(target)),
+            )
 
         def tool_request() -> None:
             arguments = self.stack.pop() if self.stack else {}
@@ -266,7 +319,14 @@ class AgentStackVM:
                 "arguments": arguments,
                 "requested_by": host_context.agent_name,
             }
-            _set_transition("call_tool")
+            _set_transition(
+                "call_tool",
+                effect=call_tool_effect(
+                    tool_name=str(tool_name),
+                    arguments=dict(arguments),
+                    requested_by=host_context.agent_name,
+                ),
+            )
 
         async def llm_call() -> None:
             prompt = str(self.stack.pop() if self.stack else "")
@@ -316,7 +376,7 @@ class AgentStackVM:
         self.register_word("prompt-interaction", prompt_interaction)
         self.register_word("handoff", handoff)
         self.register_word("tool-request", tool_request)
-        self.register_word("transition", lambda: _set_transition(str(self.stack.pop() if self.stack else "continue")))
+        self.register_word("transition", set_transition_word)
         self.register_word("llm-call", llm_call)
         self.register_word("system-prompt", lambda: self.stack.append(host_context.system_prompt))
         self.register_word("llm-profile", lambda: self.stack.append(host_context.llm_profile))
@@ -766,6 +826,8 @@ class AgentStackVM:
         stack_snapshot = list(self.stack)
         try:
             await self.execute_ast(primary_ast)
+        except StackVmIllegalChildEffectError:
+            raise
         except Exception:
             self.stack[:] = stack_snapshot
             await self.execute_ast(fallback_ast)
@@ -862,13 +924,13 @@ class AgentStackVM:
 
     def _raise_if_child_requested_transition(self, *, combinator_name: str) -> None:
         if self.store.get("pending_tool"):
-            raise RuntimeError(f"{combinator_name} child quotations cannot schedule tool requests.")
+            raise StackVmIllegalChildEffectError(f"{combinator_name} child quotations cannot schedule tool requests.")
         if self.store.get("pending_handoff_agent"):
-            raise RuntimeError(f"{combinator_name} child quotations cannot perform handoffs.")
+            raise StackVmIllegalChildEffectError(f"{combinator_name} child quotations cannot perform handoffs.")
         if self.store.get("question_to_ask"):
-            raise RuntimeError(f"{combinator_name} child quotations cannot ask the user.")
+            raise StackVmIllegalChildEffectError(f"{combinator_name} child quotations cannot ask the user.")
         if self.store.get("final_answer"):
-            raise RuntimeError(f"{combinator_name} child quotations cannot finalize answers.")
+            raise StackVmIllegalChildEffectError(f"{combinator_name} child quotations cannot finalize answers.")
 def _lookup_path(mapping: dict[str, Any], path: str) -> Any:
     return _lookup_segments(mapping, _normalize_path_segments(path))
 

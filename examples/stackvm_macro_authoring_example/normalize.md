@@ -7,6 +7,8 @@ vm_entry: decide
 vm_modules:
   - vm/common
   - vm/router
+vm_module_prefixes:
+  vm/common: common
 ---
 
 Read a YAML payload through a helper word and a user-authored macro, then answer from the parsed message through another user-authored macro.

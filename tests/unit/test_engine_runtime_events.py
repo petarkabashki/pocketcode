@@ -77,6 +77,36 @@ class _WarningRuntime:
         shared_store["final_output"] = "ready"
 
 
+class _EffectHistoryRuntime:
+    def run(self, shared_store):
+        shared_store["active_agent"] = "core.agent"
+        shared_store["last_runtime_effect"] = {
+            "kind": "final_answer",
+            "payload": {"answer": "ready"},
+        }
+        shared_store["last_vm_effect"] = {
+            "kind": "final_answer",
+            "payload": {"answer": "ready"},
+        }
+        shared_store["last_vm_transition"] = "final_answer"
+        shared_store["runtime_effect_history"] = [
+            {
+                "agent": "core.agent",
+                "source": "agent",
+                "transition": "final_answer",
+                "effect": {"kind": "final_answer", "payload": {"answer": "ready"}},
+            }
+        ]
+        shared_store["vm_effect_history"] = [
+            {
+                "agent": "core.agent",
+                "transition": "final_answer",
+                "effect": {"kind": "final_answer", "payload": {"answer": "ready"}},
+            }
+        ]
+        shared_store["final_output"] = "ready"
+
+
 class _CancellableRuntime:
     def run(self, shared_store):
         for _ in range(100):
@@ -278,6 +308,40 @@ class TestEngineRunHandle:
                     "end_line": 4,
                     "end_column": 12,
                 },
+            }
+        ]
+
+    def test_start_request_includes_runtime_effect_history_in_run_summary(self):
+        engine = _build_engine(_EffectHistoryRuntime())
+
+        handle = engine.start_request("hello", {"files": set(), "folders": set(), "urls": set(), "snippets": {}})
+        result = handle.wait(timeout=1.0)
+
+        assert result == "ready"
+        assert engine.last_run_summary["last_runtime_effect"] == {
+            "kind": "final_answer",
+            "payload": {"answer": "ready"},
+        }
+        assert engine.last_run_summary["last_vm_effect"] == {
+            "kind": "final_answer",
+            "payload": {"answer": "ready"},
+        }
+        assert engine.last_run_summary["last_vm_transition"] == "final_answer"
+        assert engine.last_run_summary["runtime_effect_count"] == 1
+        assert engine.last_run_summary["vm_effect_count"] == 1
+        assert engine.last_run_summary["runtime_effect_history"] == [
+            {
+                "agent": "core.agent",
+                "source": "agent",
+                "transition": "final_answer",
+                "effect": {"kind": "final_answer", "payload": {"answer": "ready"}},
+            }
+        ]
+        assert engine.last_run_summary["vm_effect_history"] == [
+            {
+                "agent": "core.agent",
+                "transition": "final_answer",
+                "effect": {"kind": "final_answer", "payload": {"answer": "ready"}},
             }
         ]
 

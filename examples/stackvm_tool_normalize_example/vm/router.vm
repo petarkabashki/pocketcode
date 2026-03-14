@@ -5,13 +5,13 @@
     last-tool-result failure?
     [ "Normalization failed: missing tool payload file." answer ]
     [
-      payload-data "payload" store-set
+      common.payload-data "payload" store-set
 
-      "payload" store-get normalize-item-titles
+      "payload" store-get common.normalize-item-titles
 
-      "payload" store-get store-normalized-enabled
+      "payload" store-get common.store-normalized-enabled
 
-      "payload" store-get store-normalized-source
+      "payload" store-get common.store-normalized-source
 
       "normalized.enabled" shared@
       [

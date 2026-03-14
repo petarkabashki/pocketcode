@@ -322,6 +322,10 @@ def handle_command(
         print(f"  Debugger Breakpoints (session): {len(session_debugger_breakpoints or [])}")
         print(f"  Runtime Events: {run_summary.get('runtime_event_count', 0)}")
         print(f"  Runtime Steps: {run_summary.get('step_count', 0)}")
+        print(f"  Runtime Effects: {run_summary.get('runtime_effect_count', 0)}")
+        last_runtime_effect = run_summary.get("last_runtime_effect", {})
+        if isinstance(last_runtime_effect, dict) and str(last_runtime_effect.get("kind") or "").strip():
+            print(f"  Last Runtime Effect: {last_runtime_effect.get('kind')}")
         if verbose and session_debugger_breakpoints:
             for label in session_debugger_breakpoints:
                 print(f"    - {label}")

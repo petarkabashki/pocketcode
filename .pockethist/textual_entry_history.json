@@ -26,5 +26,6 @@
   "/",
   "/llms",
   "/agent help",
-  "/"
+  "/",
+  "/agents"
 ]

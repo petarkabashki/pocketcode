@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import re
 from typing import Any
@@ -23,31 +23,89 @@ class StackVmSourceToken:
     end_column: int
 
 
+@dataclass(frozen=True)
+class StackVmSourceSpan:
+    start_line: int
+    start_column: int
+    end_line: int
+    end_column: int
+
+    @property
+    def location(self) -> str:
+        if self.start_line == self.end_line:
+            if self.start_column == self.end_column:
+                return f"line {self.start_line}, col {self.start_column}"
+            return f"line {self.start_line}, cols {self.start_column}-{self.end_column}"
+        return (
+            f"line {self.start_line}, col {self.start_column} "
+            f"to line {self.end_line}, col {self.end_column}"
+        )
+
+
+@dataclass(frozen=True)
+class StackVmAstSpan:
+    span: StackVmSourceSpan
+    children: tuple["StackVmAstSpan", ...] = field(default_factory=tuple)
+
+
 def strip_stackvm_comments(code: str) -> str:
     return STACKVM_COMMENT_LINE_RE.sub("", code or "")
 
 
 def parse_stackvm_source(code: str) -> list[Any]:
-    tokens = [token.raw for token in tokenize_stackvm_source(code)]
+    ast, _ = parse_stackvm_source_with_spans(code)
+    return ast
+
+
+def parse_stackvm_source_with_spans(code: str) -> tuple[list[Any], list[StackVmAstSpan]]:
+    tokens = tokenize_stackvm_source(code)
     ast: list[Any] = []
     parse_stack: list[list[Any]] = [ast]
+    span_tree: list[StackVmAstSpan] = []
+    span_stack: list[list[StackVmAstSpan]] = [span_tree]
+    open_tokens: list[StackVmSourceToken] = []
 
     for token in tokens:
-        if token == "[":
+        if token.raw == "[":
             nested: list[Any] = []
             parse_stack[-1].append(nested)
             parse_stack.append(nested)
+            open_tokens.append(token)
+            span_stack.append([])
             continue
-        if token == "]":
+        if token.raw == "]":
             if len(parse_stack) <= 1:
                 raise SyntaxError("Unexpected closing bracket ']'")
+            opening = open_tokens.pop()
+            nested_children = span_stack.pop()
             parse_stack.pop()
+            span_stack[-1].append(
+                StackVmAstSpan(
+                    span=StackVmSourceSpan(
+                        start_line=opening.line,
+                        start_column=opening.column,
+                        end_line=token.end_line,
+                        end_column=token.end_column,
+                    ),
+                    children=tuple(nested_children),
+                )
+            )
             continue
-        parse_stack[-1].append(parse_stackvm_token(token))
+        parse_stack[-1].append(parse_stackvm_token(token.raw))
+        span_stack[-1].append(
+            StackVmAstSpan(
+                span=StackVmSourceSpan(
+                    start_line=token.line,
+                    start_column=token.column,
+                    end_line=token.end_line,
+                    end_column=token.end_column,
+                )
+            )
+        )
 
     if len(parse_stack) > 1:
         raise SyntaxError("Missing closing bracket ']'")
-    return ast
+    return ast, span_tree
 
 
 def tokenize_stackvm_source(code: str) -> list[StackVmSourceToken]:

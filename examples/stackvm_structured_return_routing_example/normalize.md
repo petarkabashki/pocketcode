@@ -7,6 +7,8 @@ vm_entry: decide
 vm_modules:
   - vm/common
   - vm/router
+vm_module_prefixes:
+  vm/common: common
 ---
 
 Read a YAML payload through `core.read_file` with `tool-once`, normalize all payload item titles, hand off to a VM delegate for a route choice, then parse the delegate's YAML answer and route to a final delegate.

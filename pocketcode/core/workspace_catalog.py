@@ -39,6 +39,18 @@ from pocketcode.core.tool_conventions import TOOL_MODULE_SUFFIX, iter_convention
 from pocketcode.core.workspace_namespaces import WorkspaceNamespace, namespace_asset_name
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_str_dict(value: Any) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key).strip(): str(item).strip()
+        for key, item in value.items()
+        if str(key).strip() and str(item).strip()
+    }
+
+
 _EXECUTABLE_MARKDOWN_KEYS = frozenset(
     {
         "name",
@@ -58,6 +70,7 @@ _EXECUTABLE_MARKDOWN_KEYS = frozenset(
         "vm_entry",
         "vm_module",
         "vm_modules",
+        "vm_module_prefixes",
         "vm_file",
         "vm_files",
         "vm_source",
@@ -79,6 +92,7 @@ _SELF_CONTAINED_AGENT_FLOW_KEYS = frozenset(
         "vm_entry",
         "vm_module",
         "vm_modules",
+        "vm_module_prefixes",
         "vm_file",
         "vm_files",
         "vm_source",
@@ -1021,6 +1035,7 @@ class WorkspaceCatalog:
                 vm_entry=str(definition["vm_entry"]).strip() if definition.get("vm_entry") else None,
                 vm_module=str(definition["vm_module"]).strip() if definition.get("vm_module") else None,
                 vm_modules=coerce_str_list(definition.get("vm_modules")),
+                vm_module_prefixes=_coerce_str_dict(definition.get("vm_module_prefixes")),
                 vm_file=str(definition["vm_file"]).strip() if definition.get("vm_file") else None,
                 vm_files=coerce_str_list(definition.get("vm_files")),
                 vm_source=str(definition["vm_source"]).strip() if definition.get("vm_source") else None,
@@ -1276,6 +1291,7 @@ class WorkspaceCatalog:
             vm_entry=str(definition["vm_entry"]).strip() if definition.get("vm_entry") else None,
             vm_module=str(definition["vm_module"]).strip() if definition.get("vm_module") else None,
             vm_modules=coerce_str_list(definition.get("vm_modules")),
+            vm_module_prefixes=_coerce_str_dict(definition.get("vm_module_prefixes")),
             vm_file=str(definition["vm_file"]).strip() if definition.get("vm_file") else None,
             vm_files=coerce_str_list(definition.get("vm_files")),
             vm_source=str(definition["vm_source"]).strip() if definition.get("vm_source") else None,
@@ -1777,6 +1793,7 @@ class WorkspaceCatalog:
             vm_entry=str(definition["vm_entry"]).strip() if definition.get("vm_entry") else None,
             vm_module=str(definition["vm_module"]).strip() if definition.get("vm_module") else None,
             vm_modules=coerce_str_list(definition.get("vm_modules")),
+            vm_module_prefixes=_coerce_str_dict(definition.get("vm_module_prefixes")),
             vm_file=str(definition["vm_file"]).strip() if definition.get("vm_file") else None,
             vm_files=coerce_str_list(definition.get("vm_files")),
             vm_source=str(definition["vm_source"]).strip() if definition.get("vm_source") else None,

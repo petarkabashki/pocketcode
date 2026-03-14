@@ -12,6 +12,8 @@ Prefer the smallest mechanism that matches the job:
 - use a built-in macro for a recurring authoring pattern that already has a stable expansion, such as `tool-once`, `prompt-route`, `delegate-return`, or `finalize-from`
 - use `defmacro` when you need a new postfix authoring surface over ordinary StackVM AST
 
+Prefer explicit StackVM modules with `module`, `export`, and `import` when helpers are meant to be reused across files. Keep `vm_module_prefixes` for compatibility with older helper modules that still rely on automatic qualification.
+
 If the repeated part is mostly data, especially a YAML literal, keep it in a helper word. If the repeated part is mostly control-flow shape, prefer a macro.
 
 ## Guard A Branch With `when`
@@ -92,6 +94,10 @@ fallback
 
 `fallback` is not a replacement for tool-result branching. Tool failures still arrive through `last-tool-result` and should normally be handled with `failure?`.
 
+`fallback` now recovers ordinary VM execution failures such as missing words or bad data operations, but it does not swallow illegal child-effect violations raised from combinators such as `parallel-map` or `reduce`.
+
+At the runtime boundary, host words still populate the familiar shared-store keys such as `final_answer`, `question_to_ask`, `pending_handoff_agent`, and `pending_tool`, but the VM now also emits typed effect metadata through `last_vm_effect` and appends each VM turn to both `vm_effect_history` and the broader `runtime_effect_history`. The agent runtime prefers that effect metadata when deciding what happens next, and `last_vm_transition` is now just the derived string view of the same effect.
+
 ## Fan Out Over Pure Data
 
 Use `parallel-map` when you already have a list value on the stack and each item should run through the same pure quotation concurrently.
@@ -103,7 +109,7 @@ parallel-map
 "results" store-set
 ```
 
-`parallel-map` is intended for pure data transforms and helper-word pipelines. Each child receives a cloned snapshot of the parent shared store, so any `shared!` or `store-set` mutation inside the child is discarded when the child finishes. Child quotations should not perform `tool-request`, `handoff`, `ask-user`, or `answer`.
+`parallel-map` is intended for pure data transforms and helper-word pipelines. Each child receives a cloned snapshot of the parent shared store, so any `shared!` or `store-set` mutation inside the child is discarded when the child finishes. Child quotations must not perform runtime effects such as `tool-request`, `handoff`, `ask-user`, or `answer`; those now raise a dedicated illegal child-effect runtime error.
 
 See `examples/stackvm_parallel_map_example/` for a checked-in end-to-end example that reuses a user-defined helper word inside each child VM.
 See `examples/stackvm_parallel_tool_map_example/` for the same pattern after a tool-loaded YAML payload has been normalized into a list.
@@ -119,7 +125,7 @@ Use `reduce` when you already have a list on the stack and want to fold it into 
 reduce
 ```
 
-`reduce` expects the list first, then the initial accumulator, then a quotation. Each child quotation receives the current accumulator beneath the current item and must leave the next accumulator on top of the stack. Like `parallel-map`, each reducer step runs with a cloned shared-store snapshot, so reducer-local `shared!` or `store-set` changes do not leak back to the parent flow.
+`reduce` expects the list first, then the initial accumulator, then a quotation. Each child quotation receives the current accumulator beneath the current item and must leave the next accumulator on top of the stack. Like `parallel-map`, each reducer step runs with a cloned shared-store snapshot, so reducer-local `shared!` or `store-set` changes do not leak back to the parent flow. Child quotations must remain effect-free in the same way as `parallel-map`.
 
 See `examples/stackvm_reduce_example/` for a checked-in end-to-end example that combines `parallel-map` and `reduce` in one pure pipeline.
 See `examples/stackvm_reduce_tool_example/` for the same pattern after a tool-loaded YAML payload has been normalized into a list.
@@ -237,6 +243,8 @@ Use `parallel-map` before `prompt-interaction`, `handoff`, or delegate-return lo
 ```
 
 In the checked-in examples, `item-title`, `normalize-item-titles`, `store-normalized-source`, `store-normalized-enabled` where needed, and `store-normalized-summary` often live in `vm/common.vm` so multiple flows can reuse the same normalization helpers without repeating payload shaping.
+
+When those helpers are loaded through `vm_module_prefixes`, the caller module should reference them with their qualified names, for example `common.normalize-item-titles` and `common.store-normalized-source`.
 
 The checked-in examples now pair `normalize-item-titles` with a reusable `store-normalized-summary` helper so routers can build `normalized.summary` without repeating the title-plus-source concatenation logic.
 

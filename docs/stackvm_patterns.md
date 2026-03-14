@@ -8,7 +8,7 @@ Use this together with `markdown_assets.md` for the canonical StackVM surface, `
 
 **For the canonical description of self-contained StackVM authoring, combinators, macros, and when to extract helper modules, always refer to `stackvm_cookbook.md`.**
 
-Most payload-driven checked-in examples can be authored as one self-contained Markdown VM program. Some checked-in examples extract reusable normalization helpers into `vm/common.vm`; see `stackvm_cookbook.md` for when that extraction is justified.
+Most payload-driven checked-in examples can be authored as one self-contained Markdown VM program. Some checked-in examples extract reusable normalization helpers into `vm/common.vm`; when those helpers should avoid collisions, the flow can assign a prefix with `vm_module_prefixes` so callers use names like `common.normalize-item-titles`. See `stackvm_cookbook.md` for when that extraction is justified.
 
 Examples that use this helper style include `stackvm_buttons_example`, `stackvm_radio_example`, `stackvm_checklist_handoff_example`, `stackvm_multistage_pipeline_example`, the delegate-return routing/finalize examples, and the plain normalization examples.
 
@@ -17,6 +17,7 @@ Use this convention when the example needs a stable normalized shared-state cont
 ## Macro Authoring
 
 - `examples/stackvm_macro_authoring_example/`
+  - Loads `vm/common` under the `common.*` helper prefix
   - Uses a helper word for the repeated YAML request payload
   - Defines user-authored macros with `defmacro` and `syntax-quote`
   - Shows `unquote` and `unquote-splice` in a runnable end-to-end flow
@@ -37,6 +38,7 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 - `examples/stackvm_parallel_tool_map_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Extracts payload items with `dict-get?`
   - Uses `parallel-map` after the tool result is normalized into an in-memory list
   - Good starting point for tool-first fan-out patterns
@@ -49,18 +51,21 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 - `examples/stackvm_reduce_tool_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Extracts payload items with `dict-get?`
   - Uses `parallel-map` for fan-out and `reduce` for fan-in after the tool result is normalized into an in-memory list
   - Good starting point for tool-first map-and-reduce patterns
 
 - `examples/stackvm_reduce_numeric_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Normalizes numeric item values with `dict-get?` and `int>`
   - Uses `parallel-map` for fan-out and `reduce` to calculate a numeric total
   - Good starting point for numeric aggregation patterns
 
 - `examples/stackvm_tool_normalize_example/`
   - Reads YAML through a tool
+  - Loads `vm/common` under the `common.*` helper prefix
   - Uses the built-in `tool-once` macro to keep the request/consume loop compact
   - Normalizes all payload item titles with `parallel-map` plus selected fields into shared state
   - Produces the final answer from the normalized view instead of the raw payload
@@ -95,6 +100,7 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 - `examples/stackvm_threshold_router_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Uses `parallel-map` and `reduce` to calculate a numeric total
   - Uses `cond` to route to different delegates based on threshold bands
   - Good starting point for aggregate-then-route patterns
@@ -103,6 +109,7 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 - `examples/stackvm_normalize_handoff_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Normalizes all payload item titles, enabled, and source into `shared["normalized"]`
   - Hands off based on normalized shared-state instead of raw payload structure
 
@@ -110,6 +117,7 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 - `examples/stackvm_normalize_ask_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Normalizes all payload item titles plus selected values into shared state
   - Surfaces a user question derived from the normalized view
 
@@ -117,6 +125,7 @@ Use this convention when the example needs a stable normalized shared-state cont
 
 - `examples/stackvm_normalize_confirm_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Normalizes all payload item titles plus selected values into shared state
   - Uses `prompt-user` to collect a bridged user reply and continue execution to a final answer
 
@@ -189,6 +198,7 @@ These examples share the same authoring pattern: define `item-title` plus reusab
 
 - `examples/stackvm_checklist_handoff_example/`
   - Reads YAML through a tool
+  - Uses `tool-once` for the tool loop
   - Normalizes all payload item titles into shared state with `parallel-map`
   - Collects checklist actions through `prompt-interaction`
   - Uses a reusable `format-selected-actions` helper to store the joined action text once before handing off to different delegates

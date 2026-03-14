@@ -5,9 +5,9 @@ This example shows a StackVM flow that reads a YAML payload through `core.read_f
 Layout:
 
 - `flows/*.md`: registers the StackVM flow
-- `flows/summarize.md`: StackVM-backed numeric aggregation flow
-- `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: tool-result loading plus numeric normalization and `reduce` pipeline
+- `flows/summarize.md`: StackVM-backed numeric aggregation flow with `vm_module_prefixes` assigning the `common` helper prefix
+- `vm/common.vm`: shared helper module for parsing the tool result into payload data, loaded as `common.*`
+- `vm/router.vm`: tool-result loading plus numeric normalization and `reduce` pipeline using qualified `common.*` helper calls
 
 The example demonstrates:
 

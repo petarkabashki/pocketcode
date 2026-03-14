@@ -5,9 +5,9 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 Layout:
 
 - `flows/*.md`: registers the StackVM normalization flow
-- `flows/normalize.md`: StackVM-backed normalization, radio interaction, and answer flow
-- `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: normalization script using `tool-once`, `dict-get?`, `parallel-map`, `shared!?`, `dict-set`, and `prompt-interaction`
+- `flows/normalize.md`: StackVM-backed normalization, radio interaction, and answer flow with `vm_module_prefixes` assigning the `common` helper prefix
+- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
+- `vm/router.vm`: normalization script using `tool-once`, `dict-get?`, `parallel-map`, `shared!?`, `dict-set`, `prompt-interaction`, and qualified `common.*` helper calls
 
 The example demonstrates:
 

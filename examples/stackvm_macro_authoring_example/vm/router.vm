@@ -1,23 +1,23 @@
 [ args later_turn ]
 [ "core.read_file" [ args unquote ] [ later_turn unquote ] tool-once ]
-syntax-quote "read-file-once" defmacro
+syntax-quote "common.read-file-once" defmacro
 
 [ body ]
 [ [ body unquote-splice ] answer ]
-syntax-quote "answer-from" defmacro
+syntax-quote "common.answer-from" defmacro
 
 [
-  [ macro-payload-request ]
+  [ common.macro-payload-request ]
   [
     last-tool-result failure?
     [ "Could not load macro payload." answer ]
     [
       last-tool-result "content" dict-get yaml>
-      payload-message
+      common.payload-message
       [ "Macro says: " swap concat ]
-      answer-from
+      common.answer-from
     ]
     if
   ]
-  read-file-once
+  common.read-file-once
 ] "decide" define

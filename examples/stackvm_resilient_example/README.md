@@ -5,9 +5,9 @@ This example shows a StackVM flow that requests a tool, checks the returned succ
 Layout:
 
 - `flows/*.md`: registers the VM router plus the fallback delegate
-- `flows/router.md`: StackVM-backed routing flow
-- `vm/common.vm`: shared utility words for reading the tool payload
-- `vm/router.vm`: orchestration script with failure branching and handoff
+- `flows/router.md`: StackVM-backed routing flow with `vm_module_prefixes` assigning the `common` helper prefix
+- `vm/common.vm`: shared utility words for reading the tool payload, loaded as `common.*`
+- `vm/router.vm`: orchestration script with failure branching, handoff, and qualified `common.*` helper calls where needed
 - `flows/fallback.py`: PocketFlow delegate used on failure
 
 The example demonstrates:

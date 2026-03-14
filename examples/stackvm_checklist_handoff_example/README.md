@@ -5,12 +5,12 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 Layout:
 
 - `flows/*.md`: registers the StackVM caller flow and the downstream delegates
-- `flows/normalize.md`: StackVM-backed normalization, checklist interaction, and routing flow
+- `flows/normalize.md`: StackVM-backed normalization, checklist interaction, and routing flow with `vm_module_prefixes` assigning the `common` helper prefix
 - `flows/delegate_route.py`: PocketFlow delegate for selections containing `delegate`
 - `flows/approve_route.py`: PocketFlow delegate for selections containing `approve` when `delegate` is absent
 - `flows/review_route.py`: PocketFlow delegate for remaining selections
-- `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: normalization and checklist-driven handoff routing script using `parallel-map`
+- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
+- `vm/router.vm`: normalization and checklist-driven handoff routing script using `parallel-map` and qualified `common.*` helper calls
 
 The example demonstrates:
 

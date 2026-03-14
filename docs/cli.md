@@ -482,7 +482,7 @@ Behavior:
 - `/reload` rebuilds discovered resource roots, namespace registries, agents, tools, skills, and LLM profile mappings
 - `/debug <request text>` is available in interactive CLI surfaces with debugger support and runs one request under an interactive step debugger
 - `/stop` and `/cancel` request cooperative cancellation on the active run if one exists
-- `/status` prints runtime flow, selected flow, active agent, skills, LLM overrides, default LLM, confirmation state, last-run runtime event and step counts, and any last-run StackVM validation warning codes recorded in `last_run_summary.vm_validation_warnings`
+- `/status` prints runtime flow, selected flow, active agent, skills, LLM overrides, default LLM, confirmation state, last-run runtime event, step, and typed runtime-effect counts, the latest typed runtime effect kind when present, and any last-run StackVM validation warning codes recorded in `last_run_summary.vm_validation_warnings`
 - `/status` also shows the count of session-persisted debugger breakpoints that will be restored onto the next debug run
 - `/status steps`, `/status --steps`, `/status timeline`, or `/status --timeline` also print the recorded last-run step trace without the nested per-step detail payloads
 - `/status verbose` or `/status --verbose` prints the same step trace plus the full warning messages, exact StackVM warning spans, and the recorded per-step detail payloads
@@ -557,6 +557,9 @@ Each run now also builds a canonical observability summary in `last_run_summary`
 - `runtime_event_count`: total runtime events seen by the request-level observer
 - `step_count`: number of structured runtime steps recorded for the run
 - `steps`: ordered step timeline entries with `index`, `kind`, `status`, `duration_ms`, `summary`, and compact `details`
+- `runtime_effect_count`: number of typed runtime effects recorded for the run
+- `runtime_effect_history`: ordered typed runtime effects across VM turns and non-VM agent decisions
+- `last_runtime_effect`: most recent typed runtime effect snapshot
 
 The step observer currently records first-class steps for:
 
@@ -716,7 +719,9 @@ The main chat console is rendered through a Rich-capable log surface rather than
 
 Assistant and user messages render as bordered panels under the active theme. Assistant responses that contain fenced code blocks are decomposed into prose panels plus syntax-highlighted code panels. Fenced `diff` blocks render through a dedicated diff view with line-level add/remove styling. Tool calls and tool results render as dedicated panels, while runtime, info, warning, and error entries render as themed inline log records. Tool-policy confirmation requests now render as dedicated collapsible panels that show the human question in the collapsed state and reveal `Args:` details only when expanded. LLM requests and LLM responses also render as dedicated one-line collapsible panels that expand to the full prompt or response body. The plain-text transcript is still preserved in runtime state for clipboard copy and other text-only flows.
 
-The `run` view now uses the same Rich-capable rendering path as the main chat console. Instead of a plain text dump, the run preview presents semantic overview and summary blocks, including YAML-formatted run metadata, the recorded runtime event count, the structured step count, a dedicated step-timeline block rendered from `last_run_summary.steps`, StackVM authoring warnings from `last_run_summary.vm_validation_warnings` when present, and recent live events.
+The `run` view now uses the same Rich-capable rendering path as the main chat console. Instead of a plain text dump, the run preview presents semantic overview and summary blocks, including YAML-formatted run metadata, the recorded runtime event count, the structured step count, typed runtime-effect counts, the latest runtime effect and latest VM transition, a dedicated step-timeline block rendered from `last_run_summary.steps`, a `Runtime Effects` block rendered from `last_run_summary.runtime_effect_history` when present, StackVM authoring warnings from `last_run_summary.vm_validation_warnings` when present, and recent live events.
+
+The run-side inspector summary also surfaces the current typed effect view directly: it shows the last-run runtime-effect count plus a compact `Last effect:` label derived from `last_run_summary.last_runtime_effect`.
 
 The right-side inspector summary also surfaces the last run's runtime event count, runtime step count, and any StackVM authoring warning codes when the active run summary recorded `vm_validation_warnings`.
 

@@ -7,6 +7,8 @@ vm_entry: decide
 vm_modules:
   - vm/common
   - vm/router
+vm_module_prefixes:
+  vm/common: common
 ---
 
 Load a YAML payload via `core.read_file`, fan out over the payload items with `parallel-map`, and format the collected results into a final answer.

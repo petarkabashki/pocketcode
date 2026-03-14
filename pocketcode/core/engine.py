@@ -53,7 +53,7 @@ from pocketcode.core.resource_roots import primary_resource_root, resource_root_
 from pocketcode.core.runtime_storage import load_entry_history, normalize_entry_history, save_entry_history
 from pocketcode.core.runtime_storage import checkpoint_storage_dir
 from pocketcode.core.session_manager import SessionManager
-from pocketcode.core.stackvm_expander import expand_stackvm_ast
+from pocketcode.core.stackvm_expander import expand_stackvm_source
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
 from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast, tokenize_stackvm_source
 from pocketcode.core.stackvm_validator import collect_stackvm_authoring_warnings, validate_stackvm_ast
@@ -1008,6 +1008,7 @@ class PocketCodeEngine:
                 vm_entry=script_entry,
                 vm_module=None,
                 vm_modules=[],
+                vm_module_prefixes={},
                 vm_file=str(script_path),
                 vm_files=[],
                 base_dir=script_path.parent,
@@ -1105,6 +1106,7 @@ class PocketCodeEngine:
                 vm_entry=script_entry,
                 vm_module=None,
                 vm_modules=[],
+                vm_module_prefixes={},
                 vm_file=str(script_path),
                 vm_files=[],
                 base_dir=script_path.parent,
@@ -2352,7 +2354,17 @@ class PocketCodeEngine:
 
         flow_name = raw.get("flow") or raw.get("agent")
         base_agent = raw.get("base_agent") or raw.get("extends")
-        flow_fields = {"vm_source", "vm_entry", "vm_module", "vm_modules", "vm_file", "vm_files", "module", "entry_fn"}
+        flow_fields = {
+            "vm_source",
+            "vm_entry",
+            "vm_module",
+            "vm_modules",
+            "vm_module_prefixes",
+            "vm_file",
+            "vm_files",
+            "module",
+            "entry_fn",
+        }
         is_self_contained = any(field in raw for field in flow_fields)
         if not flow_name and not base_agent and not is_self_contained:
             raise ValueError(f"Markdown agent '{target_path}' is missing required field 'flow' or 'extends'.")
@@ -2849,6 +2861,7 @@ class PocketCodeEngine:
             vm_entry=entry or definition.vm_entry,
             vm_module=definition.vm_module,
             vm_modules=definition.vm_modules,
+            vm_module_prefixes=definition.vm_module_prefixes,
             vm_file=definition.vm_file,
             vm_files=definition.vm_files,
             base_dir=search_roots[0],
@@ -2879,6 +2892,7 @@ class PocketCodeEngine:
             "builtin_macro_names": [],
             "gensym_count": 0,
             "expansion_trace": [],
+            "expansion_frames": [],
         }
         token_count = 0
 
@@ -2886,7 +2900,7 @@ class PocketCodeEngine:
             source_ast = parse_stackvm_source(compiled_source)
             token_count = len(tokenize_stackvm_source(compiled_source))
             warnings = collect_stackvm_authoring_warnings(source_ast, source=compiled_source)
-            expanded = expand_stackvm_ast(source_ast)
+            expanded = expand_stackvm_source(compiled_source)
             validate_stackvm_ast(expanded.ast)
             expanded_ast = expanded.ast
             used_macro_names = list(dict.fromkeys(expanded.expansion_trace))
@@ -2901,6 +2915,19 @@ class PocketCodeEngine:
                 "builtin_macro_names": builtin_macro_names,
                 "gensym_count": expanded.gensym_count,
                 "expansion_trace": list(expanded.expansion_trace),
+                "expansion_frames": [
+                    {
+                        "macro_name": frame.macro_name,
+                        "builtin": frame.builtin,
+                        "depth": frame.depth,
+                        "call_site": frame.call_site,
+                        "definition_site": frame.definition_site,
+                        "generated_by": frame.generated_by,
+                        "syntax_args": list(frame.syntax_args),
+                        "expanded_form": frame.expanded_form,
+                    }
+                    for frame in expanded.expansion_frames
+                ],
             }
 
         return {
@@ -3604,6 +3631,17 @@ class PocketCodeEngine:
             "llm_cost_usd": float(shared_store.get("llm_cost_usd_total", 0.0)),
             "vm_validation_warnings": list(vm_validation_warnings),
             "vm_validation_warning_count": len(vm_validation_warnings),
+            "last_runtime_effect": self._debug_snapshot_value(shared_store.get("last_runtime_effect")),
+            "last_vm_effect": self._debug_snapshot_value(shared_store.get("last_vm_effect")),
+            "last_vm_transition": shared_store.get("last_vm_transition"),
+            "runtime_effect_count": len(shared_store.get("runtime_effect_history", []))
+            if isinstance(shared_store.get("runtime_effect_history"), list)
+            else 0,
+            "runtime_effect_history": self._debug_snapshot_value(shared_store.get("runtime_effect_history", [])),
+            "vm_effect_count": len(shared_store.get("vm_effect_history", []))
+            if isinstance(shared_store.get("vm_effect_history"), list)
+            else 0,
+            "vm_effect_history": self._debug_snapshot_value(shared_store.get("vm_effect_history", [])),
             "context_stats": self._build_context_stats(cli_context),
             **build_runtime_observability_summary(shared_store),
         }
@@ -3622,6 +3660,11 @@ class PocketCodeEngine:
             "pending_handoff_agent": shared_store.get("pending_handoff_agent"),
             "question_to_ask": shared_store.get("question_to_ask"),
             "final_answer": shared_store.get("final_answer"),
+            "last_runtime_effect": self._debug_snapshot_value(shared_store.get("last_runtime_effect")),
+            "last_vm_effect": self._debug_snapshot_value(shared_store.get("last_vm_effect")),
+            "last_vm_transition": shared_store.get("last_vm_transition"),
+            "runtime_effect_history": self._debug_snapshot_value(shared_store.get("runtime_effect_history", [])),
+            "vm_effect_history": self._debug_snapshot_value(shared_store.get("vm_effect_history", [])),
             "error_message": shared_store.get("error_message"),
             "last_agent_decision": self._debug_snapshot_value(shared_store.get("last_agent_decision")),
             "last_tool_route": self._debug_snapshot_value(shared_store.get("last_tool_route")),
@@ -3640,7 +3683,7 @@ class PocketCodeEngine:
         }
 
     def _debug_snapshot_value(self, value: Any, *, depth: int = 0) -> Any:
-        if depth >= 4:
+        if depth >= 5:
             return repr(value)
         if value is None or isinstance(value, (str, int, float, bool)):
             return value

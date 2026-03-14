@@ -5,10 +5,10 @@ This example shows a StackVM caller/delegate pair where the caller normalizes al
 Layout:
 
 - `flows/*.md`: registers the caller and VM delegate flows
-- `flows/normalize.md`: caller flow that normalizes data, hands off, parses the returned nested YAML, and finalizes directly
+- `flows/normalize.md`: caller flow that normalizes data, hands off, parses the returned nested YAML, and finalizes directly, with `vm_module_prefixes` assigning the `common` helper prefix
 - `flows/confirm_delegate.md`: VM delegate flow that collects a structured choice and returns a nested YAML mapping string to the caller
-- `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, parses the returned YAML, reads nested fields with `get-in?`, and uses `finalize-from` for the final answer
+- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
+- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, parses the returned YAML, reads nested fields with `get-in?`, uses `finalize-from` for the final answer, and calls qualified `common.*` helpers
 - `vm/delegate.vm`: delegate script that collects a radio choice and returns a nested YAML mapping string
 
 The example demonstrates:

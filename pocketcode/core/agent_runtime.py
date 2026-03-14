@@ -16,11 +16,20 @@ import yaml
 from pocketcode.core.catalog_metadata import namespace_name_from_metadata, namespace_root_from_metadata
 from pocketcode.core.llm_yaml import parse_llm_yaml_mapping
 from pocketcode.core.llm_router import LlmRouter
+from pocketcode.core.runtime_effects import (
+    ask_user_effect,
+    call_tool_effect,
+    final_answer_effect,
+    handoff_effect,
+    serialize_runtime_effect,
+    transition_effect,
+    transition_from_runtime_effect,
+)
 from pocketcode.core.workspace_catalog import WorkspaceCatalog
 from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
 from pocketcode.core.run_handle import RunCancelledError
 from pocketcode.core.agent_stack_vm import AgentStackVM, StackVmExecutionResult, StackVmHostContext
-from pocketcode.core.stackvm_expander import expand_stackvm_ast
+from pocketcode.core.stackvm_expander import expand_stackvm_source
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
 from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast
 from pocketcode.core.stackvm_validator import collect_stackvm_authoring_warnings, validate_stackvm_ast
@@ -481,6 +490,7 @@ class AgentRuntime:
                 vm_entry=agent_definition.vm_entry,
                 vm_module=agent_definition.vm_module,
                 vm_modules=agent_definition.vm_modules,
+                vm_module_prefixes=agent_definition.vm_module_prefixes,
                 vm_file=agent_definition.vm_file,
                 vm_files=agent_definition.vm_files,
                 base_dir=search_roots[0] if search_roots else Path.cwd(),
@@ -497,11 +507,12 @@ class AgentRuntime:
                 "builtin_macro_names": [],
                 "gensym_count": 0,
                 "expansion_trace": [],
+                "expansion_frames": [],
             }
             if source.strip():
                 source_ast = parse_stackvm_source(source)
                 validation_warnings = collect_stackvm_authoring_warnings(source_ast, source=source)
-                expanded = expand_stackvm_ast(source_ast)
+                expanded = expand_stackvm_source(source)
                 validate_stackvm_ast(expanded.ast)
                 expanded_ast = expanded.ast
                 used_macro_names = list(dict.fromkeys(expanded.expansion_trace))
@@ -516,6 +527,19 @@ class AgentRuntime:
                     "builtin_macro_names": builtin_macro_names,
                     "gensym_count": expanded.gensym_count,
                     "expansion_trace": list(expanded.expansion_trace),
+                    "expansion_frames": [
+                        {
+                            "macro_name": frame.macro_name,
+                            "builtin": frame.builtin,
+                            "depth": frame.depth,
+                            "call_site": frame.call_site,
+                            "definition_site": frame.definition_site,
+                            "generated_by": frame.generated_by,
+                            "syntax_args": list(frame.syntax_args),
+                            "expanded_form": frame.expanded_form,
+                        }
+                        for frame in expanded.expansion_frames
+                    ],
                 }
 
             result = StackVmExecutionResult(source_files=source_files)
@@ -535,7 +559,14 @@ class AgentRuntime:
             shared_store["last_vm_expanded_source"] = serialize_stackvm_ast(expanded_ast) if expanded_ast else ""
             shared_store["last_vm_expansion_metadata"] = expansion_metadata
             shared_store["last_vm_validation_warnings"] = list(validation_warnings)
+            shared_store["last_vm_transition"] = result.transition
+            if result.effect is not None:
+                shared_store["last_vm_effect"] = dict(result.effect)
+                shared_store["last_runtime_effect"] = dict(result.effect)
 
+            effect_transition = self._resolve_vm_effect_transition(result=result, shared_store=shared_store)
+            if effect_transition:
+                return effect_transition
             if result.transition:
                 return result.transition
             if shared_store.get("pending_tool"):
@@ -553,6 +584,46 @@ class AgentRuntime:
             logger.exception("Error executing StackVM agent '%s': %s", agent_name, exc)
             shared_store["error_message"] = f"VM execution failed: {exc}"
             return "error"
+
+    def _resolve_vm_effect_transition(
+        self,
+        *,
+        result: StackVmExecutionResult,
+        shared_store: Dict[str, Any],
+    ) -> str | None:
+        effect = result.effect if isinstance(result.effect, dict) else None
+        if not effect:
+            return None
+
+        kind = str(effect.get("kind") or "").strip()
+        payload = effect.get("payload", {}) if isinstance(effect.get("payload"), dict) else {}
+        if not kind:
+            return None
+
+        if kind == "final_answer":
+            if "final_answer" not in shared_store:
+                shared_store["final_answer"] = str(payload.get("answer") or "")
+            return "final_answer"
+        if kind == "ask_user":
+            if "question_to_ask" not in shared_store:
+                shared_store["question_to_ask"] = str(payload.get("question") or "")
+            return "ask_user"
+        if kind == "handoff":
+            if "pending_handoff_agent" not in shared_store:
+                shared_store["pending_handoff_agent"] = str(payload.get("target_agent") or "")
+            return "handoff"
+        if kind == "call_tool":
+            if "pending_tool" not in shared_store:
+                shared_store["pending_tool"] = {
+                    "name": str(payload.get("tool_name") or ""),
+                    "arguments": dict(payload.get("arguments") or {}),
+                    "requested_by": str(payload.get("requested_by") or shared_store.get("active_agent") or ""),
+                }
+            return "call_tool"
+        if kind == "transition":
+            transition_name = str(payload.get("name") or "").strip()
+            return transition_name or "continue"
+        return transition_from_runtime_effect(effect)
 
     def _run_stackvm_program(self, *, vm: AgentStackVM, ast: list[Any], entry: str | None) -> None:
         async def _runner() -> None:
@@ -1119,6 +1190,29 @@ class AgentRuntime:
 
         return str(profile)
 
+    def _record_runtime_effect(
+        self,
+        *,
+        shared_store: Dict[str, Any],
+        agent_name: str,
+        effect: dict[str, Any] | None,
+        source: str,
+    ) -> None:
+        serialized = serialize_runtime_effect(effect)
+        if serialized is None:
+            return
+        shared_store["last_runtime_effect"] = dict(serialized)
+        history = shared_store.setdefault("runtime_effect_history", [])
+        if isinstance(history, list):
+            history.append(
+                {
+                    "agent": agent_name,
+                    "source": source,
+                    "transition": transition_from_runtime_effect(serialized),
+                    "effect": dict(serialized),
+                }
+            )
+
     def _apply_agent_decision(
         self,
         *,
@@ -1150,29 +1244,37 @@ class AgentRuntime:
                 "arguments": arguments,
                 "requested_by": agent_name,
             }
-            return str(transition_override or "call_tool")
+            effect = serialize_runtime_effect(
+                call_tool_effect(tool_name=str(tool_name), arguments=arguments, requested_by=agent_name)
+            )
+            self._record_runtime_effect(shared_store=shared_store, agent_name=agent_name, effect=effect, source="agent")
+            return str(transition_override or transition_from_runtime_effect(effect) or "call_tool")
 
         if action == "final_answer":
             answer = decision.get("answer")
             shared_store["final_answer"] = str(answer) if answer is not None else ""
+            effect = serialize_runtime_effect(final_answer_effect(shared_store["final_answer"]))
+            self._record_runtime_effect(shared_store=shared_store, agent_name=agent_name, effect=effect, source="agent")
             self._emit_event(
                 shared_store,
                 "final_answer",
                 agent=agent_name,
                 answer=shared_store["final_answer"],
             )
-            return str(transition_override or "final_answer")
+            return str(transition_override or transition_from_runtime_effect(effect) or "final_answer")
 
         if action == "ask_user":
             question = decision.get("question")
             shared_store["question_to_ask"] = str(question) if question is not None else ""
+            effect = serialize_runtime_effect(ask_user_effect(shared_store["question_to_ask"]))
+            self._record_runtime_effect(shared_store=shared_store, agent_name=agent_name, effect=effect, source="agent")
             self._emit_event(
                 shared_store,
                 "ask_user",
                 agent=agent_name,
                 question=shared_store["question_to_ask"],
             )
-            return str(transition_override or "ask_user")
+            return str(transition_override or transition_from_runtime_effect(effect) or "ask_user")
 
         if action == "handoff":
             target_agent = decision.get("agent")
@@ -1199,15 +1301,23 @@ class AgentRuntime:
             if handoff_profile:
                 shared_store.setdefault("dynamic_llm_overrides", {})[str(target_agent)] = str(handoff_profile)
 
-            return str(transition_override or "handoff")
+            effect = serialize_runtime_effect(handoff_effect(str(target_agent)))
+            self._record_runtime_effect(shared_store=shared_store, agent_name=agent_name, effect=effect, source="agent")
+            return str(transition_override or transition_from_runtime_effect(effect) or "handoff")
 
         if action == "transition":
             if not transition_override:
                 raise ValueError("Agent selected action=transition without a transition label.")
-            return str(transition_override)
+            effect = serialize_runtime_effect(transition_effect(str(transition_override)))
+            self._record_runtime_effect(shared_store=shared_store, agent_name=agent_name, effect=effect, source="agent")
+            return str(transition_from_runtime_effect(effect) or transition_override)
 
         if action:
-            return str(transition_override or action)
+            if transition_override:
+                effect = serialize_runtime_effect(transition_effect(str(transition_override)))
+                self._record_runtime_effect(shared_store=shared_store, agent_name=agent_name, effect=effect, source="agent")
+                return str(transition_from_runtime_effect(effect) or transition_override)
+            return str(action)
 
         return "error"
 

@@ -7,6 +7,8 @@ vm_entry: decide
 vm_modules:
   - vm/common
   - vm/router
+vm_module_prefixes:
+  vm/common: common
 ---
 
 Read a YAML payload through `core.read_file`, normalize all payload item titles into shared state, present a radio choice through the bridged interaction channel, and continue to a final answer.

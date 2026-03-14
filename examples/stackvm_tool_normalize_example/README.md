@@ -5,9 +5,9 @@ This example shows a StackVM flow that reads a YAML payload through `core.read_f
 Layout:
 
 - `flows/*.md`: registers the VM normalization flow
-- `flows/normalize.md`: StackVM-backed normalization flow
-- `vm/common.vm`: shared word for parsing the tool result into payload data
-- `vm/router.vm`: normalization script using `tool-once`, `parallel-map`, `get-in?`, `bool>`, and `shared!?`
+- `flows/normalize.md`: StackVM-backed normalization flow with `vm_module_prefixes` assigning the `common` helper namespace
+- `vm/common.vm`: shared helper module whose user-defined words are loaded under the `common.*` prefix
+- `vm/router.vm`: normalization script using `tool-once`, `parallel-map`, `get-in?`, `bool>`, `shared!?`, and qualified `common.*` helper calls
 
 The example demonstrates:
 

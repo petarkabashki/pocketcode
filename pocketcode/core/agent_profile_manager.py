@@ -32,6 +32,16 @@ from pocketcode.core.resource_roots import (
 logger = logging.getLogger(__name__)
 
 
+def _coerce_str_dict(value: Any) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key).strip(): str(item).strip()
+        for key, item in value.items()
+        if str(key).strip() and str(item).strip()
+    }
+
+
 def _normalize_agent_commands(raw_commands: Any, *, field_name: str) -> list[Any]:
     from pocketcode.core.runtime_models import AgentCommand  # noqa: PLC0415
 
@@ -494,7 +504,7 @@ class CompositeAgentManager:
             
             # Hybrid agent support: check for self-contained flow fields
             flow_fields = {
-                "vm_source", "vm_entry", "vm_module", "vm_modules", 
+                "vm_source", "vm_entry", "vm_module", "vm_modules", "vm_module_prefixes",
                 "vm_file", "vm_files", "module", "entry_fn"
             }
             is_self_contained = any(field in raw for field in flow_fields)
@@ -550,6 +560,7 @@ class CompositeAgentManager:
                     vm_entry=str(raw["vm_entry"]).strip() if raw.get("vm_entry") else None,
                     vm_module=str(raw["vm_module"]).strip() if raw.get("vm_module") else None,
                     vm_modules=coerce_str_list(raw.get("vm_modules")),
+                    vm_module_prefixes=_coerce_str_dict(raw.get("vm_module_prefixes")),
                     vm_file=str(raw["vm_file"]).strip() if raw.get("vm_file") else None,
                     vm_files=coerce_str_list(raw.get("vm_files")),
                     vm_source=str(raw["vm_source"]).strip() if raw.get("vm_source") else None,

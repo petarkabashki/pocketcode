@@ -1,17 +1,15 @@
 [ "score" dict-get? dup none? [ drop 0 ] [ int> ] if ] "item-score" define
 
 [
-  last-tool-result none?
+  "core.read_file"
   [
-    "core.read_file"
     "{path: threshold_payload.yaml}" yaml>
-    tool-request
   ]
   [
     last-tool-result failure?
     [ "Could not load the threshold payload." answer ]
     [
-      payload-data "payload" store-set
+      common.payload-data "payload" store-set
       "payload" store-get "items" dict-get? dup none?
       [ drop "[]" yaml> ]
       [ ]
@@ -32,5 +30,5 @@
     ]
     if
   ]
-  if
+  tool-once
 ] "decide" define

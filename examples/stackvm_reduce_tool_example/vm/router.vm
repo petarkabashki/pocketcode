@@ -2,17 +2,15 @@
 [ "current_item" store-set "current_acc" store-set "current_acc" store-get dup empty? [ drop "current_item" store-get ] [ "; " concat "current_item" store-get concat ] if ] "append-summary" define
 
 [
-  last-tool-result none?
+  "core.read_file"
   [
-    "core.read_file"
     "{path: reduce_payload.yaml}" yaml>
-    tool-request
   ]
   [
     last-tool-result failure?
     [ "Reduce failed: missing tool payload file." answer ]
     [
-      payload-data "payload" store-set
+      common.payload-data "payload" store-set
       "payload" store-get "items" dict-get? dup none?
       [ drop "[]" yaml> ]
       [ ]
@@ -26,5 +24,5 @@
     ]
     if
   ]
-  if
+  tool-once
 ] "decide" define

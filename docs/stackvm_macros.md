@@ -18,13 +18,14 @@ Macros are not raw text substitution and they are not YAML templating. They cons
 
 For VM-backed flows, the runtime currently:
 
-1. loads and concatenates VM source through `pocketcode/core/stackvm_loader.py`
+1. loads raw VM source through `pocketcode/core/stackvm_loader.py`
 2. parses StackVM source through `pocketcode/core/stackvm_parser.py`
-3. collects source-level authoring warnings and validates executable AST constraints through `pocketcode/core/stackvm_validator.py`
-4. expands compile-time macros through `pocketcode/core/stackvm_expander.py`
-5. executes the expanded AST through `pocketcode/core/agent_stack_vm.py`
+3. links modules and lowers compile-time module forms through `pocketcode/core/stackvm_loader.py`
+4. collects source-level authoring warnings and validates executable AST constraints through `pocketcode/core/stackvm_validator.py`
+5. expands compile-time macros through `pocketcode/core/stackvm_expander.py`
+6. executes the expanded AST through `pocketcode/core/agent_stack_vm.py`
 
-Compile-only forms such as `defmacro`, `syntax-quote`, `unquote`, `unquote-splice`, and `gensym` must not survive into the executable AST.
+Compile-only forms such as `module`, `export`, `import`, `defmacro`, `syntax-quote`, `unquote`, `unquote-splice`, and `gensym` must not survive into the executable AST.
 
 ## Definition Surface
 
@@ -47,6 +48,55 @@ Current rules:
 - macro invocations are ordinary postfix StackVM and consume the required number of immediately preceding syntax arguments
 - quotations can be passed as syntax arguments
 - macros may be defined inline in `vm_source` or in loaded `vm_module` or `vm_file` sources
+- imported macro names behave the same way as imported helper words because module linking happens before macro expansion
+- when a flow uses `vm_module_prefixes`, user-authored macro names from that module are rewritten to qualified names such as `common.read-file-once` during source assembly
+
+## Modules
+
+StackVM still executes against one linked program, but loaded helper files can now declare explicit modules, exports, and imports:
+
+```text
+"common" module
+[ "payload" ] "payload-data" define
+"payload-data" export
+```
+
+```text
+"router" module
+"common.payload-data" import
+[ payload-data answer ] "route" define
+"route" export
+```
+
+Current behavior:
+
+- `"name" module` declares the module namespace for one loaded file or inline source block
+- `"local-name" export` exposes a local `define` or `defmacro` name to other modules as `module.local-name`
+- `"other.symbol" import` imports that exported symbol into the current module under its last path segment
+- `"other.symbol" "alias" import` imports that exported symbol under an explicit local alias
+- duplicate module names, duplicate exported symbols, unresolved imports, and import cycles fail during source assembly
+- `module`, `export`, and `import` are compile-time forms only and do not survive into the executable AST
+
+## Compatibility Prefixes
+
+Explicit modules are now the preferred authoring model. Flows may still assign prefixes to loaded helper modules:
+
+```yaml
+vm_modules:
+  - vm/common
+  - vm/router
+vm_module_prefixes:
+  vm/common: common
+```
+
+Compatibility behavior:
+
+- the loader rewrites unqualified user-defined `define` and `defmacro` names from the prefixed module into qualified names such as `common.payload-data`
+- references to those module-local user names inside the same prefixed module are rewritten to the same qualified names
+- call sites in other modules should use the qualified names directly, such as `common.payload-data`
+- built-in words and host words are not prefixed
+- this compatibility path effectively exports all local user-defined names from that module under the assigned prefix
+- when a file already declares `"name" module`, that declared name must match any configured compatibility prefix for the same ref
 
 ## Template Modes
 
@@ -138,8 +188,10 @@ Current runtime fields for VM flows:
 
 - `last_vm_source`: combined pre-expansion VM source
 - `last_vm_expanded_source`: serialized expanded executable AST
-- `last_vm_expansion_metadata`: includes `expansion_count`, `macro_names`, `builtin_macro_names`, `gensym_count`, and ordered `expansion_trace`
+- `last_vm_expansion_metadata`: includes `expansion_count`, `macro_names`, `builtin_macro_names`, `gensym_count`, ordered `expansion_trace`, and ordered `expansion_frames`
 - `last_vm_validation_warnings`: non-fatal source-level warnings collected before macro expansion
+
+Each `expansion_frames` entry now records the expanded macro name, whether it was built-in, expansion depth, the macro call-site location when known, the macro definition location when known, the parent macro that generated the current expansion when applicable, serialized syntax arguments, and the immediate expanded form.
 
 Macro expansion failures retain an ordered macro trace so nested failures identify the expansion path.
 
@@ -148,13 +200,20 @@ Macro expansion failures retain an ordered macro trace so nested failures identi
 Current macro support is intentionally limited:
 
 - there is no richer compile-time evaluator beyond syntax substitution and limited compile forms
-- there is no source-map style expansion report yet
 - hygiene is limited to generated symbol names from `gensym`
 - macros expand before runtime host words execute; macros do not run tools, prompts, handoffs, or answers during expansion
+
+Current diagnostics still have limits:
+
+- expansion frames track source locations for parsed source forms and macro definitions, but nested generated forms inherit the parent call-site instead of a full source map
+- there is still no complete per-node source map from expanded AST back to original source spans
 
 ## Example References
 
 - `examples/stackvm_tool_normalize_example/`: built-in `tool-once`
+- `examples/stackvm_parallel_tool_map_example/`: built-in `tool-once` around tool-first fan-out
+- `examples/stackvm_reduce_tool_example/`: built-in `tool-once` around tool-first fan-in
+- `examples/stackvm_threshold_router_example/`: built-in `tool-once` plus aggregate routing
 - `examples/stackvm_buttons_example/`: built-in `tool-once` plus `prompt-route`
 - `examples/stackvm_delegate_return_example/`: built-in `tool-once` plus `delegate-return`
 - `examples/stackvm_macro_authoring_example/`: user-authored `defmacro`, `syntax-quote`, `unquote`, and `unquote-splice`

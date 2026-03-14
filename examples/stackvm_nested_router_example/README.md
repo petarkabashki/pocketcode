@@ -5,9 +5,9 @@ This example shows a StackVM flow that reads nested YAML config, traverses mixed
 Layout:
 
 - `flows/*.md`: registers the VM router plus the delegate and fallback flows
-- `flows/router.md`: StackVM-backed routing flow
-- `vm/common.vm`: shared word for parsing the tool result into config data
-- `vm/router.vm`: orchestration script using `get-in?`, `list-get?`, and `set-in?`
+- `flows/router.md`: StackVM-backed routing flow with `vm_module_prefixes` assigning the `common` helper prefix
+- `vm/common.vm`: shared helper module for parsing the tool result into config data, loaded as `common.*`
+- `vm/router.vm`: orchestration script using `get-in?`, `list-get?`, `set-in?`, and qualified `common.*` helper calls
 - `flows/delegate.py`: PocketFlow delegate used when the nested config selects the primary route
 - `flows/fallback.py`: PocketFlow delegate used when nested routing is disabled or missing
 

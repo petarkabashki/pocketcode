@@ -358,7 +358,13 @@ class _StatusEngineStub(_EngineStub):
             "default_llm_profile": "balanced",
             "tool_confirmation": {},
             "session_tool_confirmation_overrides": {},
-            "last_run_summary": {"runtime_event_count": 0, "step_count": 0, "steps": []},
+            "last_run_summary": {
+                "runtime_event_count": 0,
+                "step_count": 0,
+                "runtime_effect_count": 0,
+                "last_runtime_effect": {},
+                "steps": [],
+            },
         }
 
 
@@ -379,6 +385,8 @@ class _WarningStatusEngineStub(_EngineStub):
             "last_run_summary": {
                 "runtime_event_count": 4,
                 "step_count": 2,
+                "runtime_effect_count": 2,
+                "last_runtime_effect": {"kind": "call_tool", "payload": {"tool_name": "core.read_file"}},
                 "steps": [
                     {
                         "index": 1,
@@ -910,6 +918,8 @@ class TestCommandHandlerParsing:
         captured = capsys.readouterr()
         assert "VM Validation Warnings: manual-tool-loop, manual-prompt-route" in captured.out
         assert "Runtime Steps: 2" in captured.out
+        assert "Runtime Effects: 2" in captured.out
+        assert "Last Runtime Effect: call_tool" in captured.out
 
     def test_status_verbose_output_includes_vm_validation_warning_messages(self, capsys):
         cli_context = {

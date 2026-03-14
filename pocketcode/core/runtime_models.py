@@ -129,6 +129,7 @@ class FlowDefinition:
     vm_entry: Optional[str] = None
     vm_module: Optional[str] = None
     vm_modules: List[str] = field(default_factory=list)
+    vm_module_prefixes: Dict[str, str] = field(default_factory=dict)
     vm_file: Optional[str] = None
     vm_files: List[str] = field(default_factory=list)
     vm_source: Optional[str] = None

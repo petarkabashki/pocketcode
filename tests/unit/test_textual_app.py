@@ -134,7 +134,7 @@ class TestUiTextHelpers:
 
     def test_view_title_text_matches_named_view(self):
         assert _build_view_title_text("run") == "Run Inspector"
-        assert _build_view_title_text("chat") == ""
+        assert _build_view_title_text("chat") == "Conversation"
 
     def test_profile_editor_hint_tracks_profile_source(self):
         workspace_profile = SimpleNamespace(name="coder.safe", source="workspace")
@@ -329,6 +329,18 @@ class TestTextualRuntimeSelectors:
                 "llm_cost_usd": 0.01,
                 "runtime_event_count": 4,
                 "step_count": 2,
+                "runtime_effect_count": 2,
+                "vm_effect_count": 1,
+                "last_runtime_effect": {"kind": "call_tool", "payload": {"tool_name": "core.read_file"}},
+                "last_vm_transition": "call_tool",
+                "runtime_effect_history": [
+                    {
+                        "agent": "coder.safe",
+                        "source": "vm",
+                        "transition": "call_tool",
+                        "effect": {"kind": "call_tool", "payload": {"tool_name": "core.read_file"}},
+                    }
+                ],
                 "steps": [
                     {
                         "index": 1,
@@ -391,11 +403,16 @@ class TestTextualRuntimeSelectors:
         assert "VM warnings: manual-tool-loop@4:1-12; manual-prompt-route@9:5-22" in summary_text
         assert "Runtime events: 4" in summary_text
         assert "Runtime steps: 2" in summary_text
+        assert "Runtime effects: 2" in summary_text
+        assert "Last effect: call_tool: core.read_file" in summary_text
         assert "active_modal: tool_selection" in preview_text
         assert "active_modal_title: Pick Tools" in preview_text
         assert "current_llm_model: gpt-test" in preview_text
         assert "runtime_event_count: 4" in preview_text
         assert "step_count: 2" in preview_text
+        assert "runtime_effect_count: 2" in preview_text
+        assert "vm_effect_count: 1" in preview_text
+        assert "last_vm_transition: call_tool" in preview_text
         assert "- 1. agent_turn (completed) [12.0ms] Transition: call_tool" in preview_text
         assert "vm_validation_warning_count: 2" in preview_text
 
@@ -1121,10 +1138,11 @@ class TestTextualInteractionRequests:
                     )
                 ]
                 assert app._runtime_state.pending_input_request is None
-                assert app._inline_prompt_resolved is True
+                assert app._inline_prompt_resolved is False
+                assert app.query_one("#inline-prompt-chat", Vertical).display is False
                 assert app.query_one("#inline-prompt-options-chat", OptionList).display is False
-                assert app.query_one("#inline-prompt-summary-chat", Static).display is True
-                assert app._inline_prompt_summary_text == "Always Approve"
+                assert app.query_one("#inline-prompt-summary-chat", Static).display is False
+                assert app._inline_prompt_summary_text == ""
 
         asyncio.run(exercise())
 
@@ -1216,10 +1234,11 @@ class TestTextualInteractionRequests:
 
                 assert run_stub.calls == [("prompt-inline-1", "report.md")]
                 assert app._runtime_state.pending_input_request is None
-                assert app._inline_prompt_resolved is True
+                assert app._inline_prompt_resolved is False
+                assert app.query_one("#inline-prompt-chat", Vertical).display is False
                 assert app.query_one("#inline-prompt-input-chat", Input).display is False
-                assert app.query_one("#inline-prompt-summary-chat", Static).display is True
-                assert app._inline_prompt_summary_text == "report.md"
+                assert app.query_one("#inline-prompt-summary-chat", Static).display is False
+                assert app._inline_prompt_summary_text == ""
 
         asyncio.run(exercise())
 

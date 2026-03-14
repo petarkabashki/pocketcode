@@ -5,9 +5,9 @@ This example shows a multi-file StackVM-backed flow packaged as a normal workspa
 Layout:
 
 - `flows/*.md`: registers the flow
-- `flows/review.md`: declares the Markdown-backed flow and the VM entry point
-- `vm/common.vm`: shared words for request capture and result access
-- `vm/tool_loop.md`: a Markdown-authored VM module with the orchestration word definitions
+- `flows/review.md`: declares the Markdown-backed flow, the VM entry point, and `vm_module_prefixes` assigning the `common` helper prefix
+- `vm/common.vm`: shared words for request capture and result access, loaded as `common.*`
+- `vm/tool_loop.md`: a Markdown-authored VM module with the orchestration word definitions and a qualified `common.*` helper call
 
 The example is intentionally small. It demonstrates:
 

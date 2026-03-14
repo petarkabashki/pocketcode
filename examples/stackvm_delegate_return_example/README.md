@@ -5,10 +5,10 @@ This example shows a StackVM caller/delegate pair where the caller normalizes to
 Layout:
 
 - `flows/*.md`: registers the caller and delegate StackVM flows
-- `flows/normalize.md`: StackVM caller flow that normalizes data, sets a return policy, and passes the delegate answer through
+- `flows/normalize.md`: StackVM caller flow that normalizes data, sets a return policy, and passes the delegate answer through, with `vm_module_prefixes` assigning the `common` helper prefix
 - `flows/confirm_delegate.md`: StackVM delegate flow that collects a structured choice and answers directly
-- `vm/common.vm`: shared word set for parsing and normalizing the tool-derived payload
-- `vm/router.vm`: caller script that uses `tool-once` for the tool loop and `delegate-return` for the pass-through return branch
+- `vm/common.vm`: shared helper word set for parsing and normalizing the tool-derived payload, loaded as `common.*`
+- `vm/router.vm`: caller script that uses `tool-once` for the tool loop, `delegate-return` for the pass-through return branch, and qualified `common.*` helper calls
 - `vm/delegate.vm`: delegate script that uses `prompt-interaction` and returns a final answer string to the caller
 
 The example demonstrates:

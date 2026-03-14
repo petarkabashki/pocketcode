@@ -12,7 +12,7 @@ name: tool_loop
     tool-request
   ]
   [
-    tool-content
+    common.tool-content
     dup none?
     [ drop "No readable content returned." answer ]
     [ answer ]

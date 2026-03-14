@@ -9,6 +9,26 @@ from .shared import _build_output_text, _build_stats_text
 from .store import OutputBlock, TextualRuntimeState
 
 
+def _summarize_runtime_effect(effect: Any) -> str:
+    if not isinstance(effect, dict):
+        return "none"
+    kind = str(effect.get("kind") or "").strip()
+    payload = effect.get("payload", {}) if isinstance(effect.get("payload"), dict) else {}
+    if not kind:
+        return "none"
+    if kind == "final_answer":
+        return f"final_answer: {payload.get('answer') or ''}".strip()
+    if kind == "ask_user":
+        return f"ask_user: {payload.get('question') or ''}".strip()
+    if kind == "handoff":
+        return f"handoff: {payload.get('target_agent') or ''}".strip()
+    if kind == "call_tool":
+        return f"call_tool: {payload.get('tool_name') or ''}".strip()
+    if kind == "transition":
+        return f"transition: {payload.get('name') or 'continue'}"
+    return kind
+
+
 def select_output_text(state: TextualRuntimeState) -> str:
     return _build_output_text(list(state.output_lines), state.trimmed_output_line_count)
 
@@ -45,6 +65,8 @@ def select_inspector_summary_text(
         f"Modal: {select_modal_label(runtime_state)}",
         f"Runtime events: {run_summary.get('runtime_event_count', 0)}",
         f"Runtime steps: {run_summary.get('step_count', 0)}",
+        f"Runtime effects: {run_summary.get('runtime_effect_count', 0)}",
+        f"Last effect: {_summarize_runtime_effect(run_summary.get('last_runtime_effect'))}",
         _build_stats_text(status),
     ]
     if active_profile and active_profile.description:
@@ -145,6 +167,10 @@ def select_run_preview_text(
         f"llm_cost_usd: {run_summary.get('llm_cost_usd', 0.0)}",
         f"runtime_event_count: {run_summary.get('runtime_event_count', 0)}",
         f"step_count: {run_summary.get('step_count', 0)}",
+        f"runtime_effect_count: {run_summary.get('runtime_effect_count', 0)}",
+        f"vm_effect_count: {run_summary.get('vm_effect_count', 0)}",
+        f"last_runtime_effect: {run_summary.get('last_runtime_effect', {})}",
+        f"last_vm_transition: {run_summary.get('last_vm_transition') or '-'}",
         f"vm_validation_warning_count: {run_summary.get('vm_validation_warning_count', 0)}",
         f"vm_validation_warnings: {run_summary.get('vm_validation_warnings', [])}",
         f"context_stats: {run_summary.get('context_stats', {})}",
@@ -239,6 +265,10 @@ def select_run_preview_blocks(
                     "llm_cost_usd": run_summary.get("llm_cost_usd", 0.0),
                     "runtime_event_count": run_summary.get("runtime_event_count", 0),
                     "step_count": run_summary.get("step_count", 0),
+                    "runtime_effect_count": run_summary.get("runtime_effect_count", 0),
+                    "vm_effect_count": run_summary.get("vm_effect_count", 0),
+                    "last_runtime_effect": run_summary.get("last_runtime_effect", {}),
+                    "last_vm_transition": run_summary.get("last_vm_transition") or "-",
                     "vm_validation_warning_count": run_summary.get("vm_validation_warning_count", 0),
                     "vm_validation_warnings": run_summary.get("vm_validation_warnings", []),
                     "context_stats": run_summary.get("context_stats", {}),
@@ -280,6 +310,16 @@ def select_run_preview_blocks(
                 title="Step Timeline",
                 text="\n".join(step_timeline),
                 language="text",
+            )
+        )
+    runtime_effect_history = run_summary.get("runtime_effect_history", [])
+    if isinstance(runtime_effect_history, list) and runtime_effect_history:
+        blocks.append(
+            OutputBlock(
+                kind="code",
+                title="Runtime Effects",
+                text=_dump_preview_value(runtime_effect_history[-8:]),
+                language="yaml",
             )
         )
     if state.live_run_events:

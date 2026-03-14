@@ -129,6 +129,8 @@ def test_real_engine_start_request_can_continue_after_stackvm_prompt_user_declin
     result = handle.wait(timeout=1.0)
 
     assert result == "Declined Alpha, Beta, untitled from fixture"
+    router_source = (EXAMPLES_ROOT / "stackvm_normalize_confirm_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
 
 
 def test_real_engine_start_request_can_continue_after_stackvm_button_interaction(tmp_path):
@@ -415,6 +417,8 @@ def test_real_engine_start_request_can_route_after_stackvm_checklist_interaction
 
     assert result == "delegate route handled: Alpha, Beta, untitled from fixture with actions delegate, review"
     assert engine.last_run_summary["current_agent"] == "stackvm_checklist_handoff_example.delegate_route"
+    router_source = (EXAMPLES_ROOT / "stackvm_checklist_handoff_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert event_types.index("interaction_received") < event_types.index("handoff")

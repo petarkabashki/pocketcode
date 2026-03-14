@@ -223,6 +223,7 @@ You are an echo bot.
 
 Notes:
 - Self-contained agents require at least one `vm_*` field, a fenced `vm` or `stackvm` block, or `module`/`entry_fn`.
+- StackVM-backed flows may declare explicit module/export/import forms inside loaded VM sources. They may also declare `vm_module_prefixes` as a compatibility mechanism to assign qualified helper prefixes to loaded `vm_module` and `vm_modules` refs. The mapping keys are the authored refs exactly as they appear in the flow metadata, for example `vm/common: common`.
 - The CLI command `/agent new self-md <name>` creates a scaffold for this kind of self-contained agent.
 - Overlay-only agents are still supported, but new executable authoring should prefer the self-contained Markdown form.
 
