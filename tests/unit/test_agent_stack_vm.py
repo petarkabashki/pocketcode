@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from pocketcode.core.agent_stack_vm import (
     AgentStackVM,
     StackVmIllegalChildEffectError,
@@ -157,6 +159,163 @@ def test_load_stackvm_program_source_links_explicit_module_exports_and_imports(t
     assert '"router" module' not in source
     assert ' import' not in source
     assert ' export' not in source
+
+
+def test_load_stackvm_program_source_resolves_shared_stdlib_from_workspace_root_search_path(tmp_path: Path):
+    workspace_vm_root = tmp_path / "vm" / "stdlib"
+    workspace_vm_root.mkdir(parents=True, exist_ok=True)
+    (workspace_vm_root / "config.vm").write_text(
+        '\n'.join(
+            [
+                '"stdlib.config" module',
+                '[ "from-stdlib" ] "value" define',
+                '"value" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    namespace_root = tmp_path / "example_ns"
+    namespace_vm_root = namespace_root / "vm"
+    namespace_vm_root.mkdir(parents=True, exist_ok=True)
+    (namespace_vm_root / "router.vm").write_text(
+        '\n'.join(
+            [
+                '"router" module',
+                '"stdlib.config.value" import',
+                '[ value ] "route" define',
+                '"route" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    source, _ = load_stackvm_program_source(
+        vm_source=None,
+        vm_entry="router.route",
+        vm_module=None,
+        vm_modules=["stdlib.config", "vm/router"],
+        vm_module_prefixes={},
+        vm_file=None,
+        vm_files=[],
+        base_dir=namespace_root,
+        search_roots=[namespace_root, tmp_path],
+    )
+
+    assert '"stdlib.config.value" define' in source
+    assert '"router.route" define' in source
+    assert 'stdlib.config.value' in source
+
+
+def test_load_stackvm_program_source_links_shared_stdlib_macro_from_workspace_root(tmp_path: Path):
+    workspace_vm_root = tmp_path / "vm" / "stdlib"
+    workspace_vm_root.mkdir(parents=True, exist_ok=True)
+    (workspace_vm_root / "io.vm").write_text(
+        '\n'.join(
+            [
+                '"stdlib.io" module',
+                '[ request_expr later_turn ] [ "core.read_file" [ request_expr unquote ] [ later_turn unquote ] tool-once ] syntax-quote "read-file-once" defmacro',
+                '[ path_expr later_turn ] [ [ "{path: " [ path_expr unquote ] concat "}" concat yaml> ] [ later_turn unquote ] stdlib.io.read-file-once ] syntax-quote "read-yaml-file-once" defmacro',
+                '"read-file-once" export',
+                '"read-yaml-file-once" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    namespace_root = tmp_path / "example_ns"
+    namespace_vm_root = namespace_root / "vm"
+    namespace_vm_root.mkdir(parents=True, exist_ok=True)
+    (namespace_vm_root / "router.vm").write_text(
+        '\n'.join(
+            [
+                '"router" module',
+                '[ "payload.yaml" [ "done" answer ] stdlib.io.read-yaml-file-once ] "route" define',
+                '"route" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    source, source_files = load_stackvm_program_source(
+        vm_source=None,
+        vm_entry="router.route",
+        vm_module=None,
+        vm_modules=["stdlib.io", "vm/router"],
+        vm_module_prefixes={},
+        vm_file=None,
+        vm_files=[],
+        base_dir=namespace_root,
+        search_roots=[namespace_root, tmp_path],
+    )
+
+    assert '"stdlib.io.read-yaml-file-once" defmacro' in source
+    assert '"router.route" define' in source
+    assert '[ "payload.yaml" [ "done" answer ] stdlib.io.read-yaml-file-once ] "router.route" define' in source
+    assert str(workspace_vm_root / "io.vm") in source_files
+    assert str(namespace_vm_root / "router.vm") in source_files
+
+
+def test_load_stackvm_program_source_supports_stdlib_alias_for_vm_module(tmp_path: Path):
+    workspace_vm_root = tmp_path / "vm" / "stdlib"
+    workspace_vm_root.mkdir(parents=True, exist_ok=True)
+    (workspace_vm_root / "stdlib.yaml").write_text(
+        "\n".join(
+            [
+                "package: stackvm-stdlib",
+                "version: 0.1.0",
+                "module_root: vm/stdlib",
+                "modules:",
+                "  - name: stdlib.config",
+                "    ref: vm/stdlib/config",
+                "    file: vm/stdlib/config.vm",
+                "    summary: Demo module.",
+                "    exports:",
+                "      - value",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (workspace_vm_root / "config.vm").write_text(
+        '\n'.join(
+            [
+                '"stdlib.config" module',
+                '[ "from-alias" ] "value" define',
+                '"value" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    namespace_root = tmp_path / "example_ns"
+    namespace_vm_root = namespace_root / "vm"
+    namespace_vm_root.mkdir(parents=True, exist_ok=True)
+    (namespace_vm_root / "router.vm").write_text(
+        '\n'.join(
+            [
+                '"router" module',
+                '"stdlib.config.value" import',
+                '[ value ] "route" define',
+                '"route" export',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    source, source_files = load_stackvm_program_source(
+        vm_source=None,
+        vm_entry="router.route",
+        vm_module=None,
+        vm_modules=["stdlib.config", "vm/router"],
+        vm_module_prefixes={},
+        vm_file=None,
+        vm_files=[],
+        base_dir=namespace_root,
+        search_roots=[namespace_root, tmp_path],
+    )
+
+    assert '"stdlib.config.value" define' in source
+    assert any(path.endswith("vm/stdlib/config.vm") for path in source_files)
 
 
 def test_load_stackvm_program_source_rejects_unknown_module_imports(tmp_path: Path):
@@ -383,6 +542,210 @@ def test_agent_stack_vm_join_word_formats_list_values():
     assert vm.store["raw_values"] == ["git", "search", "context"]
 
 
+def test_agent_stack_vm_yaml_dump_word_serializes_structures():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            '"{route: approve}" yaml> "note" "approved by delegate" dict-set yaml< "yaml_mapping" store-set '
+            '"[git, search]" yaml> yaml< "yaml_list" store-set '
+            '"true" yaml> yaml< "yaml_bool" store-set'
+        )
+    )
+
+    assert vm.store["yaml_mapping"] == "{route: approve, note: approved by delegate}"
+    assert vm.store["yaml_list"] == "[git, search]"
+    assert vm.store["yaml_bool"] == "true"
+
+
+def test_agent_stack_vm_immutable_collection_words():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            '"[1, 2, 3, 4]" yaml> [ 10 * ] map "mapped_values" store-set '
+            '"[[1, 2], [3], []]" yaml> [ ] flat-map "flat_mapped_values" store-set '
+            '"[1, 2, 3, 4]" yaml> [ 2 > ] filter "filtered_values" store-set '
+            '"[1, 2, 3, 4]" yaml> [ 2 > ] find "found_value" store-set '
+            '"[1, 2, 3, 4]" yaml> [ 3 > ] any? "has_large_value" store-set '
+            '"[1, 2, 3, 4]" yaml> [ 0 > ] all? "all_positive" store-set '
+            '"[{name: gamma, score: 3}, {name: alpha, score: 1}, {name: beta, score: 2}]" yaml> [ "score" dict-get ] sort-by "sorted_items" store-set '
+            '"[{kind: a, value: 1}, {kind: b, value: 2}, {kind: a, value: 3}]" yaml> [ "kind" dict-get ] group-by "grouped_items" store-set '
+            '"{left: 1, shared: old}" yaml> "{right: 2, shared: new}" yaml> merge "merged_mapping" store-set'
+        )
+    )
+
+    assert vm.store["mapped_values"] == [10, 20, 30, 40]
+    assert vm.store["flat_mapped_values"] == [1, 2, 3]
+    assert vm.store["filtered_values"] == [3, 4]
+    assert vm.store["found_value"] == 3
+    assert vm.store["has_large_value"] is True
+    assert vm.store["all_positive"] is True
+    assert [item["name"] for item in vm.store["sorted_items"]] == ["alpha", "beta", "gamma"]
+    assert vm.store["grouped_items"] == {
+        "a": [{"kind": "a", "value": 1}, {"kind": "a", "value": 3}],
+        "b": [{"kind": "b", "value": 2}],
+    }
+    assert vm.store["merged_mapping"] == {"left": 1, "shared": "new", "right": 2}
+
+
+def test_agent_stack_vm_map_and_filter_replay_user_defined_words():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            '[ 10 + ] "add-ten" define '
+            '[ 2 > ] "greater-than-two" define '
+            '"[1, 2, 3]" yaml> [ add-ten ] map "mapped_values" store-set '
+            '"[1, 2, 3]" yaml> [ greater-than-two ] filter "filtered_values" store-set'
+        )
+    )
+
+    assert vm.store["mapped_values"] == [11, 12, 13]
+    assert vm.store["filtered_values"] == [3]
+
+
+def test_agent_stack_vm_data_collection_words_reject_transition_words():
+    vm = AgentStackVM(shared_store={})
+    vm.register_host_words(
+        host_context=StackVmHostContext(
+            agent_name="vm-test",
+            llm_router=None,
+            tool_runtime=None,
+            llm_profile=None,
+            system_prompt="",
+            tool_definitions=[],
+        ),
+        result=StackVmExecutionResult(),
+    )
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="map child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[1]" yaml> [ "nope" answer ] map'))
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="flat-map child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[[1]]" yaml> [ "nope" answer ] flat-map'))
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="filter child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[1]" yaml> [ "nope" answer ] filter'))
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="find child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[1]" yaml> [ "nope" answer ] find'))
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="any\\? child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[1]" yaml> [ "nope" answer ] any?'))
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="all\\? child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[1]" yaml> [ "nope" answer ] all?'))
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="sort-by child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[1]" yaml> [ "nope" answer ] sort-by'))
+
+    with pytest.raises(StackVmIllegalChildEffectError, match="group-by child quotations cannot finalize answers"):
+        asyncio.run(vm.eval('"[1]" yaml> [ "nope" answer ] group-by'))
+
+
+def test_agent_stack_vm_match_supports_literal_and_wildcard_patterns():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            '"approve" '
+            '[ "reject" [ "route.reject" "route" store-set ] _ [ "route.default" "route" store-set ] ] '
+            'match'
+        )
+    )
+
+    assert vm.store["route"] == "route.default"
+
+
+def test_agent_stack_vm_match_supports_dict_and_list_bindings():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            '"{kind: approve, payload: {id: 7, tags: [fast, safe]}}" yaml> '
+            '[ '
+            '  [ "{kind: approve, payload: {id: $approval_id, tags: [$first_tag, $second_tag]}}" yaml> ] '
+            '  [ "match.approval_id" shared@ "approval_id" store-set '
+            '    "match.first_tag" shared@ "first_tag" store-set '
+            '    "match.second_tag" shared@ "second_tag" store-set ] '
+            '  _ [ "fallback" "approval_id" store-set ] '
+            '] '
+            'match'
+        )
+    )
+
+    assert vm.store["approval_id"] == 7
+    assert vm.store["first_tag"] == "fast"
+    assert vm.store["second_tag"] == "safe"
+
+
+def test_agent_stack_vm_match_supports_typed_rest_and_consistent_bindings():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            '"{kind: route, approval_id: 7, tags: [alpha, beta, gamma], meta: {source: cfg}}" yaml> '
+            '[ '
+            '  [ "{kind: route, approval_id: $approval_id:int, tags: [$first_tag, $*other_tags], $rest: $remaining}" yaml> ] '
+            '  [ "match.approval_id" shared@ "approval_id" store-set '
+            '    "match.first_tag" shared@ "first_tag" store-set '
+            '    "match.other_tags" shared@ "other_tags" store-set '
+            '    "match.remaining" shared@ "remaining" store-set ] '
+            '  _ [ "fallback" "approval_id" store-set ] '
+            '] '
+            'match'
+        )
+    )
+
+    assert vm.store["approval_id"] == 7
+    assert vm.store["first_tag"] == "alpha"
+    assert vm.store["other_tags"] == ["beta", "gamma"]
+    assert vm.store["remaining"] == {"meta": {"source": "cfg"}}
+
+
+def test_agent_stack_vm_match_rejects_inconsistent_repeated_bindings():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            '"[1, 2]" yaml> '
+            '[ [ "[1, 1]" yaml> ] [ "literal-match" "result" store-set ] '
+            '  [ "[$value, $value]" yaml> ] [ "binding-match" "result" store-set ] '
+            '  _ [ "fallback" "result" store-set ] ] '
+            'match'
+        )
+    )
+
+    assert vm.store["result"] == "fallback"
+
+
+def test_agent_stack_vm_schema_words_validate_and_coerce_values():
+    vm = AgentStackVM(shared_store={})
+
+    asyncio.run(
+        vm.eval(
+            "\"{count: '7', enabled: yes}\" yaml> "
+            '"{type: object, required: [count, enabled], properties: {count: {type: integer}, enabled: {type: boolean}, label: {type: string, default: normalized}}}" yaml> '
+            'schema-apply dup "applied_schema" store-set '
+            '"applied_schema" store-get "success" dict-get "schema_apply_success" store-set '
+            '"applied_schema" store-get "value" dict-get "schema_apply_value" store-set '
+            '"applied_schema" store-get "errors" dict-get "schema_apply_errors" store-set '
+            '"{count: oops}" yaml> '
+            '"{type: object, required: [count, enabled], properties: {count: {type: integer}, enabled: {type: boolean}}}" yaml> '
+            'schema-check dup "checked_schema" store-set '
+            '"checked_schema" store-get "success" dict-get "schema_check_success" store-set '
+            '"checked_schema" store-get "errors" dict-get "schema_check_errors" store-set'
+        )
+    )
+
+    assert vm.store["schema_apply_success"] is True
+    assert vm.store["schema_apply_value"] == {"count": 7, "enabled": True, "label": "normalized"}
+    assert vm.store["schema_apply_errors"] == []
+    assert vm.store["schema_check_success"] is False
+    assert any("value.enabled is required." == error for error in vm.store["schema_check_errors"])
+
+
 def test_agent_stack_vm_active_session_transcript_words(tmp_path: Path):
     session_manager = SessionManager(tmp_path, config={})
     record = session_manager.create_session(
@@ -518,6 +881,78 @@ def test_agent_stack_vm_host_words_record_last_vm_effect_metadata():
             },
         }
     ]
+
+
+def test_agent_stack_vm_tool_call_pushes_result_and_records_tool_state():
+    class _ToolRuntime:
+        def execute_tool(self, tool_name, arguments, shared_store, auto_confirm=False, agent_name=None):
+            assert tool_name == "demo.echo"
+            assert arguments == {"text": "ping"}
+            assert agent_name == "vm-test"
+            return {"success": True, "text": "pong"}
+
+    vm = AgentStackVM(shared_store={"auto_confirm_tools": True})
+    vm.register_host_words(
+        host_context=StackVmHostContext(
+            agent_name="vm-test",
+            llm_router=None,
+            tool_runtime=_ToolRuntime(),
+            llm_profile=None,
+            system_prompt="",
+            tool_definitions=[{"name": "demo.echo"}],
+        ),
+        result=StackVmExecutionResult(),
+    )
+
+    asyncio.run(vm.eval('"demo.echo" "{text: ping}" yaml> tool-call dup "tool_result" store-set'))
+
+    assert vm.store["tool_result"] == {"success": True, "text": "pong"}
+    assert vm.store["last_tool_result"] == {"success": True, "text": "pong"}
+    assert vm.store["last_tool_route"] == {
+        "tool": "demo.echo",
+        "arguments": {"text": "ping"},
+        "result": {"success": True, "text": "pong"},
+    }
+    assert vm.stack == [{"success": True, "text": "pong"}]
+
+
+def test_agent_stack_vm_llm_call_pushes_response_and_tracks_usage():
+    class _Router:
+        default_profile_name = "default"
+
+        def generate(self, *, profile_name, prompt):
+            assert profile_name == "default"
+            assert prompt == "System context\n\nSay hi"
+            return "hello from llm"
+
+        def get_last_generation_info(self):
+            return {
+                "model": "gpt-test",
+                "profile_name": "default",
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+                "estimated_cost_usd": 0.01,
+            }
+
+    vm = AgentStackVM(shared_store={})
+    vm.register_host_words(
+        host_context=StackVmHostContext(
+            agent_name="vm-test",
+            llm_router=_Router(),
+            tool_runtime=None,
+            llm_profile=None,
+            system_prompt="System context",
+            tool_definitions=[],
+        ),
+        result=StackVmExecutionResult(),
+    )
+
+    asyncio.run(vm.eval('"Say hi" llm-call dup "reply" store-set'))
+
+    assert vm.store["reply"] == "hello from llm"
+    assert vm.store["last_llm_profile"] == "default"
+    assert vm.store["llm_usage_totals"] == {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+    assert vm.store["llm_cost_usd_total"] == 0.01
+    assert vm.stack == ["hello from llm"]
 
 
 def test_agent_stack_vm_fallback_does_not_swallow_illegal_child_effect_errors():

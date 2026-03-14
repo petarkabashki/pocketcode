@@ -281,6 +281,15 @@ def handle_command(
     if command in {"/reload"}:
         engine.reload()
         print("Reloaded resource roots, namespaces, agents, tools, skills, and LLM profile mappings.")
+        status = engine.status() if hasattr(engine, "status") else {}
+        workspace_stdlib = status.get("workspace_stackvm_stdlib_summary", {}) if isinstance(status, dict) else {}
+        warning_count = int(workspace_stdlib.get("warning_count", 0) or 0) if isinstance(workspace_stdlib, dict) else 0
+        print(f"StackVM stdlib workspace warnings: {warning_count}")
+        if warning_count and isinstance(workspace_stdlib.get("warnings"), list):
+            for item in workspace_stdlib["warnings"]:
+                if not isinstance(item, dict):
+                    continue
+                print(f"  - {item.get('target_kind')}.{item.get('target_name')}: {item.get('message')}")
         return None
 
     if command == "/migrate":
@@ -323,12 +332,23 @@ def handle_command(
         print(f"  Runtime Events: {run_summary.get('runtime_event_count', 0)}")
         print(f"  Runtime Steps: {run_summary.get('step_count', 0)}")
         print(f"  Runtime Effects: {run_summary.get('runtime_effect_count', 0)}")
+        workspace_stdlib = status.get("workspace_stackvm_stdlib_summary", {})
+        if not isinstance(workspace_stdlib, dict):
+            workspace_stdlib = {}
+        print(f"  StackVM stdlib workspace warnings: {int(workspace_stdlib.get('warning_count', 0) or 0)}")
         last_runtime_effect = run_summary.get("last_runtime_effect", {})
         if isinstance(last_runtime_effect, dict) and str(last_runtime_effect.get("kind") or "").strip():
             print(f"  Last Runtime Effect: {last_runtime_effect.get('kind')}")
         if verbose and session_debugger_breakpoints:
             for label in session_debugger_breakpoints:
                 print(f"    - {label}")
+        workspace_stdlib_warnings = workspace_stdlib.get("warnings", [])
+        if isinstance(workspace_stdlib_warnings, list) and workspace_stdlib_warnings:
+            print("  Workspace StackVM stdlib warnings:")
+            for item in workspace_stdlib_warnings:
+                if not isinstance(item, dict):
+                    continue
+                print(f"    - {item.get('target_kind')}.{item.get('target_name')}: {item.get('message')}")
         warning_codes = [
             str(item.get("code") or "").strip()
             for item in run_summary.get("vm_validation_warnings", [])

@@ -1,25 +1,49 @@
-[ last-tool-result "content" dict-get yaml> ] "payload-data" define
-[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
+"common" module
+"stdlib.normalize.tool-content-yaml" import
+"stdlib.normalize.normalize-item-titles" "stdlib-normalize-item-titles" import
+"stdlib.normalize.store-normalized-source" "stdlib-store-normalized-source" import
+"stdlib.normalize.store-normalized-summary" "stdlib-store-normalized-summary" import
+
+[ tool-content-yaml ] "payload-data" define
+[ stdlib-normalize-item-titles ] "normalize-item-titles" define
+[ stdlib-store-normalized-source ] "store-normalized-source" define
+[ stdlib-store-normalized-summary ] "store-normalized-summary" define
+
+"nested-structured-return-routing-family"
+"nested_structured_return_routing_payload.yaml"
+"stackvm_nested_structured_return_routing_example.confirm_delegate"
+[ "Delegate returned without an answer." answer ]
 [
-	"items" dict-get? dup none?
-	[ drop "[]" yaml> ]
-	[ ]
-	if
-	[ item-title ]
-	parallel-map
-	dup "normalized.titles" shared!? drop
-	", " join
-	dup "normalized.title" shared!? drop
-] "normalize-item-titles" define
+  "decision.route" "normalized.final_route" "review"
+  "decision.note" "normalized.delegate_note" "no note"
+  "meta.source" "normalized.delegate_source" "unspecified"
+]
+[ "normalized.final_route" shared@ ]
 [
-	"meta.source" get-in? dup none?
-	[ drop "unknown" ]
-	[ ]
-	if
-	dup "normalized.source" shared!? drop
-	drop
-] "store-normalized-source" define
+  "approve" "stackvm_nested_structured_return_routing_example.approve_route"
+  "escalate" "stackvm_nested_structured_return_routing_example.escalate_route"
+  "default" "stackvm_nested_structured_return_routing_example.review_route"
+]
+"radio"
+"Choose nested route for "
+"normalized.delegate_choice"
 [
-	"normalized.title" shared@ " from " concat "normalized.source" shared@ concat
-	dup "normalized.summary" shared!? drop
-] "store-normalized-summary" define
+  "approve" "Approve" "approve"
+  "escalate" "Escalate" "escalate"
+  "review" "Review" "review"
+]
+[ ]
+"exact"
+[ ]
+[ "{}" yaml> "delegate" "meta.source" set-in ]
+[
+  "approve" [ "decision.route" "approve" "decision.note" "approved by delegate" ]
+  "escalate" [ "decision.route" "escalate" "decision.note" "escalated by delegate" ]
+  "default" [ "decision.route" "review" ]
+]
+define-choice-route-family
+
+"payload-data" export
+"normalize-item-titles" export
+"store-normalized-source" export
+"store-normalized-summary" export

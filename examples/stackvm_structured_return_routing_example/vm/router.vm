@@ -1,44 +1,6 @@
 [
-  "last_delegated_result" shared@ none?
-  [
-    "core.read_file"
-    [ "{path: structured_return_payload.yaml}" yaml> ]
-    [
-      last-tool-result failure?
-      [ "Could not load the payload." answer ]
-      [
-        common.payload-data "payload" store-set
-
-        "payload" store-get common.normalize-item-titles
-
-        "payload" store-get common.store-normalized-source
-
-        common.store-normalized-summary
-
-        "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
-        "pending_handoff_policy" store-set
-        "stackvm_structured_return_routing_example.confirm_delegate" handoff
-      ]
-      if
-    ]
-    tool-once
-  ]
-  [
-    "last_delegated_result" shared@ "answer" dict-get dup none?
-    [ drop "Delegate returned without an answer." answer ]
-    [
-      yaml>
-      dup "route" dict-get dup "normalized.final_route" shared!? drop
-      swap "note" dict-get dup "normalized.delegate_note" shared!? drop
-
-      "normalized.final_route" shared@
-      [
-        "approve" [ "stackvm_structured_return_routing_example.approve_route" handoff ]
-        "escalate" [ "stackvm_structured_return_routing_example.escalate_route" handoff ]
-        "default" [ "stackvm_structured_return_routing_example.review_route" handoff ]
-      ] switch
-    ]
-    if
-  ]
-  if
+  "structured-return-routing-family"
+  "caller"
+  "route"
+  use-workflow-family
 ] "decide" define

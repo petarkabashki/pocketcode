@@ -1,25 +1,52 @@
-[ last-tool-result "content" dict-get yaml> ] "payload-data" define
-[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
+"common" module
+"stdlib.normalize.tool-content-yaml" import
+"stdlib.normalize.normalize-item-titles" "stdlib-normalize-item-titles" import
+"stdlib.normalize.store-normalized-source" "stdlib-store-normalized-source" import
+"stdlib.normalize.store-normalized-summary" "stdlib-store-normalized-summary" import
+
+[ tool-content-yaml ] "payload-data" define
+[ stdlib-normalize-item-titles ] "normalize-item-titles" define
+[ stdlib-store-normalized-source ] "store-normalized-source" define
+[ stdlib-store-normalized-summary ] "store-normalized-summary" define
+
+"structured-return-finalize-family"
+"structured_finalize_payload.yaml"
+"stackvm_structured_return_finalize_example.confirm_delegate"
+[ "Delegate returned without an answer." answer ]
 [
-	"items" dict-get? dup none?
-	[ drop "[]" yaml> ]
-	[ ]
-	if
-	[ item-title ]
-	parallel-map
-	dup "normalized.titles" shared!? drop
-	", " join
-	dup "normalized.title" shared!? drop
-] "normalize-item-titles" define
+  "mode" "normalized.delegate_mode" None
+  "message" "normalized.delegate_message" None
+]
 [
-	"meta.source" get-in? dup none?
-	[ drop "unknown" ]
-	[ ]
-	if
-	dup "normalized.source" shared!? drop
-	drop
-] "store-normalized-source" define
+  "finalized: "
+  "normalized.summary" shared@ concat
+  " | mode=" concat
+  "normalized.delegate_mode" shared@ concat
+  " | note=" concat
+  "normalized.delegate_message" shared@ concat
+]
+"radio"
+"Choose finalization mode for "
+"normalized.delegate_choice"
 [
-	"normalized.title" shared@ " from " concat "normalized.source" shared@ concat
-	dup "normalized.summary" shared!? drop
-] "store-normalized-summary" define
+  "concise" "Concise" "concise"
+  "detailed" "Detailed" "detailed"
+  "blocked" "Blocked" "blocked"
+]
+[ ]
+"exact"
+[ ]
+[
+  "{}" yaml>
+]
+[
+  "concise" [ "mode" "concise" "message" "concise summary requested" ]
+  "detailed" [ "mode" "detailed" "message" "detailed summary requested" ]
+  "default" [ "mode" "blocked" "message" "blocked by delegate" ]
+]
+define-choice-finalize-family
+
+"payload-data" export
+"normalize-item-titles" export
+"store-normalized-source" export
+"store-normalized-summary" export

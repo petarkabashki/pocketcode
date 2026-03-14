@@ -5,10 +5,10 @@ tools:
   - core.read_file
 vm_entry: decide
 vm_modules:
+  - stdlib.io
+  - stdlib.normalize
   - vm/common
   - vm/router
-vm_module_prefixes:
-  vm/common: common
 ---
 
-Read a YAML payload through `core.read_file` with `tool-once`, normalize all payload item titles, hand off to a VM delegate for a nested structured route choice, then parse the returned YAML and route to a final delegate.
+Read a YAML payload, apply the standard checked-in normalization contract, hand off to a VM delegate for a nested structured route choice expressed through `define-choice-route-family`, then resume through the same contract with nested field specs and defaults.

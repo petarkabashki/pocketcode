@@ -1,15 +1,6 @@
 [
-  "{kind: radio, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: escalate, label: Escalate, value: escalate}, {id: review, label: Review, value: review}]}" yaml>
-  dup "prompt" "Choose final route for " "normalized.summary" shared@ concat dict-set
-  prompt-interaction
-  dup "normalized.delegate_choice" shared!? drop
-  dup "approve" =
-  [ drop "{route: approve, note: approved by delegate}" answer ]
-  [
-    dup "escalate" =
-    [ drop "{route: escalate, note: escalated by delegate}" answer ]
-    [ drop "{route: review, note: review requested by delegate}" answer ]
-    if
-  ]
-  if
+  "structured-return-routing-family"
+  "delegate"
+  "route"
+  use-workflow-family
 ] "decide" define

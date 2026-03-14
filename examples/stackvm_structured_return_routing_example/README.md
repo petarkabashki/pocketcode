@@ -1,24 +1,26 @@
 # StackVM Structured Return Routing Example
 
-This example shows a StackVM caller/delegate pair where the caller normalizes all payload item titles, the delegate returns a structured YAML decision string, and the caller parses that returned value to choose the final downstream route.
+This example shows a StackVM caller/delegate pair where the caller normalizes all payload item titles, the delegate returns a structured YAML decision string, and the caller routes from declarative returned-field specs instead of hand-written projection code.
 
 Layout:
 
 - `flows/*.md`: registers the caller flow, VM delegate, and final route delegates
-- `flows/normalize.md`: caller flow that normalizes data, hands off, parses the returned YAML decision, and routes to the final delegate, with `vm_module_prefixes` assigning the `common` helper prefix
-- `flows/confirm_delegate.md`: VM delegate flow that collects a structured choice and returns a YAML decision string to the caller
+- `flows/normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, hands off, then resumes through the paired structured route workflow
+- `flows/confirm_delegate.md`: VM delegate flow that collects a structured choice from one declarative decision table and returns a YAML decision string to the caller
 - `flows/approve_route.py`: PocketFlow delegate for approve decisions
 - `flows/escalate_route.py`: PocketFlow delegate for escalate decisions
 - `flows/review_route.py`: PocketFlow delegate for review decisions
-- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
-- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, parses the returned YAML, routes to the final delegate, and calls qualified `common.*` helpers
-- `vm/delegate.vm`: delegate script that collects a radio choice and returns a YAML mapping string to the caller
+- `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
+- `vm/router.vm`: caller script that binds the caller half of `define-choice-route-family` for the full caller-side load, normalization, handoff, YAML resume protocol, declarative returned-field projection, and final routing policy, and calls qualified `common.*` helpers
+- `vm/delegate.vm`: delegate script that binds the delegate half of `define-choice-route-family`, collects a radio choice, declares returned fields as path/value specs, and emits YAML only at the answer boundary
 
 The example demonstrates:
 
-- tool-first normalization of all payload item titles in a StackVM caller through `tool-once`
+- tool-first normalization of all payload item titles in a StackVM caller through `stdlib.io.read-yaml-file-once`
+- shared file-read macros loaded from workspace-root `stdlib.io`
+- shared normalization helpers loaded from workspace-root `stdlib.normalize`
 - pure data fan-out with `parallel-map` before the delegate handoff
-- `return_to_caller` handoff to a VM delegate
+- a paired structured route workflow declared in `vm/common.vm` through `define-choice-route-family` and bound with `use-workflow-family` for the full caller-side load, normalization, handoff, returned-decision parsing, field projection, and resumed routing protocol
 - delegate answers encoded as stable YAML strings instead of free-form text
-- caller-side parsing of `last_delegated_result.answer` with `yaml>`
+- caller-side routing from declarative field-spec triples instead of quotation-based `dict-get` scaffolding
 - final routing to different downstream delegates from the parsed delegate decision

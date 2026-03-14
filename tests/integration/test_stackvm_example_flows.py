@@ -41,7 +41,6 @@ def test_real_engine_runs_checked_in_stackvm_config_router_example(tmp_path):
         "route_config.yaml",
         [
             'enabled: "yes"',
-            'target_index: "0"',
             'routes:',
             '  - stackvm_config_router_example.delegate',
             '  - stackvm_config_router_example.fallback',
@@ -55,7 +54,38 @@ def test_real_engine_runs_checked_in_stackvm_config_router_example(tmp_path):
     assert result == "config delegate handled: config-selected delegate"
     assert engine.last_run_summary["current_agent"] == "stackvm_config_router_example.delegate"
     router_source = (EXAMPLES_ROOT / "stackvm_config_router_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "shared-handoff",
+        "indexed-handoff-route",
+        "shared-handoff",
+        "indexed-value",
+        "indexed-handoff-route",
+        "shared-handoff",
+        "indexed-value",
+        "shared-handoff",
+        "shared-handoff",
+        "schema-route",
+        "validated-match",
+    ]
+
+
+def test_real_engine_runs_checked_in_stackvm_config_router_example_uses_schema_defaults(tmp_path):
+    write_fixture(
+        tmp_path,
+        "route_config.yaml",
+        [
+            'enabled: "yes"',
+            'routes:',
+            '  - stackvm_config_router_example.delegate',
+            '  - stackvm_config_router_example.fallback',
+        ],
+    )
+    engine = make_example_engine(tmp_path, "stackvm_config_router_example.router")
+
+    result = engine.process_request("route from config defaults", {})
+
+    assert result == "config delegate handled: delegate"
+    assert engine.last_run_summary["current_agent"] == "stackvm_config_router_example.delegate"
 
 
 def test_real_engine_runs_checked_in_stackvm_config_router_example_disabled_branch(tmp_path):
@@ -88,6 +118,23 @@ def test_real_engine_runs_checked_in_stackvm_config_router_example_missing_confi
     assert engine.last_run_summary["current_agent"] == "stackvm_config_router_example.fallback"
 
 
+def test_real_engine_runs_checked_in_stackvm_config_router_example_invalid_schema(tmp_path):
+    write_fixture(
+        tmp_path,
+        "route_config.yaml",
+        [
+            'enabled: "yes"',
+            'routes: delegate',
+        ],
+    )
+    engine = make_example_engine(tmp_path, "stackvm_config_router_example.router")
+
+    result = engine.process_request("route with invalid config", {})
+
+    assert result == "config fallback handled: invalid_config"
+    assert engine.last_run_summary["current_agent"] == "stackvm_config_router_example.fallback"
+
+
 def test_real_engine_runs_checked_in_stackvm_config_router_example_missing_route_target(tmp_path):
     write_fixture(
         tmp_path,
@@ -115,11 +162,8 @@ def test_real_engine_runs_checked_in_stackvm_nested_router_example(tmp_path):
         [
             'routing:',
             '  enabled: "yes"',
-            '  selected:',
-            '    index: "0"',
             '  targets:',
             '    - agent: stackvm_nested_router_example.delegate',
-            '      message: "nested delegate selected"',
             '    - agent: stackvm_nested_router_example.fallback',
         ],
     )
@@ -127,10 +171,42 @@ def test_real_engine_runs_checked_in_stackvm_nested_router_example(tmp_path):
 
     result = engine.process_request("route through nested config", {})
 
-    assert result == "nested delegate handled: nested delegate selected"
+    assert result == "nested delegate handled: nested delegate"
     assert engine.last_run_summary["current_agent"] == "stackvm_nested_router_example.delegate"
     router_source = (EXAMPLES_ROOT / "stackvm_nested_router_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "shared-handoff",
+        "shared-handoff",
+        "maybe-handoff",
+        "shared-handoff",
+        "indexed-handoff-route",
+        "shared-handoff",
+        "indexed-value",
+        "shared-handoff",
+        "shared-handoff",
+        "shared-handoff",
+        "schema-route",
+        "validated-match",
+    ]
+
+
+def test_real_engine_runs_checked_in_stackvm_nested_router_example_invalid_schema(tmp_path):
+    write_fixture(
+        tmp_path,
+        "nested_route_config.yaml",
+        [
+            'routing:',
+            '  enabled: "yes"',
+            '  targets:',
+            '    - message: "missing agent"',
+        ],
+    )
+    engine = make_example_engine(tmp_path, "stackvm_nested_router_example.router")
+
+    result = engine.process_request("route through invalid nested config", {})
+
+    assert result == "nested fallback handled: invalid_config"
+    assert engine.last_run_summary["current_agent"] == "stackvm_nested_router_example.fallback"
 
 
 def test_real_engine_runs_checked_in_stackvm_nested_router_example_missing_target(tmp_path):
@@ -176,7 +252,7 @@ def test_real_engine_runs_checked_in_stackvm_tool_normalize_example(tmp_path):
     assert result == "Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_tool_normalize_example.normalize"
     router_source = (EXAMPLES_ROOT / "stackvm_tool_normalize_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == []
 
 
 def test_real_engine_runs_checked_in_stackvm_tool_normalize_example_disabled_payload(tmp_path):
@@ -321,7 +397,7 @@ def test_real_engine_runs_checked_in_stackvm_threshold_router_example_low(tmp_pa
     assert result == "low route handled total: 3"
     assert engine.last_run_summary["current_agent"] == "stackvm_threshold_router_example.low_route"
     router_source = (EXAMPLES_ROOT / "stackvm_threshold_router_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == ["handoff-rules", "tool-once"]
 
 
 def test_real_engine_runs_checked_in_stackvm_threshold_router_example_review(tmp_path):
@@ -450,7 +526,7 @@ def test_real_engine_runs_checked_in_stackvm_normalize_handoff_example_enabled(t
     assert result == "enabled delegate handled: Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_normalize_handoff_example.enabled_delegate"
     router_source = (EXAMPLES_ROOT / "stackvm_normalize_handoff_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == []
 
 
 def test_real_engine_runs_checked_in_stackvm_normalize_handoff_example_disabled(tmp_path):
@@ -473,6 +549,8 @@ def test_real_engine_runs_checked_in_stackvm_normalize_handoff_example_disabled(
 
     assert result == "disabled delegate handled: Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_normalize_handoff_example.disabled_delegate"
+    router_source = (EXAMPLES_ROOT / "stackvm_normalize_handoff_example" / "vm" / "router.vm").read_text(encoding="utf-8")
+    assert expand_stackvm_source(router_source).expansion_trace == []
 
 
 def test_real_engine_runs_checked_in_stackvm_normalize_ask_example(tmp_path):
@@ -496,4 +574,4 @@ def test_real_engine_runs_checked_in_stackvm_normalize_ask_example(tmp_path):
     assert result == "Question: Proceed with Alpha, Beta, untitled from fixture?"
     assert engine.last_run_summary["current_agent"] == "stackvm_normalize_ask_example.normalize"
     router_source = (EXAMPLES_ROOT / "stackvm_normalize_ask_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == ["ask-from", "ask-from", "ask-from"]

@@ -1,33 +1,6 @@
 [
-  "last_delegated_result" shared@ none?
-  [
-    "core.read_file"
-    [ "{path: checklist_return_payload.yaml}" yaml> ]
-    [
-      last-tool-result failure?
-      [ "Could not load the payload." answer ]
-      [
-        common.payload-data "payload" store-set
-
-        "payload" store-get common.normalize-item-titles
-
-        "payload" store-get common.store-normalized-source
-
-        common.store-normalized-summary
-
-        "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
-        "pending_handoff_policy" store-set
-        "stackvm_checklist_return_example.checklist_delegate" handoff
-      ]
-      if
-    ]
-    tool-once
-  ]
-  [
-    "last_delegated_result" shared@ "answer" dict-get dup none?
-    [ drop "Delegate returned without an answer." answer ]
-    [ [ "Caller received delegate tools: " swap concat ] finalize-from ]
-    if
-  ]
-  if
+  "checklist-return-family"
+  "caller"
+  "answer"
+  use-workflow-family
 ] "decide" define

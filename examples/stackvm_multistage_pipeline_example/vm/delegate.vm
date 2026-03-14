@@ -1,7 +1,6 @@
 [
-  "{kind: radio, prompt: placeholder, options: [{id: review-first, label: Review First, value: review-first}, {id: delegate-now, label: Delegate Now, value: delegate-now}]}" yaml>
-  dup "prompt" "Choose delegate plan for " "normalized.summary" shared@ concat dict-set
-  prompt-interaction
-  dup "normalized.delegate_plan" shared!? drop
-  "delegate plan " swap concat answer
+  "multistage-family"
+  "delegate"
+  "answer"
+  use-workflow-family
 ] "decide" define

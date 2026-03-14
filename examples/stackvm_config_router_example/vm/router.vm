@@ -1,48 +1,51 @@
+"router" module
+"common.normalized-config" import
+
 [
-  "core.read_file"
-  [
-    "{path: route_config.yaml}" yaml>
-  ]
+  "route_config.yaml"
   [
     last-tool-result failure?
     [
-      "tool_failure" "route_reason" shared!
-      "stackvm_config_router_example.fallback" handoff
+      "tool_failure" "route_reason" "stackvm_config_router_example.fallback" shared-handoff
     ]
     [
-      common.config-data
-      dup "config" store-set
-      dup "enabled" dict-get? bool>
+      normalized-config
+      "config_errors"
+      None
       [
-        "config" store-get "message" dict-get? dup none?
-        [ drop "delegate" ]
-        [ ]
-        if
-        "route_message" shared!
-        "config" store-get "target_index" dict-get? dup none?
-        [ drop 0 ]
-        [ int> ]
-        if
-        "selected_index" store-set
-        "config" store-get "routes" dict-get? "selected_index" store-get list-get? dup none?
+        [ "{enabled: true, message: $route_message, target_index: $selected_index, routes: $routes}" yaml> ]
         [
-          drop
-          "missing_route" "route_reason" shared!
-          "stackvm_config_router_example.fallback" handoff
+          "match.route_message" shared@ "route_message" shared!
+          "match.selected_index" shared@ "selected_index" store-set
+          "match.routes" shared@ "routes" store-set
+          [ "routes" store-get ]
+          [ "selected_index" store-get ]
+          "missing_route"
+          "stackvm_config_router_example.fallback"
+          [ handoff ]
+          indexed-handoff-route
         ]
-        [ handoff ]
-        if
+        [ "{enabled: false, routes: $routes}" yaml> ]
+        [
+          "disabled" "route_reason" shared!
+          [ "match.routes" shared@ ]
+          [ 1 ]
+          "missing_route"
+          "stackvm_config_router_example.fallback"
+          [ handoff ]
+          indexed-handoff-route
+        ]
+        _
+        [
+          "invalid_config" "route_reason" "stackvm_config_router_example.fallback" shared-handoff
+        ]
       ]
-      [
-        "disabled" "route_reason" shared!
-        "config" store-get "routes" dict-get? 1 list-get? dup none?
-        [ drop "stackvm_config_router_example.fallback" handoff ]
-        [ handoff ]
-        if
-      ]
-      if
+      [ drop "invalid_config" "route_reason" "stackvm_config_router_example.fallback" shared-handoff ]
+      schema-route
     ]
     if
   ]
-  tool-once
+  stdlib.io.read-yaml-file-once
 ] "decide" define
+
+"decide" export

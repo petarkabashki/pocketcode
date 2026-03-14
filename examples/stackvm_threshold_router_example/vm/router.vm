@@ -22,11 +22,12 @@
       dup "normalized.total" shared!? drop
 
       [
-        [ "normalized.total" shared@ 10 >= ] [ "high" "normalized.band" shared! "stackvm_threshold_router_example.high_route" handoff ]
-        [ "normalized.total" shared@ 5 >= ] [ "review" "normalized.band" shared! "stackvm_threshold_router_example.review_route" handoff ]
-        [ True ] [ "low" "normalized.band" shared! "stackvm_threshold_router_example.low_route" handoff ]
+        [ "normalized.total" shared@ 10 >= ] "high" "stackvm_threshold_router_example.high_route"
+        [ "normalized.total" shared@ 5 >= ] "review" "stackvm_threshold_router_example.review_route"
+        [ True ] "low" "stackvm_threshold_router_example.low_route"
       ]
-      cond
+      "normalized.band"
+      handoff-rules
     ]
     if
   ]

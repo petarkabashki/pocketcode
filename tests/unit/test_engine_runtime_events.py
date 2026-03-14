@@ -345,6 +345,52 @@ class TestEngineRunHandle:
             }
         ]
 
+    def test_build_run_summary_includes_standalone_session_summary_when_present(self):
+        engine = _build_engine(_EffectHistoryRuntime())
+
+        summary = engine._build_run_summary(
+            {
+                "active_agent": "core.agent",
+                "standalone_session_id": "sess-123",
+                "standalone_session_title": "Demo Session",
+                "standalone_transcript": [
+                    {"role": "user", "content": "hello"},
+                    {"role": "assistant", "content": "ready"},
+                ],
+                "standalone_transcript_text": "User: hello\nAssistant: ready",
+                "standalone_session_persistent_keys": ["count", "mode"],
+            },
+            {"files": set(), "folders": set(), "urls": set(), "snippets": {}},
+        )
+
+        assert summary["standalone_session"] == {
+            "active": True,
+            "session_id": "sess-123",
+            "title": "Demo Session",
+            "transcript_entries": 2,
+            "transcript_chars": len("User: hello\nAssistant: ready"),
+            "persistent_key_count": 2,
+        }
+        assert summary["stackvm_runtime"] == {
+            "path": "unknown",
+            "source": "unknown",
+            "standalone_session_active": True,
+        }
+        assert summary["stackvm_static_runtime_correlation"] == {
+            "static_scope_count": 0,
+            "runtime_scope_count": 0,
+            "matched_scope_count": 0,
+            "matched_scopes": [],
+            "runtime_only_scopes": [],
+            "static_only_scopes": [],
+            "static_decision_scope_count": 0,
+            "runtime_decision_scope_count": 0,
+            "matched_decision_scope_count": 0,
+            "matched_decision_scopes": [],
+            "runtime_only_decision_scopes": [],
+            "static_only_decision_scopes": [],
+        }
+
     def test_start_request_can_be_cancelled(self):
         engine = _build_engine(_CancellableRuntime())
 

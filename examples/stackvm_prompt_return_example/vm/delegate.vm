@@ -1,10 +1,6 @@
 [
-  "{kind: buttons, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: reject, label: Reject, value: reject}]}" yaml>
-  dup "prompt" "Choose delegate action for " "normalized.summary" shared@ concat dict-set
-  prompt-interaction
-  dup "normalized.delegate_choice" shared!? drop
-  dup "approve" =
-  [ drop "delegate approved " "normalized.summary" shared@ concat answer ]
-  [ drop "delegate rejected " "normalized.summary" shared@ concat answer ]
-  if
+  "prompt-return-family"
+  "delegate"
+  "answer"
+  use-workflow-family
 ] "decide" define

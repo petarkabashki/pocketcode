@@ -5,14 +5,14 @@ This example shows a StackVM flow that reads a YAML payload through `core.read_f
 Layout:
 
 - `flows/*.md`: registers the StackVM flow
-- `flows/map.md`: StackVM-backed tool-first mapping flow with `vm_module_prefixes` assigning the `common` helper prefix
-- `vm/common.vm`: shared helper module for parsing the tool result into payload data, loaded as `common.*`
+- `flows/map.md`: StackVM-backed tool-first mapping flow that loads the shared workspace stdlib normalization module plus the local VM modules explicitly
+- `vm/common.vm`: local facade that re-exports `stdlib.normalize.tool-content-yaml` as `payload-data`
 - `vm/router.vm`: tool-result loading and `parallel-map` script using qualified `common.*` helper calls
 
 The example demonstrates:
 
 - tool-first orchestration with the built-in `tool-once` macro
-- YAML parsing from a tool result with `yaml>`
+- shared YAML parsing from a tool result through `stdlib.normalize.tool-content-yaml`
 - safe list extraction with `dict-get?`
 - pure data fan-out with `parallel-map` after the tool result is normalized into an in-memory list
 - replay of a user-defined helper word inside child VMs spawned by `parallel-map`

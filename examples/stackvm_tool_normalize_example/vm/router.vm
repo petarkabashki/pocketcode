@@ -1,6 +1,5 @@
 [
-  "core.read_file"
-  [ "{path: tool_payload.yaml}" yaml> ]
+  "tool_payload.yaml"
   [
     last-tool-result failure?
     [ "Normalization failed: missing tool payload file." answer ]
@@ -24,5 +23,5 @@
     ]
     if
   ]
-  tool-once
+  stdlib.io.read-yaml-file-once
 ] "decide" define

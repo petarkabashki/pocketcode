@@ -1,8 +1,11 @@
 import time
+import shutil
 from pathlib import Path
 from typing import Iterable, Sequence
 
 from pocketcode.core.engine import PocketCodeEngine
+from pocketcode.core.markdown_assets import load_markdown_asset_document
+from pocketcode.core.stackvm_loader import load_stackvm_program_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +58,10 @@ def make_example_engine(
     *,
     workspace_paths: Iterable[str | Path] | None = None,
 ) -> PocketCodeEngine:
+    shared_vm_root = REPO_ROOT / "vm"
+    if shared_vm_root.is_dir():
+        shutil.copytree(shared_vm_root, workspace_root / "vm", dirs_exist_ok=True)
+
     resolved_workspace_paths = [str(path) for path in EXAMPLE_NAMESPACE_ROOTS]
     if workspace_paths is not None:
         resolved_workspace_paths = []
@@ -101,3 +108,37 @@ def wait_for_new_interaction_request(handle, events, seen_request_ids, attempts:
             return event
         time.sleep(0.01)
     return None
+
+
+def load_example_linked_vm_source(example_name: str, *vm_refs: str) -> str:
+    example_root = EXAMPLES_ROOT / example_name
+    source, _ = load_stackvm_program_source(
+        vm_source=None,
+        vm_entry="decide",
+        vm_module=None,
+        vm_modules=vm_refs,
+        vm_module_prefixes=None,
+        vm_file=None,
+        vm_files=None,
+        base_dir=example_root,
+        search_roots=(REPO_ROOT, example_root),
+    )
+    return source
+
+
+def load_example_asset_vm_source(example_name: str, markdown_name: str) -> str:
+    example_root = EXAMPLES_ROOT / example_name
+    document = load_markdown_asset_document(example_root / markdown_name)
+    metadata = document.front_matter
+    source, _ = load_stackvm_program_source(
+        vm_source=metadata.get("vm_source"),
+        vm_entry=metadata.get("vm_entry"),
+        vm_module=metadata.get("vm_module"),
+        vm_modules=metadata.get("vm_modules"),
+        vm_module_prefixes=metadata.get("vm_module_prefixes"),
+        vm_file=metadata.get("vm_file"),
+        vm_files=metadata.get("vm_files"),
+        base_dir=example_root,
+        search_roots=(REPO_ROOT, example_root),
+    )
+    return source

@@ -7,8 +7,6 @@ tools:
 vm_entry: decide
 vm_modules:
   - vm/common
-vm_module_prefixes:
-  vm/common: common
 vm_files:
   - vm/tool_loop.md
 ---

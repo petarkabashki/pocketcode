@@ -1,0 +1,58 @@
+package: stackvm-stdlib
+version: 0.1.0
+module_root: vm/stdlib
+modules:
+  - name: stdlib.io
+    ref: vm/stdlib/io
+    file: vm/stdlib/io.vm
+    summary: Shared file-loading macros for one-turn read-file and read-yaml-file flows.
+    exports:
+      - read-file-once
+      - read-yaml-file-once
+    dependencies: []
+  - name: stdlib.config
+    ref: vm/stdlib/config
+    file: vm/stdlib/config.vm
+    summary: Shared YAML payload validation and schema-application helpers.
+    exports:
+      - tool-content-yaml
+      - tool-content-schema-check
+      - tool-content-schema-apply
+    dependencies: []
+  - name: stdlib.normalize
+    ref: vm/stdlib/normalize
+    file: vm/stdlib/normalize.vm
+    summary: Shared normalization helpers for tool-loaded payload titles, source, and summaries.
+    exports:
+      - tool-content-yaml
+      - item-title
+      - normalize-item-titles
+      - store-normalized-source
+      - store-normalized-enabled
+      - store-normalized-summary
+      - format-selected-actions
+    dependencies: []
+  - name: stdlib.prompt
+    ref: vm/stdlib/prompt
+    file: vm/stdlib/prompt.vm
+    summary: Shared structured interaction request builders for buttons, radio, and checklist flows.
+    exports:
+      - buttons-approve-delegate-deny
+      - buttons-approve-reject
+      - radio-delegate-approve-deny
+      - radio-approve-escalate-review
+      - radio-concise-detailed-blocked
+      - radio-concise-blocked
+      - radio-review-first-delegate-now
+      - checklist-approve-delegate-review
+      - checklist-delegate-review-approve
+      - checklist-git-search-context
+    dependencies: []
+  - name: stdlib.returns
+    ref: vm/stdlib/returns
+    file: vm/stdlib/returns.vm
+    summary: Shared helpers for caller-side delegate return access and YAML parsing.
+    exports:
+      - delegate-answer
+      - delegate-answer-yaml?
+    dependencies: []

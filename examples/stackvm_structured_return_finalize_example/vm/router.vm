@@ -1,46 +1,6 @@
 [
-  "last_delegated_result" shared@ none?
-  [
-    "core.read_file"
-    [ "{path: structured_finalize_payload.yaml}" yaml> ]
-    [
-      last-tool-result failure?
-      [ "Could not load the payload." answer ]
-      [
-        common.payload-data "payload" store-set
-
-        "payload" store-get common.normalize-item-titles
-
-        "payload" store-get common.store-normalized-source
-
-        common.store-normalized-summary
-
-        "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
-        "pending_handoff_policy" store-set
-        "stackvm_structured_return_finalize_example.confirm_delegate" handoff
-      ]
-      if
-    ]
-    tool-once
-  ]
-  [
-    "last_delegated_result" shared@ "answer" dict-get dup none?
-    [ drop "Delegate returned without an answer." answer ]
-    [
-      [
-        yaml>
-        dup "mode" dict-get dup "normalized.delegate_mode" shared!? drop
-        swap "message" dict-get dup "normalized.delegate_message" shared!? drop
-
-        "finalized: "
-        "normalized.summary" shared@ concat
-        " | mode=" concat
-        "normalized.delegate_mode" shared@ concat
-        " | note=" concat
-        "normalized.delegate_message" shared@ concat
-      ] finalize-from
-    ]
-    if
-  ]
-  if
+  "structured-return-finalize-family"
+  "caller"
+  "finalize"
+  use-workflow-family
 ] "decide" define

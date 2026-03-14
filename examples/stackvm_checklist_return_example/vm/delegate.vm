@@ -1,7 +1,6 @@
 [
-  "{kind: checklist, prompt: placeholder, options: [{id: git, label: Git, value: git}, {id: search, label: Search, value: search}, {id: context, label: Context, value: context}], min_selected: 1}" yaml>
-  dup "prompt" "Pick tools for " "normalized.summary" shared@ concat dict-set
-  prompt-interaction
-  dup "normalized.selected_tools" shared!? drop
-  ", " join "delegate picked " swap concat " for " concat "normalized.summary" shared@ concat answer
+  "checklist-return-family"
+  "delegate"
+  "answer"
+  use-workflow-family
 ] "decide" define

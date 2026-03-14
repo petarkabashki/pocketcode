@@ -5,10 +5,10 @@ tools:
   - core.read_file
 vm_entry: decide
 vm_modules:
+  - stdlib.io
+  - stdlib.normalize
   - vm/common
   - vm/router
-vm_module_prefixes:
-  vm/common: common
 ---
 
-Read a YAML payload via a tool through the built-in `tool-once` macro, normalize all payload item titles plus selected fields into shared state, and answer from the normalized view.
+Read a YAML payload through `stdlib.io.read-yaml-file-once`, normalize all payload item titles plus selected fields into shared state, and answer from the normalized view.

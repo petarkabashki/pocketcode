@@ -7,6 +7,7 @@ from typing import Any, Sequence
 
 from pocketcode.core.markdown_assets import load_markdown_asset_document
 from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast, strip_stackvm_comments
+from pocketcode.core.stackvm_stdlib_manifest import resolve_stackvm_stdlib_module_alias
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,9 @@ def _resolve_stackvm_ref(*, ref: str, base_dir: Path, search_roots: Sequence[Pat
         raise ValueError("Empty StackVM source reference.")
 
     roots = [base_dir.resolve(), *(Path(root).resolve() for root in search_roots)]
+    stdlib_alias_path = resolve_stackvm_stdlib_module_alias(cleaned, search_roots=roots)
+    if stdlib_alias_path is not None:
+        return stdlib_alias_path
     raw_path = Path(cleaned)
     candidates: list[Path] = []
     if raw_path.is_absolute():

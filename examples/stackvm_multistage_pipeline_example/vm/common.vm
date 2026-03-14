@@ -1,29 +1,61 @@
-[ last-tool-result "content" dict-get yaml> ] "payload-data" define
-[ "title" dict-get? dup none? [ drop "untitled" ] [ ] if ] "item-title" define
+"common" module
+"stdlib.normalize.tool-content-yaml" import
+"stdlib.normalize.normalize-item-titles" "stdlib-normalize-item-titles" import
+"stdlib.normalize.store-normalized-source" "stdlib-store-normalized-source" import
+"stdlib.normalize.store-normalized-summary" "stdlib-store-normalized-summary" import
+"stdlib.normalize.format-selected-actions" "stdlib-format-selected-actions" import
+
+[ tool-content-yaml ] "payload-data" define
+[ stdlib-normalize-item-titles ] "normalize-item-titles" define
+[ stdlib-store-normalized-source ] "store-normalized-source" define
+[ stdlib-store-normalized-summary ] "store-normalized-summary" define
+[ stdlib-format-selected-actions ] "format-selected-actions" define
+
+"multistage-family"
+"multistage_payload.yaml"
+"checklist"
+"Choose actions for "
+"normalized.selected_actions"
 [
-	"items" dict-get? dup none?
-	[ drop "[]" yaml> ]
-	[ ]
-	if
-	[ item-title ]
-	parallel-map
-	dup "normalized.titles" shared!? drop
-	", " join
-	dup "normalized.title" shared!? drop
-] "normalize-item-titles" define
+  "delegate" "Delegate" "delegate"
+  "review" "Review" "review"
+  "approve" "Approve" "approve"
+]
+[ "min_selected" 1 ]
+"contains"
+[ common.format-selected-actions ]
 [
-	"meta.source" get-in? dup none?
-	[ drop "unknown" ]
-	[ ]
-	if
-	dup "normalized.source" shared!? drop
-	drop
-] "store-normalized-source" define
+  "delegate" [ swap drop drop "stackvm_multistage_pipeline_example.confirm_delegate" return-handoff ]
+  "default"
+  [
+    swap drop drop
+    [
+      "pipeline complete: "
+      "normalized.summary" shared@ concat
+      " | actions=" concat
+      "normalized.selected_actions_text" shared@ concat
+      " | delegate=skipped" concat
+    ] finalize-from
+  ]
+]
+"radio"
+"Choose delegate plan for "
+"normalized.delegate_plan"
 [
-	"normalized.title" shared@ " from " concat "normalized.source" shared@ concat
-	dup "normalized.summary" shared!? drop
-] "store-normalized-summary" define
-[ 
-	dup ", " join
-	dup "normalized.selected_actions_text" shared!? drop
-] "format-selected-actions" define
+  "review-first" "Review First" "review-first"
+  "delegate-now" "Delegate Now" "delegate-now"
+]
+[ ]
+"exact"
+[ ]
+[
+  "review-first" [ "delegate plan review-first" ]
+  "default" [ "delegate plan delegate-now" ]
+]
+define-choice-continue-answer-family
+
+"payload-data" export
+"normalize-item-titles" export
+"store-normalized-source" export
+"store-normalized-summary" export
+"format-selected-actions" export

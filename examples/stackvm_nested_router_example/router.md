@@ -5,10 +5,10 @@ tools:
   - core.read_file
 vm_entry: decide
 vm_modules:
+  - stdlib.io
+  - stdlib.config
   - vm/common
   - vm/router
-vm_module_prefixes:
-  vm/common: common
 ---
 
-Read nested YAML config data, traverse it defensively, and hand off to the selected route.
+Read nested YAML config data through `stdlib.io.read-yaml-file-once`, traverse it defensively, and hand off to the selected route.

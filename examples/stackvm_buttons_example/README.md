@@ -5,16 +5,18 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 Layout:
 
 - `flows/*.md`: registers the StackVM normalization flow
-- `flows/normalize.md`: StackVM-backed normalization, interaction, and answer flow with `vm_module_prefixes` assigning the `common` helper prefix
-- `vm/common.vm`: shared helper module for parsing the tool result into payload data, loaded as `common.*`
-- `vm/router.vm`: normalization script using `tool-once`, `prompt-route`, `dict-get?`, `parallel-map`, `shared!?`, `dict-set`, and qualified `common.*` helper calls
+- `flows/normalize.md`: StackVM-backed normalization, interaction, and answer flow loading the shared workspace stdlib io and normalization modules plus a local helper facade
+- `vm/common.vm`: local helper module re-exporting the shared `stdlib.normalize` helpers under `common.*`
+- `vm/router.vm`: normalization script using a direct continuation contract declared in `vm/common.vm` with `define-choice-continue-spec` and bound with `use-workflow-spec` plus qualified `common.*` helper calls
 
 The example demonstrates:
 
-- tool-first orchestration with the built-in `tool-once` macro
+- loading shared file-read macros from workspace-root `stdlib.io`
+- loading shared normalization helpers from workspace-root `stdlib.normalize`
+- tool-first orchestration with the shared `stdlib.io.read-yaml-file-once` macro
 - normalization of all tool-derived item titles into shared state
 - pure data fan-out with `parallel-map` before the interaction step
-- structured `buttons` interaction through the built-in `prompt-route` macro
+- structured `buttons` interaction through `define-choice-continue-spec` in `vm/common.vm` and `use-workflow-spec` in the router, which packages file load, normalization, normalized-summary prompt construction, and direct `continue` plus `exact` choice routing
 - continued VM execution from the selected option value
 
-Conceptually, `prompt-route` expands to the same `prompt-interaction` plus `switch` pattern the runtime already supports, but it keeps the router focused on the case table instead of the plumbing.
+Conceptually, the named workflow-spec layer moves the example up another level: `vm/common.vm` declares the payload source, normalization contract, normalized-summary prompt prefix, option table, and continuation behavior once, and `vm/router.vm` just binds that contract by role and policy.

@@ -1,6 +1,7 @@
 from pocketcode.core.stackvm_expander import expand_stackvm_source
 from tests.integration.stackvm_test_utils import (
     EXAMPLES_ROOT,
+    load_example_asset_vm_source,
     make_example_engine,
     request_context,
     wait_for_new_interaction_request,
@@ -53,10 +54,52 @@ def test_real_engine_start_request_can_finalize_after_structured_delegate_return
 
     assert result == "finalized: Alpha, Beta, untitled from fixture | mode=concise | note=concise summary requested"
     assert engine.last_run_summary["current_agent"] == "stackvm_structured_return_finalize_example.normalize"
-    router_source = (
-        EXAMPLES_ROOT / "stackvm_structured_return_finalize_example" / "vm" / "router.vm"
-    ).read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
+    router_source = load_example_asset_vm_source("stackvm_structured_return_finalize_example", "normalize.md")
+    delegate_source = load_example_asset_vm_source(
+        "stackvm_structured_return_finalize_example",
+        "confirm_delegate.md",
+    )
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-finalize-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "finalize-workflow-contract",
+        "caller-finalize-workflow",
+        "normalized-finalize-workflow",
+        "normalized-return-flow",
+        "normalize-loaded-payload",
+        "return-contract-flow",
+        "return-field-finalize-flow",
+        "returned-policy",
+        "returned-finalize",
+        "finalize-from",
+        "project-shared",
+        "returned-yaml",
+        "return-flow",
+        "return-handoff",
+        "stdlib.io.read-yaml-file-once",
+    ]
+    assert expand_stackvm_source(delegate_source).expansion_trace == [
+        "define-choice-finalize-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "finalize-workflow-contract",
+        "delegate-structured-workflow",
+        "summary-structured-workflow",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-contract",
+        "choice-structured-decision",
+        "record-fields",
+        "record-fields",
+        "record-fields",
+        "choice-decision",
+        "choice-request",
+        "prompt-decision",
+        "prompt-return-yaml-policy",
+    ]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types
@@ -153,10 +196,52 @@ def test_real_engine_start_request_can_route_after_structured_delegate_return_ap
 
     assert result == "approved route handled: Alpha, Beta, untitled from fixture (approved by delegate)"
     assert engine.last_run_summary["current_agent"] == "stackvm_structured_return_routing_example.approve_route"
-    router_source = (
-        EXAMPLES_ROOT / "stackvm_structured_return_routing_example" / "vm" / "router.vm"
-    ).read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    router_source = load_example_asset_vm_source("stackvm_structured_return_routing_example", "normalize.md")
+    delegate_source = load_example_asset_vm_source(
+        "stackvm_structured_return_routing_example",
+        "confirm_delegate.md",
+    )
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-route-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "route-workflow-contract",
+        "caller-route-workflow",
+        "normalized-route-workflow",
+        "normalized-return-flow",
+        "normalize-loaded-payload",
+        "return-contract-flow",
+        "return-field-route-flow",
+        "returned-policy",
+        "returned-handoff-switch",
+        "handoff-switch",
+        "project-shared",
+        "returned-yaml",
+        "return-flow",
+        "return-handoff",
+        "stdlib.io.read-yaml-file-once",
+    ]
+    assert expand_stackvm_source(delegate_source).expansion_trace == [
+        "define-choice-route-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "route-workflow-contract",
+        "delegate-structured-workflow",
+        "summary-structured-workflow",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-contract",
+        "choice-structured-decision",
+        "record-fields",
+        "record-fields",
+        "record-fields",
+        "choice-decision",
+        "choice-request",
+        "prompt-decision",
+        "prompt-return-yaml-policy",
+    ]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types
@@ -251,10 +336,51 @@ def test_real_engine_start_request_can_finalize_after_nested_structured_delegate
 
     assert result == "nested finalized: Alpha, Beta, untitled from fixture | mode=concise | note=concise summary requested | delegate_source=delegate"
     assert engine.last_run_summary["current_agent"] == "stackvm_nested_structured_return_example.normalize"
-    router_source = (
-        EXAMPLES_ROOT / "stackvm_nested_structured_return_example" / "vm" / "router.vm"
-    ).read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
+    router_source = load_example_asset_vm_source("stackvm_nested_structured_return_example", "normalize.md")
+    delegate_source = load_example_asset_vm_source(
+        "stackvm_nested_structured_return_example",
+        "confirm_delegate.md",
+    )
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-finalize-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "finalize-workflow-contract",
+        "caller-finalize-workflow",
+        "normalized-finalize-workflow",
+        "normalized-return-flow",
+        "normalize-loaded-payload",
+        "return-contract-flow",
+        "return-field-finalize-flow",
+        "returned-policy",
+        "returned-finalize",
+        "finalize-from",
+        "project-shared",
+        "returned-yaml",
+        "return-flow",
+        "return-handoff",
+        "stdlib.io.read-yaml-file-once",
+    ]
+    assert expand_stackvm_source(delegate_source).expansion_trace == [
+        "define-choice-finalize-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "finalize-workflow-contract",
+        "delegate-structured-workflow",
+        "summary-structured-workflow",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-contract",
+        "choice-structured-decision",
+        "record-fields",
+        "record-fields",
+        "choice-decision",
+        "choice-request",
+        "prompt-decision",
+        "prompt-return-yaml-policy",
+    ]
 
 
 def test_real_engine_start_request_can_finalize_after_nested_structured_delegate_return_with_default_note(tmp_path):
@@ -345,10 +471,55 @@ def test_real_engine_start_request_can_route_after_nested_structured_delegate_re
 
     assert result == "approved nested route handled: Alpha, Beta, untitled from fixture | note=approved by delegate | delegate_source=delegate"
     assert engine.last_run_summary["current_agent"] == "stackvm_nested_structured_return_routing_example.approve_route"
-    router_source = (
-        EXAMPLES_ROOT / "stackvm_nested_structured_return_routing_example" / "vm" / "router.vm"
-    ).read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    router_source = load_example_asset_vm_source(
+        "stackvm_nested_structured_return_routing_example",
+        "normalize.md",
+    )
+    delegate_source = load_example_asset_vm_source(
+        "stackvm_nested_structured_return_routing_example",
+        "confirm_delegate.md",
+    )
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-route-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "route-workflow-contract",
+        "caller-route-workflow",
+        "normalized-route-workflow",
+        "normalized-return-flow",
+        "normalize-loaded-payload",
+        "return-contract-flow",
+        "return-field-route-flow",
+        "returned-policy",
+        "returned-handoff-switch",
+        "handoff-switch",
+        "project-shared",
+        "returned-yaml",
+        "return-flow",
+        "return-handoff",
+        "stdlib.io.read-yaml-file-once",
+    ]
+    assert expand_stackvm_source(delegate_source).expansion_trace == [
+        "define-choice-route-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "route-workflow-contract",
+        "delegate-structured-workflow",
+        "summary-structured-workflow",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-contract",
+        "choice-structured-decision",
+        "record-fields",
+        "record-fields",
+        "record-fields",
+        "choice-decision",
+        "choice-request",
+        "prompt-decision",
+        "prompt-return-yaml-policy",
+    ]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types

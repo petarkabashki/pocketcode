@@ -1,22 +1,24 @@
 # StackVM Nested Structured Return Example
 
-This example shows a StackVM caller/delegate pair where the caller normalizes all payload item titles, the delegate returns a nested YAML decision string, and the caller uses `get-in?` on the parsed return value before producing the final answer.
+This example shows a StackVM caller/delegate pair where the caller normalizes all payload item titles, the delegate returns a nested YAML decision string, and the caller finalizes from declarative nested field specs instead of embedding `get-in?` logic inline.
 
 Layout:
 
 - `flows/*.md`: registers the caller and VM delegate flows
-- `flows/normalize.md`: caller flow that normalizes data, hands off, parses the returned nested YAML, and finalizes directly, with `vm_module_prefixes` assigning the `common` helper prefix
-- `flows/confirm_delegate.md`: VM delegate flow that collects a structured choice and returns a nested YAML mapping string to the caller
-- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
-- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, parses the returned YAML, reads nested fields with `get-in?`, uses `finalize-from` for the final answer, and calls qualified `common.*` helpers
-- `vm/delegate.vm`: delegate script that collects a radio choice and returns a nested YAML mapping string
+- `flows/normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, hands off, then resumes through the paired nested structured finalize workflow
+- `flows/confirm_delegate.md`: VM delegate flow that collects a structured choice from one declarative decision table and returns a nested YAML mapping string to the caller
+- `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
+- `vm/router.vm`: caller script that binds the caller half of `define-choice-finalize-family` for the full caller-side load, normalization, handoff, YAML resume protocol, nested field projection with defaults, and finalization policy, and calls qualified `common.*` helpers
+- `vm/delegate.vm`: delegate script that binds the delegate half of `define-choice-finalize-family`, collects a radio choice, declares nested returned fields as path/value specs, layers them onto a shared base mapping, and emits YAML at the answer boundary
 
 The example demonstrates:
 
-- tool-first normalization of all payload item titles in a StackVM caller through `tool-once`
+- tool-first normalization of all payload item titles in a StackVM caller through `stdlib.io.read-yaml-file-once`
+- shared file-read macros loaded from workspace-root `stdlib.io`
+- shared normalization helpers loaded from workspace-root `stdlib.normalize`
 - pure data fan-out with `parallel-map` before delegate handoff
-- `return_to_caller` handoff to a VM delegate
+- a paired nested structured finalize workflow declared in `vm/common.vm` through `define-choice-finalize-family` and bound with `use-workflow-family` for the full caller-side load, normalization, handoff, returned-decision parsing, nested field projection, and finalization protocol
 - nested YAML returned through `last_delegated_result.answer`
-- caller-side parsing with `yaml>` plus nested reads with `get-in?`
+- caller-side finalization from declarative nested field-spec triples with explicit defaults
 - caller-side final answer construction through `finalize-from`
 - default handling when an optional nested field is absent from the returned decision

@@ -11,6 +11,8 @@ Keep code and documentation files limited to around 500 lines where practical; w
 - If code changes, update the relevant files in `docs/` in the same change.
 - If a spec conflicts with the implementation, do not "fix" the docs to match the spec; document the implementation and, if useful, note that the spec is historical.
 - Prefer documenting current load order, precedence rules, schemas, commands, and runtime behavior over planned or aspirational behavior.
+- Add mermaid or dot diagrams in documentation, examples, and markdown-based agents to illustrate behaviour, architecture and structure.
+- Add descriptive use-case scenarios to illustrate the different stackvm patterns in docs and examples
 
 Always for python load the local python environment by running `source` on .venv/bin/activate
 

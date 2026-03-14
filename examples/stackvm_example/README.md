@@ -5,8 +5,8 @@ This example shows a multi-file StackVM-backed flow packaged as a normal workspa
 Layout:
 
 - `flows/*.md`: registers the flow
-- `flows/review.md`: declares the Markdown-backed flow, the VM entry point, and `vm_module_prefixes` assigning the `common` helper prefix
-- `vm/common.vm`: shared words for request capture and result access, loaded as `common.*`
+- `flows/review.md`: declares the Markdown-backed flow, the VM entry point, and the explicit `vm/common` helper module
+- `vm/common.vm`: declared helper module exporting request capture and result access words under `common.*`
 - `vm/tool_loop.md`: a Markdown-authored VM module with the orchestration word definitions and a qualified `common.*` helper call
 
 The example is intentionally small. It demonstrates:
@@ -14,6 +14,7 @@ The example is intentionally small. It demonstrates:
 - `vm_entry`, `vm_modules`, and `vm_files`
 - mixed `.vm` and `.md` VM source files
 - slash-style module refs such as `vm/common` without requiring a file suffix
+- explicit module/export authoring without `vm_module_prefixes`
 - request capture with `store-set`
 - tool-first orchestration with `tool-request` against the real `core.read_file` `{path: ...}` contract
 - follow-up answer generation from `last-tool-result`

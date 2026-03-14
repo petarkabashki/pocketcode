@@ -1,8 +1,5 @@
 [
-  "core.read_file"
-  [
-    "{path: confirm_payload.yaml}" yaml>
-  ]
+  "confirm_payload.yaml"
   [
     last-tool-result failure?
     [ "Could not load the payload." answer ]
@@ -14,14 +11,15 @@
       "payload" store-get common.store-normalized-source
 
       common.store-normalized-summary
-      "Proceed with " swap concat "?" concat prompt-user
-      dup "normalized.reply" shared!? drop
-      bool>
+      [ "Proceed with " swap concat "?" concat ]
+      "normalized.reply"
+      [ bool> ]
+      prompt-store-text
       [ "Confirmed " "normalized.summary" shared@ concat answer ]
       [ "Declined " "normalized.summary" shared@ concat answer ]
       if
     ]
     if
   ]
-  tool-once
+  stdlib.io.read-yaml-file-once
 ] "decide" define

@@ -1,0 +1,9 @@
+"stdlib.config" module
+
+[ last-tool-result "content" dict-get yaml> ] "tool-content-yaml" define
+[ tool-content-yaml swap schema-check ] "tool-content-schema-check" define
+[ tool-content-yaml swap schema-apply ] "tool-content-schema-apply" define
+
+"tool-content-yaml" export
+"tool-content-schema-check" export
+"tool-content-schema-apply" export

@@ -1,11 +1,8 @@
 [
-  "core.read_file"
-  [
-    "{path: ask_payload.yaml}" yaml>
-  ]
+  "ask_payload.yaml"
   [
     last-tool-result failure?
-    [ "Could not load the payload. Continue anyway?" ask-user ]
+    [ [ "Could not load the payload. Continue anyway?" ] ask-from ]
     [
       common.payload-data "payload" store-set
 
@@ -18,11 +15,11 @@
       common.store-normalized-summary drop
 
       "normalized.enabled" shared@
-      [ "Proceed with " "normalized.summary" shared@ concat "?" concat ask-user ]
-      [ "Enable " "normalized.summary" shared@ concat " before continuing?" concat ask-user ]
+      [ [ "Proceed with " "normalized.summary" shared@ concat "?" concat ] ask-from ]
+      [ [ "Enable " "normalized.summary" shared@ concat " before continuing?" concat ] ask-from ]
       if
     ]
     if
   ]
-  tool-once
+  stdlib.io.read-yaml-file-once
 ] "decide" define

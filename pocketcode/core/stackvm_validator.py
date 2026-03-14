@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from pocketcode.core.stackvm_analysis import analyze_stackvm_ast
 from pocketcode.core.stackvm_parser import StackVmSourceToken, tokenize_stackvm_source
 
 STACKVM_COMPILE_ONLY_FORMS = {

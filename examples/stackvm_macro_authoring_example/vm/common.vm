@@ -1,3 +1,5 @@
+"common" module
+
 [ "{path: macro_payload.yaml}" yaml> ] "macro-payload-request" define
 [
   "message" dict-get? dup none?
@@ -5,3 +7,6 @@
   [ ]
   if
 ] "payload-message" define
+
+"macro-payload-request" export
+"payload-message" export

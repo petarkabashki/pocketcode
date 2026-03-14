@@ -1,1 +1,6 @@
-[ last-tool-result "content" dict-get yaml> ] "payload-data" define
+"common" module
+"stdlib.normalize.tool-content-yaml" import
+
+[ tool-content-yaml ] "payload-data" define
+
+"payload-data" export

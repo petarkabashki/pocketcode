@@ -1,8 +1,5 @@
 [
-  "core.read_file"
-  [
-    "{path: handoff_payload.yaml}" yaml>
-  ]
+  "handoff_payload.yaml"
   [
     last-tool-result failure?
     [ "stackvm_normalize_handoff_example.disabled_delegate" handoff ]
@@ -26,5 +23,5 @@
     ]
     if
   ]
-  tool-once
+  stdlib.io.read-yaml-file-once
 ] "decide" define

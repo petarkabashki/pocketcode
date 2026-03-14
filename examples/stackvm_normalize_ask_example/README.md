@@ -5,14 +5,16 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 Layout:
 
 - `flows/*.md`: registers the StackVM normalization flow
-- `flows/normalize.md`: StackVM-backed normalization-and-question flow with `vm_module_prefixes` assigning the `common` helper prefix
-- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
-- `vm/router.vm`: normalization script using `parallel-map`, `get-in?`, `bool>`, `shared!?`, `ask-user`, and qualified `common.*` helper calls
+- `flows/normalize.md`: StackVM-backed normalization-and-question flow loading the shared workspace stdlib io and normalization modules plus a local facade
+- `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
+- `vm/router.vm`: normalization script using `stdlib.io.read-yaml-file-once`, `parallel-map`, `get-in?`, `bool>`, `shared!?`, `ask-from`, and qualified `common.*` helper calls
 
 The example demonstrates:
 
-- tool-first orchestration with `tool-request`
+- tool-first orchestration through the shared `stdlib.io.read-yaml-file-once` macro
+- shared file-read macros loaded from workspace-root `stdlib.io`
+- shared normalization helpers loaded from workspace-root `stdlib.normalize`
 - normalization of tool-derived YAML into shared state
 - fan-out normalization of all payload item titles with `parallel-map`
 - question generation from normalized shared-state instead of the raw tool payload
-- the `ask-user` transition as a first-class StackVM flow outcome
+- the built-in `ask-from` macro as the higher-level authoring form over `ask-user`

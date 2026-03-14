@@ -1,55 +1,58 @@
 [
-  "core.read_file"
-  [
-    "{path: nested_route_config.yaml}" yaml>
-  ]
+  "nested_route_config.yaml"
   [
     last-tool-result failure?
     [
-      "tool_failure" "route_reason" shared!
-      "stackvm_nested_router_example.fallback" handoff
+      "tool_failure" "route_reason" "stackvm_nested_router_example.fallback" shared-handoff
     ]
     [
-      common.config-data
-      dup "config" store-set
-      dup "routing.enabled" get-in? bool>
+      common.normalized-config
+      "config_errors"
+      "config"
       [
-        "config" store-get "routing.selected.index" get-in? dup none?
-        [ drop 0 ]
-        [ int> ]
-        if
-        "selected_index" store-set
-        "config" store-get "routing.targets" get-in? "selected_index" store-get list-get? dup none?
+        [ "{routing: {enabled: true, selected: {index: $selected_index}, targets: $targets}}" yaml> ]
         [
-          drop
-          "missing_target" "route_reason" shared!
-          "stackvm_nested_router_example.fallback" handoff
-        ]
-        [
-          dup "message" dict-get? dup none?
-          [ drop "nested delegate" ]
-          [ ]
-          if
-          "route_message" shared!
-          "config" store-get "selected" "routing.audit.status" set-in? "updated_config" store-set
-          "agent" dict-get? dup none?
+          "match.selected_index" shared@ "selected_index" store-set
+          "match.targets" shared@ "targets" store-set
+          [ "targets" store-get ]
+          [ "selected_index" store-get ]
+          "missing_target"
+          "stackvm_nested_router_example.fallback"
           [
-            drop
-            "missing_target" "route_reason" shared!
-            "stackvm_nested_router_example.fallback" handoff
+            [
+              [ "{agent: $selected_agent, message: $route_message}" yaml> ]
+              [
+                "match.route_message" shared@ "route_message" shared!
+                "match.selected_agent" shared@ "selected_agent" store-set
+                "config" store-get "selected" "routing.audit.status" set-in? "updated_config" store-set
+                [ "selected_agent" store-get ]
+                [
+                  "missing_target" "route_reason" "stackvm_nested_router_example.fallback" shared-handoff
+                ]
+                maybe-handoff
+              ]
+              _
+              [
+                "missing_target" "route_reason" "stackvm_nested_router_example.fallback" shared-handoff
+              ]
+            ]
+            match
           ]
-          [ handoff ]
-          if
+          indexed-handoff-route
         ]
-        if
+        [ "{routing: {enabled: false}}" yaml> ]
+        [
+          "disabled" "route_reason" "stackvm_nested_router_example.fallback" shared-handoff
+        ]
+        _
+        [
+          "invalid_config" "route_reason" "stackvm_nested_router_example.fallback" shared-handoff
+        ]
       ]
-      [
-        "disabled" "route_reason" shared!
-        "stackvm_nested_router_example.fallback" handoff
-      ]
-      if
+      [ drop "invalid_config" "route_reason" "stackvm_nested_router_example.fallback" shared-handoff ]
+      schema-route
     ]
     if
   ]
-  tool-once
+  stdlib.io.read-yaml-file-once
 ] "decide" define

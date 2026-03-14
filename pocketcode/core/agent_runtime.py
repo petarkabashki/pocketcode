@@ -28,11 +28,17 @@ from pocketcode.core.runtime_effects import (
 from pocketcode.core.workspace_catalog import WorkspaceCatalog
 from pocketcode.core.prompt_loader import is_prompt_reference, resolve_prompt_reference
 from pocketcode.core.run_handle import RunCancelledError
-from pocketcode.core.agent_stack_vm import AgentStackVM, StackVmExecutionResult, StackVmHostContext
+from pocketcode.core.agent_stack_vm import AgentStackVM, StackVmExecutionResult
+from pocketcode.core.stackvm_host import PocketCoderStackVmHostAdapter, StackVmHostContext
 from pocketcode.core.stackvm_expander import expand_stackvm_source
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
-from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast
-from pocketcode.core.stackvm_validator import collect_stackvm_authoring_warnings, validate_stackvm_ast
+from pocketcode.core.stackvm_parser import (
+    StackVmAstSpan,
+    parse_stackvm_source,
+    parse_stackvm_source_with_spans,
+    serialize_stackvm_ast,
+)
+from pocketcode.core.stackvm_validator import analyze_stackvm_ast, collect_stackvm_authoring_warnings, validate_stackvm_ast
 from pocketcode.core.runtime_models import AgentDefinition, HOOK_PHASES, HookDefinition
 from pocketcode.core.tool_runtime import ToolRuntime
 
@@ -350,16 +356,20 @@ class AgentRuntime:
             system_prompt = f"{system_prompt}\n\n{overlay_prompt}"
         result = StackVmExecutionResult()
         vm = AgentStackVM(shared_store=shared_store)
+        host_context = StackVmHostContext(
+            agent_name=agent_name,
+            llm_router=self._llm_router,
+            tool_runtime=self._tool_runtime,
+            llm_profile=llm_profile,
+            system_prompt=system_prompt,
+            tool_definitions=tool_definitions,
+        )
         vm.register_host_words(
-            host_context=StackVmHostContext(
-                agent_name=agent_name,
-                llm_router=self._llm_router,
-                tool_runtime=self._tool_runtime,
-                llm_profile=llm_profile,
-                system_prompt=system_prompt,
-                tool_definitions=tool_definitions,
-            ),
-            result=result,
+            host_adapter=PocketCoderStackVmHostAdapter(
+                shared_store=shared_store,
+                host_context=host_context,
+                result=result,
+            )
         )
         try:
             asyncio.run(vm.eval(vm_source))
@@ -478,12 +488,15 @@ class AgentRuntime:
             markdown_path = metadata.get("markdown_path")
             namespace_root = metadata.get("namespace_root")
             resource_root = metadata.get("resource_root")
+            workspace_root = shared_store.get("workspace_root")
             if markdown_path:
                 search_roots.append(Path(str(markdown_path)).resolve().parent)
             if namespace_root:
                 search_roots.append(Path(str(namespace_root)).resolve())
             if resource_root:
                 search_roots.append(Path(str(resource_root)).resolve())
+            if workspace_root:
+                search_roots.append(Path(str(workspace_root)).resolve())
 
             source, source_files = load_stackvm_program_source(
                 vm_source=agent_definition.vm_source,
@@ -500,6 +513,8 @@ class AgentRuntime:
                 raise ValueError(f"VM agent '{agent_name}' has no executable StackVM source.")
 
             expanded_ast: list[Any] = []
+            expanded_trace_spans: list[StackVmAstSpan] = []
+            authored_spans: list[StackVmAstSpan] = []
             validation_warnings: list[dict[str, str]] = []
             expansion_metadata = {
                 "expansion_count": 0,
@@ -509,12 +524,32 @@ class AgentRuntime:
                 "expansion_trace": [],
                 "expansion_frames": [],
             }
+            analysis: dict[str, Any] = {
+                "diagnostics": [],
+                "diagnostic_count": 0,
+                "effect_kinds": [],
+                "max_stack_depth": 0,
+                "final_min_stack_depth": 0,
+                "word_metadata_summary": {},
+            }
             if source.strip():
                 source_ast = parse_stackvm_source(source)
                 validation_warnings = collect_stackvm_authoring_warnings(source_ast, source=source)
                 expanded = expand_stackvm_source(source)
                 validate_stackvm_ast(expanded.ast)
                 expanded_ast = expanded.ast
+                authored_spans = list(expanded.ast_spans)
+                expanded_source = serialize_stackvm_ast(expanded_ast) if expanded_ast else ""
+                if expanded_source:
+                    _, expanded_trace_spans = parse_stackvm_source_with_spans(expanded_source)
+                analysis_ast = list(expanded_ast)
+                if agent_definition.vm_entry:
+                    analysis_ast.append(("sym", str(agent_definition.vm_entry)))
+                analysis = analyze_stackvm_ast(
+                    analysis_ast,
+                    source=serialize_stackvm_ast(analysis_ast),
+                    authored_spans=list(expanded.ast_spans),
+                )
                 used_macro_names = list(dict.fromkeys(expanded.expansion_trace))
                 builtin_macro_names = [
                     name
@@ -552,13 +587,27 @@ class AgentRuntime:
                 tool_definitions=list(shared_store.get("_agent_tool_definitions", [])),
             )
             vm = AgentStackVM(shared_store=shared_store)
-            vm.register_host_words(host_context=host_context, result=result)
-            self._run_stackvm_program(vm=vm, ast=expanded_ast, entry=agent_definition.vm_entry)
+            vm.register_host_words(
+                host_adapter=PocketCoderStackVmHostAdapter(
+                    shared_store=shared_store,
+                    host_context=host_context,
+                    result=result,
+                )
+            )
+            self._run_stackvm_program(
+                vm=vm,
+                ast=expanded_ast,
+                trace_spans=expanded_trace_spans,
+                authored_spans=authored_spans,
+                entry=agent_definition.vm_entry,
+            )
             shared_store["last_vm_sources"] = list(source_files)
             shared_store["last_vm_source"] = source
             shared_store["last_vm_expanded_source"] = serialize_stackvm_ast(expanded_ast) if expanded_ast else ""
             shared_store["last_vm_expansion_metadata"] = expansion_metadata
             shared_store["last_vm_validation_warnings"] = list(validation_warnings)
+            shared_store["last_vm_analysis"] = dict(analysis)
+            shared_store["last_vm_diagnostics"] = list(analysis.get("diagnostics", []))
             shared_store["last_vm_transition"] = result.transition
             if result.effect is not None:
                 shared_store["last_vm_effect"] = dict(result.effect)
@@ -625,10 +674,18 @@ class AgentRuntime:
             return transition_name or "continue"
         return transition_from_runtime_effect(effect)
 
-    def _run_stackvm_program(self, *, vm: AgentStackVM, ast: list[Any], entry: str | None) -> None:
+    def _run_stackvm_program(
+        self,
+        *,
+        vm: AgentStackVM,
+        ast: list[Any],
+        trace_spans: list[StackVmAstSpan] | None,
+        authored_spans: list[StackVmAstSpan] | None,
+        entry: str | None,
+    ) -> None:
         async def _runner() -> None:
             if ast:
-                await vm.execute_ast(ast)
+                await vm.execute_ast(ast, trace_spans=trace_spans, authored_spans=authored_spans)
             if entry:
                 await vm.execute_word(entry)
 

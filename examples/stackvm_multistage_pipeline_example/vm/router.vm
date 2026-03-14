@@ -1,47 +1,10 @@
 [
   "last_delegated_result" shared@ none?
   [
-    "core.read_file"
-    [ "{path: multistage_payload.yaml}" yaml> ]
-    [
-      last-tool-result failure?
-      [ "Could not load the payload." answer ]
-      [
-        common.payload-data "payload" store-set
-
-        "payload" store-get common.normalize-item-titles
-
-        "payload" store-get common.store-normalized-source
-
-        common.store-normalized-summary
-
-        "{kind: checklist, prompt: placeholder, options: [{id: delegate, label: Delegate, value: delegate}, {id: review, label: Review, value: review}, {id: approve, label: Approve, value: approve}], min_selected: 1}" yaml>
-        dup "prompt" "Choose actions for " "normalized.summary" shared@ concat dict-set
-        prompt-interaction
-        dup "normalized.selected_actions" shared!? drop
-        common.format-selected-actions
-        over "delegate" contains?
-        [
-          swap drop drop
-          "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
-          "pending_handoff_policy" store-set
-          "stackvm_multistage_pipeline_example.confirm_delegate" handoff
-        ]
-        [
-          [
-            swap drop drop
-            "pipeline complete: "
-            "normalized.summary" shared@ concat
-            " | actions=" concat
-            "normalized.selected_actions_text" shared@ concat
-            " | delegate=skipped" concat
-          ] finalize-from
-        ]
-        if
-      ]
-      if
-    ]
-    tool-once
+    "multistage-family"
+    "router"
+    "continue"
+    use-workflow-family
   ]
   [
     [

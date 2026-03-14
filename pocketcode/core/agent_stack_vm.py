@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import yaml
 
+from pocketcode.core.schema_tools import apply_schema_value, validate_schema_value
+from pocketcode.core.stackvm_parser import StackVmAstSpan, parse_stackvm_source_with_spans, serialize_stackvm_ast
+from pocketcode.core.stackvm_host import (
+    PocketCoderStackVmHostAdapter,
+    StackVmHostAdapter,
+    StackVmHostContext,
+    coerce_prompt_interaction_request,
+    coerce_tool_arguments,
+)
 from pocketcode.core.runtime_effects import (
-    RuntimeEffect,
     ask_user_effect,
     call_tool_effect,
     final_answer_effect,
     handoff_effect,
-    serialize_runtime_effect,
     transition_effect,
     transition_from_runtime_effect,
 )
@@ -31,42 +39,11 @@ class StackVmExecutionResult:
         return transition_from_runtime_effect(self.effect)
 
 
-@dataclass(frozen=True)
-class StackVmHostContext:
-    agent_name: str
-    llm_router: Any
-    tool_runtime: Any
-    llm_profile: str | None
-    system_prompt: str
-    tool_definitions: list[dict[str, Any]]
-
 class StackVmIllegalChildEffectError(RuntimeError):
     pass
 
 
-def _coerce_vm_interaction_value(response: Any) -> str:
-    if isinstance(response, dict):
-        value = response.get("value")
-        if value is None:
-            value = response.get("raw_input")
-        return "" if value is None else str(value)
-    return "" if response is None else str(response)
-
-
-def _extract_vm_interaction_value(response: Any) -> Any:
-    if isinstance(response, dict):
-        kind = str(response.get("kind") or "").strip().lower()
-        if kind == "checklist":
-            values = response.get("values")
-            if values is not None:
-                return list(values) if isinstance(values, (list, tuple, set)) else values
-        if "value" in response:
-            return response.get("value")
-        if "values" in response:
-            values = response.get("values")
-            return list(values) if isinstance(values, (list, tuple, set)) else values
-        return response.get("raw_input")
-    return response
+_MISSING = object()
 
 
 def _snapshot_vm_value(value: Any, *, depth: int = 0) -> Any:
@@ -84,56 +61,6 @@ def _snapshot_vm_value(value: Any, *, depth: int = 0) -> Any:
     return repr(value)
 
 
-def _emit_runtime_event(shared_store: dict[str, Any], event_type: str, **payload: Any) -> None:
-    handler = shared_store.get("runtime_event_handler")
-    if callable(handler):
-        handler(event_type, **payload)
-
-
-def _accumulate_llm_usage(
-    *,
-    shared_store: dict[str, Any],
-    agent_name: str,
-    profile_name: str | None,
-    generation_info: dict[str, Any] | None,
-) -> None:
-    info = generation_info if isinstance(generation_info, dict) else {}
-    usage = info.get("usage", {}) if isinstance(info.get("usage", {}), dict) else {}
-    shared_store["last_llm_generation"] = info
-    shared_store["last_llm_profile"] = profile_name
-
-    totals = shared_store.setdefault(
-        "llm_usage_totals",
-        {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    )
-    if isinstance(totals, dict):
-        prompt_tokens = usage.get("prompt_tokens")
-        completion_tokens = usage.get("completion_tokens")
-        total_tokens = usage.get("total_tokens")
-        if isinstance(prompt_tokens, (int, float)):
-            totals["prompt_tokens"] = int(totals.get("prompt_tokens", 0)) + int(prompt_tokens)
-        if isinstance(completion_tokens, (int, float)):
-            totals["completion_tokens"] = int(totals.get("completion_tokens", 0)) + int(completion_tokens)
-        if isinstance(total_tokens, (int, float)):
-            totals["total_tokens"] = int(totals.get("total_tokens", 0)) + int(total_tokens)
-
-    estimated_cost = info.get("estimated_cost_usd", 0.0)
-    if isinstance(estimated_cost, (int, float)):
-        shared_store["llm_cost_usd_total"] = float(shared_store.get("llm_cost_usd_total", 0.0)) + float(estimated_cost)
-    else:
-        estimated_cost = 0.0
-
-    shared_store.setdefault("llm_calls", []).append(
-        {
-            "agent": agent_name,
-            "profile": info.get("profile_name") if info else profile_name,
-            "model": info.get("model") if info else None,
-            "usage": usage,
-            "estimated_cost_usd": float(estimated_cost),
-        }
-    )
-
-
 def _clone_for_child(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _clone_for_child(item) for key, item in value.items()}
@@ -146,13 +73,28 @@ def _clone_for_child(value: Any) -> Any:
     return value
 
 
+def _stack_delta(before: list[Any], after: list[Any]) -> dict[str, Any]:
+    common = 0
+    while common < len(before) and common < len(after) and before[common] == after[common]:
+        common += 1
+    return {
+        "depth_change": len(after) - len(before),
+        "popped": before[common:],
+        "pushed": after[common:],
+    }
+
+
 class AgentStackVM:
     def __init__(self, shared_store: dict[str, Any] | None = None):
         self.stack: list[Any] = []
         self.store = shared_store if shared_store is not None else {}
         self.words: dict[str, Callable[..., Any]] = {}
-        self._user_word_defs: dict[str, list[Any]] = {}
+        self._user_word_defs: dict[str, tuple[list[Any], list[StackVmAstSpan] | None, list[StackVmAstSpan] | None]] = {}
+        self._quotation_trace_spans: dict[int, list[StackVmAstSpan]] = {}
+        self._quotation_authored_spans: dict[int, list[StackVmAstSpan]] = {}
         self._host_context: StackVmHostContext | None = None
+        self._host_adapter: StackVmHostAdapter | None = None
+        self._trace_scope_stack: list[str] = ["main"]
         self._register_builtins()
 
     def register_word(self, name: str, func: Callable[..., Any]) -> None:
@@ -161,214 +103,246 @@ class AgentStackVM:
     async def eval(self, code_string: str) -> None:
         expanded = expand_stackvm_source(code_string)
         validate_stackvm_ast(expanded.ast)
-        await self.execute_ast(expanded.ast)
+        expanded_source = serialize_stackvm_ast(expanded.ast)
+        _, trace_spans = parse_stackvm_source_with_spans(expanded_source)
+        await self.execute_ast(expanded.ast, trace_spans=trace_spans, authored_spans=list(expanded.ast_spans))
 
     async def execute_word(self, word_name: str) -> None:
         if word_name not in self.words:
             raise ValueError(f"Unknown word: '{word_name}'")
+        stack_before = list(self.stack)
         await self._call_word(self.words[word_name])
-        self._record_trace("word", word=word_name)
+        self._record_trace("word", word=word_name, stack_before=stack_before)
 
-    async def execute_ast(self, ast: list[Any]) -> None:
-        for item in ast:
+    async def execute_ast(
+        self,
+        ast: list[Any],
+        *,
+        trace_spans: list[StackVmAstSpan] | None = None,
+        authored_spans: list[StackVmAstSpan] | None = None,
+    ) -> None:
+        for index, item in enumerate(ast):
+            trace_span = trace_spans[index] if trace_spans and index < len(trace_spans) else None
+            authored_span = authored_spans[index] if authored_spans and index < len(authored_spans) else None
             if isinstance(item, list):
+                stack_before = list(self.stack)
+                if trace_span is not None and trace_span.children:
+                    self._quotation_trace_spans[id(item)] = list(trace_span.children)
+                if authored_span is not None and authored_span.children:
+                    self._quotation_authored_spans[id(item)] = list(authored_span.children)
                 self.stack.append(item)
-                self._record_trace("push-quotation", value=item)
+                self._record_trace(
+                    "push-quotation",
+                    value=item,
+                    trace_span=trace_span,
+                    authored_span=authored_span,
+                    stack_before=stack_before,
+                )
                 continue
             token_type, token_value = item
             if token_type in {"str", "int", "float", "bool", "none"}:
+                stack_before = list(self.stack)
                 self.stack.append(token_value)
-                self._record_trace("push-literal", token_type=token_type, value=token_value)
+                self._record_trace(
+                    "push-literal",
+                    token_type=token_type,
+                    value=token_value,
+                    trace_span=trace_span,
+                    authored_span=authored_span,
+                    stack_before=stack_before,
+                )
                 continue
             if token_type == "sym":
                 if token_value not in self.words:
                     raise ValueError(f"Unknown word: '{token_value}'")
+                stack_before = list(self.stack)
                 await self._call_word(self.words[token_value])
-                self._record_trace("word", word=token_value)
+                self._record_trace(
+                    "word",
+                    word=token_value,
+                    trace_span=trace_span,
+                    authored_span=authored_span,
+                    stack_before=stack_before,
+                )
 
-    def _record_trace(self, op: str, **payload: Any) -> None:
+    def _record_trace(
+        self,
+        op: str,
+        *,
+        trace_span: StackVmAstSpan | None = None,
+        authored_span: StackVmAstSpan | None = None,
+        stack_before: list[Any] | None = None,
+        **payload: Any,
+    ) -> None:
         if not self.store.get("stackvm_trace_enabled"):
             return
         trace = self.store.setdefault("vm_trace", [])
         if not isinstance(trace, list):
             return
-        trace.append(
+        before_stack = list(stack_before or [])
+        after_stack = list(self.stack)
+        entry = {
+            "op": str(op),
+            **{key: _snapshot_vm_value(value) for key, value in payload.items()},
+            "scope": self._current_trace_scope(),
+            "depth": max(len(self._trace_scope_stack) - 1, 0),
+            "stack_before": _snapshot_vm_value(before_stack),
+            "stack_after": _snapshot_vm_value(after_stack),
+            "stack_delta": _snapshot_vm_value(_stack_delta(before_stack, after_stack)),
+            "stack": _snapshot_vm_value(after_stack),
+        }
+        if trace_span is not None and trace_span.span.location:
+            entry["location"] = trace_span.span.location
+        if authored_span is not None and authored_span.span.location:
+            entry["authored_location"] = authored_span.span.location
+        trace.append(entry)
+
+    def _current_trace_scope(self) -> str:
+        if not self._trace_scope_stack:
+            return "main"
+        return str(self._trace_scope_stack[-1] or "main")
+
+    def _record_scope_summary(
+        self,
+        *,
+        scope: str,
+        depth: int,
+        input_stack: list[Any],
+        output_stack: list[Any],
+        location: str | None = None,
+        authored_location: str | None = None,
+    ) -> None:
+        if not self.store.get("stackvm_trace_enabled"):
+            return
+        summaries = self.store.setdefault("vm_trace_scope_summaries", [])
+        if not isinstance(summaries, list):
+            return
+        summaries.append(
             {
-                "op": str(op),
-                **{key: _snapshot_vm_value(value) for key, value in payload.items()},
-                "stack": _snapshot_vm_value(list(self.stack)),
+                "scope": str(scope or "main"),
+                "depth": int(depth),
+                "input_stack": _snapshot_vm_value(list(input_stack)),
+                "output_stack": _snapshot_vm_value(list(output_stack)),
+                "stack_delta": _snapshot_vm_value(_stack_delta(list(input_stack), list(output_stack))),
+                "shape_preserved": len(input_stack) == len(output_stack),
+                "location": location,
+                "authored_location": authored_location,
             }
         )
 
-    def register_host_words(self, *, host_context: StackVmHostContext, result: StackVmExecutionResult) -> None:
-        self._host_context = host_context
+    def _record_runtime_decision(
+        self,
+        *,
+        scope: str,
+        decision: str,
+        detail: str,
+        value: Any = None,
+    ) -> None:
+        if not self.store.get("stackvm_trace_enabled"):
+            return
+        decisions = self.store.setdefault("vm_trace_decisions", [])
+        if not isinstance(decisions, list):
+            return
+        entry = {
+            "scope": str(scope or self._current_trace_scope()),
+            "depth": max(len(self._trace_scope_stack) - 1, 0),
+            "decision": str(decision),
+            "detail": str(detail),
+        }
+        if value is not None:
+            entry["value"] = _snapshot_vm_value(value)
+        decisions.append(entry)
 
-        def _set_transition(name: str, *, effect: RuntimeEffect | dict[str, Any] | None = None) -> None:
-            result.effect = serialize_runtime_effect(effect or RuntimeEffect(kind=name, payload={}))
-            self.store["last_vm_effect"] = dict(result.effect) if isinstance(result.effect, dict) else None
-            self.store["last_vm_transition"] = transition_from_runtime_effect(result.effect)
-            runtime_history = self.store.setdefault("runtime_effect_history", [])
-            runtime_entry = {
-                "agent": host_context.agent_name,
-                "source": "vm",
-                "transition": transition_from_runtime_effect(result.effect),
-                "effect": dict(result.effect) if isinstance(result.effect, dict) else None,
-            }
-            if isinstance(runtime_history, list):
-                runtime_history.append(dict(runtime_entry))
-            history = self.store.setdefault("vm_effect_history", [])
-            if isinstance(history, list):
-                history.append(
-                    {
-                        "agent": host_context.agent_name,
-                        "transition": runtime_entry["transition"],
-                        "effect": dict(runtime_entry["effect"]) if isinstance(runtime_entry["effect"], dict) else None,
-                    }
-                )
+    @contextmanager
+    def _trace_scope(
+        self,
+        suffix: str,
+        *,
+        trace_span: StackVmAstSpan | None = None,
+        authored_span: StackVmAstSpan | None = None,
+    ):
+        parent = self._current_trace_scope()
+        scope = str(suffix or "").strip()
+        if not scope:
+            yield parent
+            return
+        full_scope = scope if parent == scope or scope.startswith(parent) else f"{parent} > {scope}"
+        input_stack = list(self.stack)
+        self._trace_scope_stack.append(full_scope)
+        try:
+            yield full_scope
+        finally:
+            self._trace_scope_stack.pop()
+            self._record_scope_summary(
+                scope=full_scope,
+                depth=max(len(self._trace_scope_stack), 0),
+                input_stack=input_stack,
+                output_stack=list(self.stack),
+                location=trace_span.span.location if trace_span is not None else None,
+                authored_location=authored_span.span.location if authored_span is not None else None,
+            )
+
+    def register_host_words(
+        self,
+        *,
+        host_context: StackVmHostContext | None = None,
+        result: StackVmExecutionResult | None = None,
+        host_adapter: StackVmHostAdapter | None = None,
+    ) -> None:
+        if host_adapter is None:
+            if host_context is None or result is None:
+                raise TypeError("register_host_words requires either host_adapter or both host_context and result.")
+            host_adapter = PocketCoderStackVmHostAdapter(
+                shared_store=self.store,
+                host_context=host_context,
+                result=result,
+            )
+        self._host_adapter = host_adapter
+        self._host_context = host_adapter.host_context
 
         def set_transition_word() -> None:
             transition_name = str(self.stack.pop() if self.stack else "continue")
-            _set_transition(
-                transition_name,
-                effect=transition_effect(transition_name),
-            )
+            self._host_adapter.emit_effect(transition_effect(transition_name))
 
         def answer() -> None:
             answer_text = self.stack.pop() if self.stack else ""
-            self.store["final_answer"] = str(answer_text)
-            _set_transition(
-                "final_answer",
-                effect=final_answer_effect(str(answer_text)),
-            )
+            self._host_adapter.emit_effect(final_answer_effect(str(answer_text)))
 
         def ask_user() -> None:
             question = self.stack.pop() if self.stack else ""
-            self.store["question_to_ask"] = str(question)
-            _set_transition(
-                "ask_user",
-                effect=ask_user_effect(str(question)),
-            )
+            self._host_adapter.emit_effect(ask_user_effect(str(question)))
 
         async def prompt_user() -> None:
             question = str(self.stack.pop() if self.stack else "")
-            interaction_handler = self.store.get("interaction_handler")
-
-            if callable(interaction_handler):
-                response = interaction_handler(
-                    {
-                        "kind": "text",
-                        "prompt": question,
-                        "allow_empty": True,
-                    }
-                )
-                if inspect.isawaitable(response):
-                    response = await response
-                payload = dict(response) if isinstance(response, dict) else {"value": response, "raw_input": response}
-            else:
-                raise RuntimeError("prompt-user requires an interaction_handler in the shared store.")
-
-            self.store["last_user_prompt"] = question
-            self.store["last_user_interaction"] = payload
-            self.store["last_user_value"] = _extract_vm_interaction_value(payload)
-            self.store["last_user_input"] = _coerce_vm_interaction_value(payload)
-            self.stack.append(self.store["last_user_input"])
+            self.stack.append(await self._host_adapter.prompt_text(question))
 
         async def prompt_interaction() -> None:
-            request = self.stack.pop() if self.stack else {}
-            if isinstance(request, str):
-                parsed = yaml.safe_load(request) if request.strip() else {}
-                request = parsed if isinstance(parsed, dict) else {}
-            if not isinstance(request, dict):
-                raise RuntimeError("prompt-interaction expects a mapping or YAML mapping string.")
-
-            interaction_handler = self.store.get("interaction_handler")
-
-            if callable(interaction_handler):
-                response = interaction_handler(request)
-                if inspect.isawaitable(response):
-                    response = await response
-                payload = dict(response) if isinstance(response, dict) else {"value": response, "raw_input": response}
-            else:
-                raise RuntimeError("prompt-interaction requires an interaction_handler in the shared store.")
-
-            extracted_value = _extract_vm_interaction_value(payload)
-            self.store["last_user_prompt"] = str(request.get("prompt") or "")
-            self.store["last_user_request"] = dict(request)
-            self.store["last_user_interaction"] = payload
-            self.store["last_user_value"] = extracted_value
-            self.stack.append(extracted_value)
+            request = coerce_prompt_interaction_request(self.stack.pop() if self.stack else {})
+            self.stack.append(await self._host_adapter.prompt_interaction(request))
 
         def handoff() -> None:
             target = self.stack.pop() if self.stack else ""
-            self.store["pending_handoff_agent"] = str(target)
-            _set_transition(
-                "handoff",
-                effect=handoff_effect(str(target)),
-            )
+            self._host_adapter.emit_effect(handoff_effect(str(target)))
 
         def tool_request() -> None:
-            arguments = self.stack.pop() if self.stack else {}
+            arguments = coerce_tool_arguments(self.stack.pop() if self.stack else {})
             tool_name = self.stack.pop() if self.stack else ""
-            if isinstance(arguments, str):
-                parsed = yaml.safe_load(arguments) if arguments.strip() else {}
-                arguments = parsed if isinstance(parsed, dict) else {}
-            if not isinstance(arguments, dict):
-                arguments = {}
-            self.store["pending_tool"] = {
-                "name": str(tool_name),
-                "arguments": arguments,
-                "requested_by": host_context.agent_name,
-            }
-            _set_transition(
-                "call_tool",
-                effect=call_tool_effect(
+            self._host_adapter.emit_effect(
+                call_tool_effect(
                     tool_name=str(tool_name),
                     arguments=dict(arguments),
-                    requested_by=host_context.agent_name,
-                ),
+                    requested_by=self._host_context.agent_name,
+                )
             )
+
+        def tool_call() -> None:
+            arguments = coerce_tool_arguments(self.stack.pop() if self.stack else {})
+            tool_name = self.stack.pop() if self.stack else ""
+            self.stack.append(self._host_adapter.execute_tool(str(tool_name), dict(arguments)))
 
         async def llm_call() -> None:
             prompt = str(self.stack.pop() if self.stack else "")
-            full_prompt = host_context.system_prompt.strip()
-            if full_prompt:
-                full_prompt = f"{full_prompt}\n\n{prompt}" if prompt else full_prompt
-            else:
-                full_prompt = prompt
-            profile_name = host_context.llm_profile or getattr(host_context.llm_router, "default_profile_name", None)
-            _emit_runtime_event(
-                self.store,
-                "llm_call_started",
-                agent=host_context.agent_name,
-                profile=profile_name,
-                prompt_text=full_prompt,
-            )
-            response = host_context.llm_router.generate(profile_name=profile_name, prompt=full_prompt)
-            generation_info = None
-            if hasattr(host_context.llm_router, "get_last_generation_info"):
-                info = host_context.llm_router.get_last_generation_info()
-                if isinstance(info, dict):
-                    generation_info = info
-            _accumulate_llm_usage(
-                shared_store=self.store,
-                agent_name=host_context.agent_name,
-                profile_name=profile_name,
-                generation_info=generation_info,
-            )
-            usage = generation_info.get("usage", {}) if isinstance(generation_info, dict) else {}
-            estimated_cost = generation_info.get("estimated_cost_usd", 0.0) if isinstance(generation_info, dict) else 0.0
-            _emit_runtime_event(
-                self.store,
-                "llm_call_completed",
-                agent=host_context.agent_name,
-                profile=profile_name,
-                model=generation_info.get("model") if isinstance(generation_info, dict) else None,
-                usage=usage if isinstance(usage, dict) else {},
-                estimated_cost_usd=estimated_cost if isinstance(estimated_cost, (int, float)) else 0.0,
-                prompt_text=full_prompt,
-                response_text=response,
-            )
-            self.stack.append(response)
+            self.stack.append(await self._host_adapter.llm_call(prompt))
 
         self.register_word("answer", answer)
         self.register_word("ask-user", ask_user)
@@ -376,11 +350,12 @@ class AgentStackVM:
         self.register_word("prompt-interaction", prompt_interaction)
         self.register_word("handoff", handoff)
         self.register_word("tool-request", tool_request)
+        self.register_word("tool-call", tool_call)
         self.register_word("transition", set_transition_word)
         self.register_word("llm-call", llm_call)
-        self.register_word("system-prompt", lambda: self.stack.append(host_context.system_prompt))
-        self.register_word("llm-profile", lambda: self.stack.append(host_context.llm_profile))
-        self.register_word("tool-definitions", lambda: self.stack.append(list(host_context.tool_definitions)))
+        self.register_word("system-prompt", lambda: self.stack.append(self._host_context.system_prompt))
+        self.register_word("llm-profile", lambda: self.stack.append(self._host_context.llm_profile))
+        self.register_word("tool-definitions", lambda: self.stack.append(list(self._host_context.tool_definitions)))
         self.register_word("request", lambda: self.stack.append(self.store.get("initial_request", "")))
         self.register_word("last-tool-result", lambda: self.stack.append(self.store.get("last_tool_result")))
         self.register_word("last-tool-route", lambda: self.stack.append(self.store.get("last_tool_route")))
@@ -431,6 +406,7 @@ class AgentStackVM:
         self.register_word(">=", self._greater_equal)
         self.register_word("<=", self._less_equal)
         self.register_word("yaml>", lambda: self.stack.append(yaml.safe_load(str(self.stack.pop() if self.stack else ""))))
+        self.register_word("yaml<", self._to_yaml)
         self.register_word("dict-get", self._dict_get)
         self.register_word("dict-get?", self._dict_get_safe)
         self.register_word("get-in", self._get_in)
@@ -443,6 +419,9 @@ class AgentStackVM:
         self.register_word("list-set", self._list_set)
         self.register_word("keys", self._keys)
         self.register_word("values", self._values)
+        self.register_word("merge", self._merge_mappings)
+        self.register_word("schema-check", self._schema_check)
+        self.register_word("schema-apply", self._schema_apply)
         self.register_word("list-append", self._list_append)
         self.register_word("store-set", self._store_set)
         self.register_word("store-get", self._store_get)
@@ -454,7 +433,16 @@ class AgentStackVM:
         self.register_word("while", self._builtin_while)
         self.register_word("switch", self._builtin_switch)
         self.register_word("cond", self._builtin_cond)
+        self.register_word("match", self._builtin_match)
         self.register_word("fallback", self._builtin_fallback)
+        self.register_word("map", self._builtin_map)
+        self.register_word("flat-map", self._builtin_flat_map)
+        self.register_word("filter", self._builtin_filter)
+        self.register_word("find", self._builtin_find)
+        self.register_word("any?", self._builtin_any)
+        self.register_word("all?", self._builtin_all)
+        self.register_word("sort-by", self._builtin_sort_by)
+        self.register_word("group-by", self._builtin_group_by)
         self.register_word("parallel-map", self._builtin_parallel_map)
         self.register_word("reduce", self._builtin_reduce)
         self.register_word("define", self._builtin_define)
@@ -593,6 +581,15 @@ class AgentStackVM:
             raise TypeError(f"dict-get expects a dict, got {type(mapping)!r}")
         self.stack.append(mapping.get(key))
 
+    def _to_yaml(self) -> None:
+        value = self.stack.pop() if self.stack else None
+        dumped = yaml.safe_dump(value, default_flow_style=True, sort_keys=False)
+        if dumped.endswith("\n...\n"):
+            dumped = dumped[:-5]
+        elif dumped.endswith("\n"):
+            dumped = dumped[:-1]
+        self.stack.append(dumped)
+
     def _dict_get_safe(self) -> None:
         key = self.stack.pop()
         mapping = self.stack.pop()
@@ -687,6 +684,43 @@ class AgentStackVM:
             raise TypeError(f"values expects a dict, got {type(mapping)!r}")
         self.stack.append(list(mapping.values()))
 
+    def _merge_mappings(self) -> None:
+        right = self.stack.pop()
+        left = self.stack.pop()
+        if not isinstance(left, dict):
+            raise TypeError(f"merge expects a dict on the left, got {type(left)!r}")
+        if not isinstance(right, dict):
+            raise TypeError(f"merge expects a dict on the right, got {type(right)!r}")
+        self.stack.append({**left, **right})
+
+    def _schema_check(self) -> None:
+        schema = self.stack.pop()
+        value = self.stack.pop()
+        if not isinstance(schema, dict):
+            raise TypeError(f"schema-check expects a dict schema, got {type(schema)!r}")
+        errors = validate_schema_value(value, schema, path="value")
+        self.stack.append(
+            {
+                "success": len(errors) == 0,
+                "value": value,
+                "errors": list(errors),
+            }
+        )
+
+    def _schema_apply(self) -> None:
+        schema = self.stack.pop()
+        value = self.stack.pop()
+        if not isinstance(schema, dict):
+            raise TypeError(f"schema-apply expects a dict schema, got {type(schema)!r}")
+        coerced_value, errors = apply_schema_value(value, schema, path="value")
+        self.stack.append(
+            {
+                "success": len(errors) == 0,
+                "value": coerced_value,
+                "errors": list(errors),
+            }
+        )
+
     def _list_append(self) -> None:
         value = self.stack.pop()
         container = self.stack.pop()
@@ -767,22 +801,65 @@ class AgentStackVM:
 
     async def _builtin_call(self) -> None:
         quotation_ast = self.stack.pop()
-        await self.execute_ast(quotation_ast)
+        with self._trace_scope("call"):
+            await self.execute_ast(
+                quotation_ast,
+                trace_spans=self._quotation_trace_spans.get(id(quotation_ast)),
+                authored_spans=self._quotation_authored_spans.get(id(quotation_ast)),
+            )
 
     async def _builtin_if(self) -> None:
         false_ast = self.stack.pop()
         true_ast = self.stack.pop()
         condition = self.stack.pop()
-        await self.execute_ast(true_ast if condition else false_ast)
+        branch_ast = true_ast if condition else false_ast
+        branch_scope = "if:true" if condition else "if:false"
+        self._record_runtime_decision(
+            scope=f"{self._current_trace_scope()} > {branch_scope}",
+            decision="if-branch",
+            detail="Selected true branch." if condition else "Selected false branch.",
+            value=condition,
+        )
+        with self._trace_scope(branch_scope):
+            await self.execute_ast(
+                branch_ast,
+                trace_spans=self._quotation_trace_spans.get(id(branch_ast)),
+                authored_spans=self._quotation_authored_spans.get(id(branch_ast)),
+            )
 
     async def _builtin_while(self) -> None:
         body_ast = self.stack.pop()
         condition_ast = self.stack.pop()
+        iteration = 0
         while True:
-            await self.execute_ast(condition_ast)
-            if not self.stack.pop():
+            with self._trace_scope("while:condition"):
+                await self.execute_ast(
+                    condition_ast,
+                    trace_spans=self._quotation_trace_spans.get(id(condition_ast)),
+                    authored_spans=self._quotation_authored_spans.get(id(condition_ast)),
+                )
+            condition_value = self.stack.pop()
+            if not condition_value:
+                self._record_runtime_decision(
+                    scope=f"{self._current_trace_scope()} > while:condition",
+                    decision="while-stop",
+                    detail=f"Stopped loop after {iteration} iteration(s).",
+                    value=condition_value,
+                )
                 break
-            await self.execute_ast(body_ast)
+            self._record_runtime_decision(
+                scope=f"{self._current_trace_scope()} > while:body",
+                decision="while-continue",
+                detail=f"Entered loop body for iteration {iteration + 1}.",
+                value=condition_value,
+            )
+            with self._trace_scope("while:body"):
+                await self.execute_ast(
+                    body_ast,
+                    trace_spans=self._quotation_trace_spans.get(id(body_ast)),
+                    authored_spans=self._quotation_authored_spans.get(id(body_ast)),
+                )
+            iteration += 1
 
     async def _builtin_switch(self) -> None:
         cases_ast = self.stack.pop()
@@ -797,25 +874,110 @@ class AgentStackVM:
                     default_action = action_ast
                 continue
             if case_value == target_value:
-                await self.execute_ast(action_ast)
+                self._record_runtime_decision(
+                    scope=f"{self._current_trace_scope()} > switch:case",
+                    decision="switch-match",
+                    detail=f"Matched case {case_value!r}.",
+                    value=target_value,
+                )
+                with self._trace_scope("switch:case"):
+                    await self.execute_ast(
+                        action_ast,
+                        trace_spans=self._quotation_trace_spans.get(id(action_ast)),
+                        authored_spans=self._quotation_authored_spans.get(id(action_ast)),
+                    )
                 return
 
         if default_action is not None:
-            await self.execute_ast(default_action)
+            self._record_runtime_decision(
+                scope=f"{self._current_trace_scope()} > switch:default",
+                decision="switch-default",
+                detail="Fell back to default case.",
+                value=target_value,
+            )
+            with self._trace_scope("switch:default"):
+                await self.execute_ast(
+                    default_action,
+                    trace_spans=self._quotation_trace_spans.get(id(default_action)),
+                    authored_spans=self._quotation_authored_spans.get(id(default_action)),
+                )
+            return
+        self._record_runtime_decision(
+            scope=f"{self._current_trace_scope()} > switch",
+            decision="switch-no-match",
+            detail="No switch case matched and no default case was present.",
+            value=target_value,
+        )
 
     async def _builtin_cond(self) -> None:
         cases_ast = self.stack.pop()
         pairs = self._normalize_case_pairs(cases_ast, word_name="cond")
 
-        for condition_ast, action_ast in pairs:
+        for index, (condition_ast, action_ast) in enumerate(pairs, start=1):
             if not isinstance(condition_ast, list):
                 raise TypeError("cond expects each condition to be a quotation.")
-            await self.execute_ast(condition_ast)
+            with self._trace_scope("cond:condition"):
+                await self.execute_ast(
+                    condition_ast,
+                    trace_spans=self._quotation_trace_spans.get(id(condition_ast)),
+                    authored_spans=self._quotation_authored_spans.get(id(condition_ast)),
+                )
             if not self.stack:
                 raise RuntimeError("cond condition did not leave a value on the stack.")
-            if self.stack.pop():
-                await self.execute_ast(action_ast)
+            condition_value = self.stack.pop()
+            if condition_value:
+                self._record_runtime_decision(
+                    scope=f"{self._current_trace_scope()} > cond:action",
+                    decision="cond-match",
+                    detail=f"Condition {index} matched.",
+                    value=condition_value,
+                )
+                with self._trace_scope("cond:action"):
+                    await self.execute_ast(
+                        action_ast,
+                        trace_spans=self._quotation_trace_spans.get(id(action_ast)),
+                        authored_spans=self._quotation_authored_spans.get(id(action_ast)),
+                    )
                 return
+        self._record_runtime_decision(
+            scope=f"{self._current_trace_scope()} > cond",
+            decision="cond-no-match",
+            detail="No cond condition matched.",
+        )
+
+    async def _builtin_match(self) -> None:
+        cases_ast = self.stack.pop()
+        target_value = self.stack.pop()
+        pairs = self._normalize_case_pairs(cases_ast, word_name="match")
+
+        for pattern_node, action_ast in pairs:
+            pattern_value = await self._evaluate_match_pattern(pattern_node)
+            bindings = _match_pattern_value(pattern_value, target_value)
+            if bindings is None:
+                continue
+            self.store["match"] = dict(bindings)
+            self.store["match_bindings"] = dict(bindings)
+            for key, value in bindings.items():
+                _assign_path(self.store, f"match.{key}", value)
+            self._record_runtime_decision(
+                scope=f"{self._current_trace_scope()} > match:action",
+                decision="match-case",
+                detail=f"Matched pattern with {len(bindings)} binding(s).",
+                value=bindings,
+            )
+            with self._trace_scope("match:action"):
+                await self.execute_ast(
+                    action_ast,
+                    trace_spans=self._quotation_trace_spans.get(id(action_ast)),
+                    authored_spans=self._quotation_authored_spans.get(id(action_ast)),
+                )
+            return
+        self._record_runtime_decision(
+            scope=f"{self._current_trace_scope()} > match",
+            decision="match-no-case",
+            detail="No match pattern matched the target value.",
+            value=target_value,
+        )
 
     async def _builtin_fallback(self) -> None:
         fallback_ast = self.stack.pop()
@@ -825,12 +987,32 @@ class AgentStackVM:
 
         stack_snapshot = list(self.stack)
         try:
-            await self.execute_ast(primary_ast)
+            with self._trace_scope("fallback:primary"):
+                await self.execute_ast(
+                    primary_ast,
+                    trace_spans=self._quotation_trace_spans.get(id(primary_ast)),
+                    authored_spans=self._quotation_authored_spans.get(id(primary_ast)),
+                )
+            self._record_runtime_decision(
+                scope=f"{self._current_trace_scope()} > fallback:primary",
+                decision="fallback-primary-succeeded",
+                detail="Primary quotation completed without fallback.",
+            )
         except StackVmIllegalChildEffectError:
             raise
-        except Exception:
+        except Exception as exc:
+            self._record_runtime_decision(
+                scope=f"{self._current_trace_scope()} > fallback:fallback",
+                decision="fallback-used",
+                detail=f"Primary quotation raised {type(exc).__name__}; executing fallback.",
+            )
             self.stack[:] = stack_snapshot
-            await self.execute_ast(fallback_ast)
+            with self._trace_scope("fallback:fallback"):
+                await self.execute_ast(
+                    fallback_ast,
+                    trace_spans=self._quotation_trace_spans.get(id(fallback_ast)),
+                    authored_spans=self._quotation_authored_spans.get(id(fallback_ast)),
+                )
 
     async def _builtin_parallel_map(self) -> None:
         quotation_ast = self.stack.pop()
@@ -842,13 +1024,133 @@ class AgentStackVM:
 
         async def _run_item(item: Any) -> Any:
             child_vm = self._make_child_vm()
+            child_vm._trace_scope_stack = [f"{self._current_trace_scope()} > parallel-map:child"]
             child_vm.stack.append(item)
-            await child_vm.execute_ast(quotation_ast)
+            await child_vm.execute_ast(
+                quotation_ast,
+                trace_spans=self._quotation_trace_spans.get(id(quotation_ast)),
+                authored_spans=self._quotation_authored_spans.get(id(quotation_ast)),
+            )
             child_vm._raise_if_child_requested_transition(combinator_name="parallel-map")
             return child_vm.stack.pop() if child_vm.stack else None
 
         results = await asyncio.gather(*(_run_item(item) for item in values))
         self.stack.append(list(results))
+
+    async def _builtin_map(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("map expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"map expects a list or tuple, got {type(values)!r}")
+
+        results = [await self._run_unary_child_quotation(item, quotation_ast, combinator_name="map") for item in values]
+        self.stack.append(results)
+
+    async def _builtin_flat_map(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("flat-map expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"flat-map expects a list or tuple, got {type(values)!r}")
+
+        flattened: list[Any] = []
+        for item in values:
+            mapped = await self._run_unary_child_quotation(item, quotation_ast, combinator_name="flat-map")
+            if isinstance(mapped, (list, tuple)):
+                flattened.extend(mapped)
+            else:
+                flattened.append(mapped)
+        self.stack.append(flattened)
+
+    async def _builtin_filter(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("filter expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"filter expects a list or tuple, got {type(values)!r}")
+
+        results: list[Any] = []
+        for item in values:
+            include_item = await self._run_unary_child_quotation(item, quotation_ast, combinator_name="filter")
+            if include_item:
+                results.append(item)
+        self.stack.append(results)
+
+    async def _builtin_find(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("find expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"find expects a list or tuple, got {type(values)!r}")
+
+        for item in values:
+            include_item = await self._run_unary_child_quotation(item, quotation_ast, combinator_name="find")
+            if include_item:
+                self.stack.append(item)
+                return
+        self.stack.append(None)
+
+    async def _builtin_any(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("any? expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"any? expects a list or tuple, got {type(values)!r}")
+
+        for item in values:
+            if await self._run_unary_child_quotation(item, quotation_ast, combinator_name="any?"):
+                self.stack.append(True)
+                return
+        self.stack.append(False)
+
+    async def _builtin_all(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("all? expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"all? expects a list or tuple, got {type(values)!r}")
+
+        for item in values:
+            if not await self._run_unary_child_quotation(item, quotation_ast, combinator_name="all?"):
+                self.stack.append(False)
+                return
+        self.stack.append(True)
+
+    async def _builtin_sort_by(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("sort-by expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"sort-by expects a list or tuple, got {type(values)!r}")
+
+        keyed_values: list[tuple[Any, Any]] = []
+        for item in values:
+            sort_key = await self._run_unary_child_quotation(item, quotation_ast, combinator_name="sort-by")
+            keyed_values.append((sort_key, item))
+        keyed_values.sort(key=lambda pair: pair[0])
+        self.stack.append([item for _, item in keyed_values])
+
+    async def _builtin_group_by(self) -> None:
+        quotation_ast = self.stack.pop()
+        values = self.stack.pop()
+        if not isinstance(quotation_ast, list):
+            raise TypeError("group-by expects a quotation.")
+        if not isinstance(values, (list, tuple)):
+            raise TypeError(f"group-by expects a list or tuple, got {type(values)!r}")
+
+        grouped: dict[str, list[Any]] = {}
+        for item in values:
+            group_key = await self._run_unary_child_quotation(item, quotation_ast, combinator_name="group-by")
+            grouped.setdefault(str(group_key), []).append(item)
+        self.stack.append(grouped)
 
     async def _builtin_reduce(self) -> None:
         quotation_ast = self.stack.pop()
@@ -861,9 +1163,14 @@ class AgentStackVM:
 
         for item in values:
             child_vm = self._make_child_vm()
+            child_vm._trace_scope_stack = [f"{self._current_trace_scope()} > reduce:child"]
             child_vm.stack.append(accumulator)
             child_vm.stack.append(item)
-            await child_vm.execute_ast(quotation_ast)
+            await child_vm.execute_ast(
+                quotation_ast,
+                trace_spans=self._quotation_trace_spans.get(id(quotation_ast)),
+                authored_spans=self._quotation_authored_spans.get(id(quotation_ast)),
+            )
             child_vm._raise_if_child_requested_transition(combinator_name="reduce")
             accumulator = child_vm.stack.pop() if child_vm.stack else None
 
@@ -876,15 +1183,48 @@ class AgentStackVM:
         if not isinstance(quotation_ast, list):
             raise TypeError("define expects a quotation before the word name.")
 
-        self._define_user_word(word_name, quotation_ast)
+        self._define_user_word(
+            word_name,
+            quotation_ast,
+            trace_spans=self._quotation_trace_spans.get(id(quotation_ast)),
+            authored_spans=self._quotation_authored_spans.get(id(quotation_ast)),
+        )
 
-    def _define_user_word(self, word_name: str, quotation_ast: list[Any]) -> None:
-        self._user_word_defs[str(word_name)] = quotation_ast
+    def _define_user_word(
+        self,
+        word_name: str,
+        quotation_ast: list[Any],
+        *,
+        trace_spans: list[StackVmAstSpan] | None = None,
+        authored_spans: list[StackVmAstSpan] | None = None,
+    ) -> None:
+        self._user_word_defs[str(word_name)] = (quotation_ast, trace_spans, authored_spans)
+        if trace_spans is not None:
+            self._quotation_trace_spans[id(quotation_ast)] = list(trace_spans)
+        if authored_spans is not None:
+            self._quotation_authored_spans[id(quotation_ast)] = list(authored_spans)
 
-        async def custom_user_word(ast: list[Any] = quotation_ast) -> None:
-            await self.execute_ast(ast)
+        async def custom_user_word(
+            ast: list[Any] = quotation_ast,
+            word_trace_spans: list[StackVmAstSpan] | None = trace_spans,
+            word_authored_spans: list[StackVmAstSpan] | None = authored_spans,
+        ) -> None:
+            with self._trace_scope(f"word:{word_name}"):
+                await self.execute_ast(ast, trace_spans=word_trace_spans, authored_spans=word_authored_spans)
 
         self.register_word(str(word_name), custom_user_word)
+
+    async def _run_unary_child_quotation(self, item: Any, quotation_ast: list[Any], *, combinator_name: str) -> Any:
+        child_vm = self._make_child_vm()
+        child_vm._trace_scope_stack = [f"{self._current_trace_scope()} > {combinator_name}:child"]
+        child_vm.stack.append(item)
+        await child_vm.execute_ast(
+            quotation_ast,
+            trace_spans=self._quotation_trace_spans.get(id(quotation_ast)),
+            authored_spans=self._quotation_authored_spans.get(id(quotation_ast)),
+        )
+        child_vm._raise_if_child_requested_transition(combinator_name=combinator_name)
+        return child_vm.stack.pop() if child_vm.stack else None
 
     def _make_child_vm(self) -> AgentStackVM:
         child_vm = AgentStackVM(shared_store=_clone_for_child(self.store))
@@ -893,8 +1233,13 @@ class AgentStackVM:
                 host_context=self._host_context,
                 result=StackVmExecutionResult(),
             )
-        for word_name, word_ast in self._user_word_defs.items():
-            child_vm._define_user_word(word_name, word_ast)
+        for word_name, (word_ast, word_trace_spans, word_authored_spans) in self._user_word_defs.items():
+            child_vm._define_user_word(
+                word_name,
+                word_ast,
+                trace_spans=word_trace_spans,
+                authored_spans=word_authored_spans,
+            )
         return child_vm
 
     def _normalize_case_pairs(self, cases_ast: Any, *, word_name: str) -> list[tuple[Any, list[Any]]]:
@@ -922,6 +1267,23 @@ class AgentStackVM:
             return str(token_value)
         return token_value
 
+    async def _evaluate_match_pattern(self, pattern_node: Any) -> Any:
+        if isinstance(pattern_node, list):
+            child_vm = self._make_child_vm()
+            child_vm._trace_scope_stack = [f"{self._current_trace_scope()} > match:pattern"]
+            await child_vm.execute_ast(
+                pattern_node,
+                trace_spans=self._quotation_trace_spans.get(id(pattern_node)),
+                authored_spans=self._quotation_authored_spans.get(id(pattern_node)),
+            )
+            return child_vm.stack.pop() if child_vm.stack else None
+        if not isinstance(pattern_node, tuple) or len(pattern_node) != 2:
+            raise TypeError("match encountered an invalid pattern entry.")
+        token_type, token_value = pattern_node
+        if token_type == "sym":
+            return str(token_value)
+        return token_value
+
     def _raise_if_child_requested_transition(self, *, combinator_name: str) -> None:
         if self.store.get("pending_tool"):
             raise StackVmIllegalChildEffectError(f"{combinator_name} child quotations cannot schedule tool requests.")
@@ -931,6 +1293,8 @@ class AgentStackVM:
             raise StackVmIllegalChildEffectError(f"{combinator_name} child quotations cannot ask the user.")
         if self.store.get("final_answer"):
             raise StackVmIllegalChildEffectError(f"{combinator_name} child quotations cannot finalize answers.")
+
+
 def _lookup_path(mapping: dict[str, Any], path: str) -> Any:
     return _lookup_segments(mapping, _normalize_path_segments(path))
 
@@ -972,6 +1336,111 @@ def _lookup_segments(current: Any, segments: list[str | int]) -> Any:
             continue
         return None
     return current
+
+
+def _match_pattern_value(pattern: Any, value: Any, *, bindings: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    resolved = dict(bindings or {})
+
+    if pattern == "_":
+        return resolved
+
+    if isinstance(pattern, str) and pattern.startswith("$*") and len(pattern) > 2:
+        return _bind_match_value(resolved, pattern[2:], value)
+
+    if isinstance(pattern, str) and pattern.startswith("$") and len(pattern) > 1:
+        binding_name, expected_type = _parse_match_binding_pattern(pattern[1:])
+        if expected_type is not None and not _match_value_has_type(value, expected_type):
+            return None
+        if not binding_name:
+            return resolved if expected_type is not None else None
+        matched = _bind_match_value(resolved, binding_name, value)
+        if matched is None:
+            return None
+        resolved = matched
+        return resolved
+
+    if isinstance(pattern, dict):
+        if not isinstance(value, dict):
+            return None
+        explicit_keys = [key for key in pattern.keys() if key != "$rest"]
+        for key in explicit_keys:
+            child_pattern = pattern[key]
+            if key not in value:
+                return None
+            matched = _match_pattern_value(child_pattern, value[key], bindings=resolved)
+            if matched is None:
+                return None
+            resolved = matched
+        if "$rest" in pattern:
+            rest_value = {key: child_value for key, child_value in value.items() if key not in explicit_keys}
+            matched = _match_pattern_value(pattern["$rest"], rest_value, bindings=resolved)
+            if matched is None:
+                return None
+            resolved = matched
+        return resolved
+
+    if isinstance(pattern, list):
+        if not isinstance(value, list):
+            return None
+        rest_capture = None
+        fixed_patterns = pattern
+        if pattern and isinstance(pattern[-1], str) and pattern[-1].startswith("$*") and len(pattern[-1]) > 2:
+            rest_capture = pattern[-1][2:]
+            fixed_patterns = pattern[:-1]
+            if len(value) < len(fixed_patterns):
+                return None
+        elif len(pattern) != len(value):
+            return None
+        for child_pattern, child_value in zip(fixed_patterns, value):
+            matched = _match_pattern_value(child_pattern, child_value, bindings=resolved)
+            if matched is None:
+                return None
+            resolved = matched
+        if rest_capture is not None:
+            matched = _bind_match_value(resolved, rest_capture, value[len(fixed_patterns):])
+            if matched is None:
+                return None
+            resolved = matched
+        return resolved
+
+    return resolved if pattern == value else None
+
+
+def _parse_match_binding_pattern(binding: str) -> tuple[str, str | None]:
+    if ":" not in binding:
+        return binding, None
+    binding_name, expected_type = binding.split(":", 1)
+    return binding_name, expected_type.strip().lower() or None
+
+
+def _bind_match_value(bindings: dict[str, Any], name: str, value: Any) -> dict[str, Any] | None:
+    existing = bindings.get(name, _MISSING)
+    if existing is not _MISSING and existing != value:
+        return None
+    bindings[name] = value
+    return bindings
+
+
+def _match_value_has_type(value: Any, expected_type: str) -> bool:
+    if expected_type == "any":
+        return True
+    if expected_type == "none":
+        return value is None
+    if expected_type == "bool":
+        return isinstance(value, bool)
+    if expected_type == "int":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type == "float":
+        return isinstance(value, float)
+    if expected_type == "number":
+        return (isinstance(value, int) and not isinstance(value, bool)) or isinstance(value, float)
+    if expected_type == "str":
+        return isinstance(value, str)
+    if expected_type == "list":
+        return isinstance(value, list)
+    if expected_type == "dict":
+        return isinstance(value, dict)
+    return False
 
 
 def _assign_segments(container: Any, segments: list[str | int], value: Any) -> None:

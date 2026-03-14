@@ -1,0 +1,7 @@
+"stdlib.returns" module
+
+[ "last_delegated_result" shared@ "answer" dict-get ] "delegate-answer" define
+[ delegate-answer dup none? [ drop none ] [ yaml> ] if ] "delegate-answer-yaml?" define
+
+"delegate-answer" export
+"delegate-answer-yaml?" export

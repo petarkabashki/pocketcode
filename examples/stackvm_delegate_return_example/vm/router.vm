@@ -1,6 +1,5 @@
 [
-  "core.read_file"
-  [ "{path: delegate_return_payload.yaml}" yaml> ]
+  "delegate_return_payload.yaml"
   [
     last-tool-result failure?
     [ "Could not load the payload." answer ]
@@ -13,13 +12,11 @@
 
       common.store-normalized-summary
 
-      "{return_to_caller: true, context_mode: whole, return_transition: continue}" yaml>
-      "pending_handoff_policy" store-set
       "stackvm_delegate_return_example.confirm_delegate"
       "last_delegated_result.answer"
-      delegate-return
+      return-delegate
     ]
     if
   ]
-  tool-once
+  stdlib.io.read-yaml-file-once
 ] "decide" define

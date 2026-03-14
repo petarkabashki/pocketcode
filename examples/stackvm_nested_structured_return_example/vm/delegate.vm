@@ -1,10 +1,6 @@
 [
-  "{kind: radio, prompt: placeholder, options: [{id: concise, label: Concise, value: concise}, {id: blocked, label: Blocked, value: blocked}]}" yaml>
-  dup "prompt" "Choose nested mode for " "normalized.summary" shared@ concat dict-set
-  prompt-interaction
-  dup "normalized.delegate_choice" shared!? drop
-  dup "concise" =
-  [ drop "{decision: {mode: concise, note: concise summary requested}, meta: {source: delegate}}" answer ]
-  [ drop "{decision: {mode: blocked}, meta: {source: delegate}}" answer ]
-  if
+  "nested-structured-return-finalize-family"
+  "delegate"
+  "finalize"
+  use-workflow-family
 ] "decide" define

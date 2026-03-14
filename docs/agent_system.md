@@ -172,6 +172,36 @@ The current StackVM host surface for hooks and VM-backed flows also includes act
 
 This enables reusable memory hooks that append recent chat history to prompt context without hardcoding memory logic into a specific flow.
 
+Current StackVM host words for VM-backed flows and hooks are mediated through the PocketCoder host adapter in `pocketcode/core/stackvm_host.py`. That adapter is responsible for:
+
+- turning VM host words into typed runtime effects
+- updating compatibility keys such as `final_answer`, `question_to_ask`, `pending_tool`, and `pending_handoff_agent`
+- handling prompt interactions and LLM calls for the current runtime
+
+This means the VM core now emits through an explicit host layer rather than writing every PocketCoder runtime field directly inside each host word.
+
+The same module now also exposes `StandaloneStackVmHostAdapter` for direct script execution. That portable adapter supports callback-backed `prompt-user` and `prompt-interaction`, direct `llm-call`, synchronous `tool-call`, `ask-user`, and portable tool-result state without depending on the full PocketCoder handoff/tool-transition loop. Transition-based `tool-request`, `handoff`, and session-oriented transcript readers remain PocketCoder-only.
+
+For embedders that do not want to go through `PocketCodeEngine.run_stackvm_target()`, the portable standalone path is now also exposed directly in `pocketcode/core/stackvm_driver.py` through:
+
+- `compile_stackvm_program(...)`
+- `compile_stackvm_program_target(...)`
+- `build_stackvm_standalone_host_config(...)`
+- `StackVmStandaloneHostConfig`
+- `StackVmStandaloneRuntime`
+- `StackVmStandaloneSession`
+- `create_stackvm_standalone_runtime(...)`
+- `create_stackvm_standalone_runtime_target(...)`
+- `create_stackvm_standalone_session(...)`
+- `create_stackvm_standalone_session_target(...)`
+- `restore_stackvm_standalone_session(...)`
+- `restore_stackvm_standalone_session_target(...)`
+- `run_compiled_stackvm_program(...)`
+- `run_stackvm_program(...)`
+- `run_stackvm_program_target(...)`
+
+Those entry points let external callers run portable StackVM programs with explicit tool, prompt, LLM, runtime-event, and shared-store hooks while keeping the same host-word semantics as standalone script execution. `StackVmStandaloneHostConfig` is the preferred embedding surface because it groups those portable host hooks into one explicit contract instead of a loose set of kwargs, and `build_stackvm_standalone_host_config(...)` is the preferred way to construct it because it can derive `tool_definitions` from the supplied tool runtime. The `*_target(...)` variants additionally accept `vm_source`, `vm_module`, `vm_modules`, `vm_file`, and `vm_files`, so module-based StackVM programs can be embedded directly without first flattening them into one source string. When the same compiled or target-based program should be invoked repeatedly, `StackVmStandaloneRuntime` is the preferred reusable harness: it keeps one compiled program plus one default host config, workspace root, agent name, and shared-store seed, and exposes repeated `run(...)` calls with optional per-run overrides. When the embedding needs intentional cross-run continuity, `StackVmStandaloneSession` is the next layer up: it reuses one runtime while persisting curated shared-store state plus a simple in-memory transcript under `standalone_transcript` and `standalone_transcript_text`. Sessions can now also be snapshotted and restored through `snapshot()`, `restore(...)`, `restore_stackvm_standalone_session(...)`, and `restore_stackvm_standalone_session_target(...)`, which is the current portable persistence boundary for embedded standalone use.
+
 ## Workspace LLM Profile Schema
 
 Workspace LLM profiles are stored in `.pocketcode/llm-profiles/<name>.yaml`.

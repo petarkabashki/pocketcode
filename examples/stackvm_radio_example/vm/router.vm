@@ -1,25 +1,6 @@
 [
-  "core.read_file"
-  [ "{path: radio_payload.yaml}" yaml> ]
-  [
-    last-tool-result failure?
-    [ "Could not load the payload." answer ]
-    [
-      common.payload-data "payload" store-set
-
-      "payload" store-get common.normalize-item-titles
-
-      "payload" store-get common.store-normalized-source
-
-      common.store-normalized-summary
-
-      "{kind: radio, prompt: placeholder, options: [{id: delegate, label: Delegate, value: delegate}, {id: approve, label: Approve, value: approve}, {id: deny, label: Deny, value: deny}]}" yaml>
-      dup "prompt" "Choose mode for " "normalized.summary" shared@ concat dict-set
-      prompt-interaction
-      dup "normalized.mode" shared!? drop
-      "Selected mode " swap concat " for " concat "normalized.summary" shared@ concat answer
-    ]
-    if
-  ]
-  tool-once
+  "radio-workflow"
+  "router"
+  "continue"
+  use-workflow-spec
 ] "decide" define

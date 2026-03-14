@@ -288,7 +288,7 @@ Additional directories still used by the runtime:
 - `<runtime.storage.session_state_dir>/sessions/`: runtime-managed saved session JSON files
 - `<runtime.storage.entry_history_dir>/textual_entry_history.json`: Textual accepted-input history
 - `skills/`: skill packs with `SKILL.md` and optional assets
-- `vm/`: standalone StackVM `.vm` or Markdown `.md` scripts used by the `/stackvm` CLI commands; these are not auto-registered as flows until a direct `/stackvm run` or `/stackvm debug` invocation synthesizes a temporary VM flow for the current command
+- `vm/`: standalone StackVM `.vm` or Markdown `.md` scripts used by the `/stackvm` CLI commands; simple scripts now run through a standalone VM adapter without flow registration, while effectful scripts still synthesize a temporary VM flow for the current command when they require the full PocketCoder runtime
 
 See `markdown_assets.md` for the canonical file formats and validation rules for Markdown-backed assets.
 

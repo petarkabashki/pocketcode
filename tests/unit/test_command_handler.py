@@ -365,6 +365,10 @@ class _StatusEngineStub(_EngineStub):
                 "last_runtime_effect": {},
                 "steps": [],
             },
+            "workspace_stackvm_stdlib_summary": {
+                "warning_count": 0,
+                "warnings": [],
+            },
         }
 
 
@@ -429,6 +433,38 @@ class _WarningStatusEngineStub(_EngineStub):
                         },
                     },
                 ]
+            },
+            "workspace_stackvm_stdlib_summary": {
+                "warning_count": 1,
+                "warnings": [
+                    {
+                        "target_kind": "flow",
+                        "target_name": "resource_root.pocketcode.stdlib_missing",
+                        "message": "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost.",
+                    }
+                ],
+            },
+        }
+
+
+class _ReloadEngineStub(_EngineStub):
+    def __init__(self):
+        self.reload_calls = 0
+
+    def reload(self):
+        self.reload_calls += 1
+
+    def status(self):
+        return {
+            "workspace_stackvm_stdlib_summary": {
+                "warning_count": 1,
+                "warnings": [
+                    {
+                        "target_kind": "flow",
+                        "target_name": "resource_root.pocketcode.stdlib_missing",
+                        "message": "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost.",
+                    }
+                ],
             },
         }
 
@@ -571,6 +607,63 @@ class _StackVmCommandEngineStub(_EngineStub):
     def list_stackvm_scripts(self):
         return ["router.vm", "nested/review.vm"]
 
+    def get_stackvm_stdlib_manifest(self):
+        return {
+            "package": "stackvm-stdlib",
+            "version": "0.1.0",
+            "module_root": "vm/stdlib",
+            "manifest_path": str(self.workspace_root / "vm" / "stdlib" / "stdlib.yaml"),
+        }
+
+    def list_stackvm_stdlib_modules(self):
+        return [
+            {
+                "name": "stdlib.io",
+                "ref": "vm/stdlib/io",
+                "file": "vm/stdlib/io.vm",
+                "summary": "Shared file-loading macros.",
+                "exports": ["read-file-once", "read-yaml-file-once"],
+                "dependencies": [],
+            },
+            {
+                "name": "stdlib.prompt",
+                "ref": "vm/stdlib/prompt",
+                "file": "vm/stdlib/prompt.vm",
+                "summary": "Shared interaction request builders.",
+                "exports": ["buttons-approve-reject"],
+                "dependencies": [],
+            },
+        ]
+
+    def validate_stackvm_stdlib_manifest(self):
+        return {
+            "package": "stackvm-stdlib",
+            "version": "0.1.0",
+            "module_root": "vm/stdlib",
+            "module_count": 2,
+            "warning_count": 1,
+            "error_count": 0,
+            "valid": True,
+            "modules": [
+                {
+                    "name": "stdlib.io",
+                    "declared_dependencies": [],
+                    "actual_dependencies": [],
+                    "valid": True,
+                    "warnings": [],
+                    "errors": [],
+                },
+                {
+                    "name": "stdlib.prompt",
+                    "declared_dependencies": [],
+                    "actual_dependencies": [],
+                    "valid": True,
+                    "warnings": ["Declared file 'vm/stdlib/prompt.vm' resolved to 'vm/stdlib/prompt.vm'."],
+                    "errors": [],
+                },
+            ],
+        }
+
     def create_stackvm_flow(self, name, *, entry="decide", agent_name=None):
         self.create_flow_calls.append((name, entry, agent_name))
         path = self.workspace_root / ".pocketcode" / "flows" / f"{name}.md"
@@ -587,7 +680,18 @@ class _StackVmCommandEngineStub(_EngineStub):
                 "flow": name,
                 "path": agent_dir / f"{relative_parts[-1]}.agent.md",
             }
-        return {"name": name, "path": path, "entry": entry, "agent": agent}
+        return {
+            "name": name,
+            "path": path,
+            "entry": entry,
+            "agent": agent,
+            "warnings": [
+                {
+                    "code": "stdlib-module-missing",
+                    "message": "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost.",
+                }
+            ],
+        }
 
     def create_stackvm_script(self, name, *, entry="main"):
         self.create_script_calls.append((name, entry))
@@ -616,6 +720,15 @@ class _StackVmCommandEngineStub(_EngineStub):
             "source_files": [str(self.workspace_root / ".pocketcode" / "vm" / "router.vm")],
             "token_count": 5,
             "warning_count": 1,
+            "diagnostic_count": 1,
+            "effect_kinds": ["tool"],
+            "stdlib_modules_requested": ["stdlib.io", "stdlib.prompt"],
+            "stdlib_modules_resolved": ["stdlib.io", "stdlib.prompt"],
+            "stdlib_alias_refs": ["stdlib.io", "stdlib.prompt"],
+            "stdlib_file_refs": [],
+            "stdlib_unresolved_refs": [],
+            "max_stack_depth": 2,
+            "final_min_stack_depth": 0,
             "warnings": [
                 {
                     "code": "manual-tool-loop",
@@ -623,17 +736,136 @@ class _StackVmCommandEngineStub(_EngineStub):
                     "message": "Prefer tool-once.",
                 }
             ],
+            "diagnostics": [
+                {
+                    "code": "illegal-child-effect",
+                    "severity": "warning",
+                    "message": "parallel-map child quotation may emit disallowed effects: tool.",
+                }
+            ],
+            "analysis": {
+                "final_stack_shape": ["int"],
+                "host_surfaces_used": ["pocketcoder_host"],
+                "pocketcoder_host_words_used": ["tool-request"],
+                "standalone_script_compatible": False,
+                "analysis_decisions": [
+                    {
+                        "scope": "main > switch:merge",
+                        "category": "merge",
+                        "reason": "optional-no-match-path",
+                        "detail": "Analyzer kept an explicit path where no branch matched.",
+                        "severity": "info",
+                        "location": "line 1, cols 21-26",
+                    },
+                ],
+                "scope_summaries": [
+                    {
+                        "scope": "main",
+                        "kind": "region",
+                        "input_stack_shape": [],
+                        "output_stack_shape": ["int"],
+                        "effect_kinds": ["tool"],
+                        "diagnostic_count": 1,
+                        "unknown_output_count": 0,
+                        "shape_preserved": False,
+                    },
+                    {
+                        "scope": "main > word:decide",
+                        "kind": "region",
+                        "input_stack_shape": ["str"],
+                        "output_stack_shape": ["int"],
+                        "effect_kinds": [],
+                        "diagnostic_count": 0,
+                        "unknown_output_count": 0,
+                        "shape_preserved": True,
+                        "location": "line 1, cols 15-20",
+                        "definition_location": "line 1, cols 1-14",
+                    },
+                    {
+                        "scope": "main > switch:merge",
+                        "kind": "merge",
+                        "branch_output_shapes": [["int"], []],
+                        "merged_stack_shape": [],
+                        "branch_count": 2,
+                        "unknown_output_count": 0,
+                        "reason": "optional-no-match-path",
+                        "precision": "optional-path",
+                        "location": "line 1, cols 21-26",
+                    },
+                ],
+                "shape_flow": [
+                    {"op": "literal", "label": "'hello'", "depth": 0, "scope": "main", "stack_shape": ["str"]},
+                    {
+                        "op": "word",
+                        "label": "decide",
+                        "depth": 0,
+                        "scope": "main > word:decide",
+                        "stack_shape": ["int"],
+                        "location": "line 1, cols 15-20",
+                    },
+                ],
+                "word_metadata_summary": {
+                    "decide": {"pops": 0, "pushes": 0, "effect_kind": "final", "host_surface": "core", "definition_location": "line 1, cols 1-14", "output_shape": []},
+                }
+            },
+            "expansion_metadata": {
+                "expansion_count": 2,
+                "macro_names": ["tool-once", "when"],
+                "builtin_macro_names": ["tool-once", "when"],
+                "gensym_count": 0,
+                "expansion_trace": ["tool-once", "when"],
+                "expansion_frames": [
+                    {
+                        "macro_name": "tool-once",
+                        "builtin": True,
+                        "depth": 0,
+                        "call_site": "line 1, cols 1-12",
+                        "definition_site": None,
+                        "generated_by": None,
+                        "syntax_args": [],
+                        "expanded_form": "[ ... ]",
+                    },
+                    {
+                        "macro_name": "when",
+                        "builtin": True,
+                        "depth": 1,
+                        "call_site": "line 1, cols 20-23",
+                        "definition_site": None,
+                        "generated_by": "tool-once",
+                        "syntax_args": [],
+                        "expanded_form": "[ ... ]",
+                    },
+                ],
+            },
             "expanded_source": "[ \"done\" answer ] \"decide\" define",
             "source": "[ \"done\" answer ] \"decide\" define",
         }
 
     def update_stackvm_script(self, target, *, source_text):
         self.update_script_calls.append((target, source_text))
-        return {"name": target, "path": self.workspace_root / ".pocketcode" / "vm" / target, "warnings": []}
+        return {
+            "name": target,
+            "path": self.workspace_root / ".pocketcode" / "vm" / target,
+            "warnings": [
+                {
+                    "code": "stdlib-module-missing",
+                    "message": "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost.",
+                }
+            ],
+        }
 
     def update_markdown_asset(self, kind, target, *, markdown_text):
         self.update_markdown_calls.append((kind, target, markdown_text))
-        return {"name": target, "path": self.workspace_root / ".pocketcode" / f"{kind}s" / f"{target}.md"}
+        return {
+            "name": target,
+            "path": self.workspace_root / ".pocketcode" / f"{kind}s" / f"{target}.md",
+            "warnings": [
+                {
+                    "code": "stdlib-module-missing",
+                    "message": "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost.",
+                }
+            ] if kind == "flow" else [],
+        }
 
     def run_stackvm_target(self, kind, target, *, request="", entry=None, debug=False, auto_confirm_tools=True):
         self.run_calls.append(
@@ -649,12 +881,107 @@ class _StackVmCommandEngineStub(_EngineStub):
         return {
             "output": "stackvm output",
             "error_message": None,
-            "run_summary": {"vm_validation_warning_count": 1},
+            "last_vm_analysis": {
+                "scope_summaries": [
+                    {
+                        "scope": "main > word:main",
+                        "kind": "region",
+                        "output_stack_shape": ["str"],
+                        "effect_kinds": ["tool"],
+                        "shape_preserved": True,
+                    }
+                ],
+                "shape_flow": [
+                    {
+                        "scope": "main > word:main",
+                        "location": "line 1, cols 3-9",
+                        "label": "'hello'",
+                        "stack_shape": ["str"],
+                    },
+                    {
+                        "scope": "main > word:main",
+                        "location": "line 1, cols 11-16",
+                        "label": "answer",
+                        "stack_shape": [],
+                    },
+                ],
+            },
+            "run_summary": {
+                "vm_validation_warning_count": 1,
+                "vm_diagnostic_count": 1,
+                "vm_effect_kinds": ["tool"],
+                "vm_final_stack_shape": ["str"],
+                "stackvm_runtime": {
+                    "path": "standalone-script",
+                    "source": "standalone-vm",
+                    "standalone_session_active": True,
+                },
+                "stackvm_static_runtime_correlation": {
+                    "static_scope_count": 3,
+                    "runtime_scope_count": 1,
+                    "matched_scope_count": 1,
+                    "matched_scopes": ["main > word:main"],
+                    "runtime_only_scopes": [],
+                    "static_only_scopes": ["main", "main > switch:merge"],
+                    "static_decision_scope_count": 1,
+                    "runtime_decision_scope_count": 1,
+                    "matched_decision_scope_count": 0,
+                    "matched_decision_scopes": [],
+                    "runtime_only_decision_scopes": ["main > word:main > if:true"],
+                    "static_only_decision_scopes": ["main > switch:merge"],
+                },
+                "standalone_session": {
+                    "active": True,
+                    "session_id": "sess-123",
+                    "title": "Debug Session",
+                    "transcript_entries": 3,
+                    "transcript_chars": 42,
+                    "persistent_key_count": 2,
+                },
+                "vm_trace_decisions": [
+                    {
+                        "scope": "main > word:main > if:true",
+                        "decision": "if-branch",
+                        "detail": "Selected true branch.",
+                        "value": True,
+                    }
+                ],
+                "vm_trace_scope_summaries": [
+                    {
+                        "scope": "main > word:main",
+                        "input_stack": [],
+                        "output_stack": [],
+                        "stack_delta": {"depth_change": 0, "popped": [], "pushed": []},
+                        "shape_preserved": True,
+                        "location": "line 1, cols 1-16",
+                    }
+                ],
+            },
             "tool_history": [{"tool": "core.read_file"}],
             "trace_count": 2,
             "trace": [
-                {"op": "push-literal", "value": "hello", "stack": ["hello"]},
-                {"op": "word", "word": "answer", "stack": []},
+                {
+                    "op": "push-literal",
+                    "value": "hello",
+                    "scope": "main > word:main",
+                    "stack_before": [],
+                    "stack_after": ["hello"],
+                    "stack_delta": {"depth_change": 1, "popped": [], "pushed": ["hello"]},
+                    "stack": ["hello"],
+                    "location": "line 1, cols 3-9",
+                    "authored_location": "line 1, cols 3-9",
+                },
+                {
+                    "op": "word",
+                    "word": "answer",
+                    "scope": "main > word:main",
+                    "stack_before": ["hello"],
+                    "stack_after": [],
+                    "stack_delta": {"depth_change": -1, "popped": ["hello"], "pushed": []},
+                    "stack": [],
+                    "location": "line 1, cols 11-16",
+                    "authored_location": "line 1, cols 11-16",
+                },
             ],
             "last_vm_expanded_source": "[ \"hello\" answer ]",
             "last_vm_source": "[ \"hello\" answer ]",
@@ -917,6 +1244,7 @@ class TestCommandHandlerParsing:
 
         captured = capsys.readouterr()
         assert "VM Validation Warnings: manual-tool-loop, manual-prompt-route" in captured.out
+        assert "StackVM stdlib workspace warnings: 1" in captured.out
         assert "Runtime Steps: 2" in captured.out
         assert "Runtime Effects: 2" in captured.out
         assert "Last Runtime Effect: call_tool" in captured.out
@@ -937,10 +1265,32 @@ class TestCommandHandlerParsing:
 
         captured = capsys.readouterr()
         assert "VM Validation Warnings: manual-tool-loop, manual-prompt-route" in captured.out
+        assert "Workspace StackVM stdlib warnings:" in captured.out
+        assert "- flow.resource_root.pocketcode.stdlib_missing: Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost." in captured.out
         assert "- manual-tool-loop (line 4, cols 1-12): Prefer tool-once." in captured.out
         assert "- manual-prompt-route (line 9, cols 5-22): Prefer prompt-route." in captured.out
         assert "1. agent_turn (completed) [12.0ms] Transition: call_tool" in captured.out
         assert "details: {'agent': 'core.react'}" in captured.out
+
+    def test_reload_prints_workspace_stdlib_warning_summary(self, capsys):
+        cli_context = {
+            "files": set(),
+            "folders": set(),
+            "urls": set(),
+            "snippets": {},
+        }
+        engine = _ReloadEngineStub()
+
+        handle_command(
+            "/reload",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.reload_calls == 1
+        assert "StackVM stdlib workspace warnings: 1" in captured.out
+        assert "- flow.resource_root.pocketcode.stdlib_missing: Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost." in captured.out
 
     def test_status_steps_outputs_step_trace_without_verbose_details(self, capsys):
         cli_context = {
@@ -1203,6 +1553,8 @@ class TestCommandHandlerParsing:
         captured = capsys.readouterr()
         assert engine.create_flow_calls == [("vm_triage", "route", "review.safe")]
         assert "Created StackVM flow 'vm_triage'" in captured.out
+        assert "Warnings: 1" in captured.out
+        assert "stdlib-module-missing: Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost." in captured.out
 
     def test_stackvm_inspect_prints_warning_and_expanded_source(self, capsys, tmp_path):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -1215,7 +1567,99 @@ class TestCommandHandlerParsing:
 
         captured = capsys.readouterr()
         assert "manual-tool-loop" in captured.out
+        assert "Diagnostics   : 1" in captured.out
+        assert "Stdlib req    : stdlib.io, stdlib.prompt" in captured.out
+        assert "Stdlib used   : stdlib.io, stdlib.prompt" in captured.out
+        assert "Final shape   : ['int']" in captured.out
         assert "Expanded StackVM:" in captured.out
+
+    def test_stackvm_check_prints_static_summary_without_execution(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/stackvm check script router.vm --entry decide",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.inspect_calls == [("script", "router.vm", "decide")]
+        assert engine.run_calls == []
+        assert "StackVM check for script 'router.vm'" in captured.out
+        assert "Diagnostics :" in captured.out
+        assert "Host        : pocketcoder_host" in captured.out
+        assert "Standalone  : no" in captured.out
+        assert "Stdlib req  : stdlib.io, stdlib.prompt" in captured.out
+        assert "Stdlib used : stdlib.io, stdlib.prompt" in captured.out
+        assert "Final shape : ['int']" in captured.out
+        assert "illegal-child-effect" in captured.out
+
+    def test_stackvm_explain_prints_macro_trace_and_word_contracts(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/stackvm explain script router.vm --entry decide",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert engine.inspect_calls == [("script", "router.vm", "decide")]
+        assert "StackVM explain for script 'router.vm'" in captured.out
+        assert "Host        : pocketcoder_host" in captured.out
+        assert "Standalone  : no" in captured.out
+        assert "Stdlib req  : stdlib.io, stdlib.prompt" in captured.out
+        assert "Stdlib used : stdlib.io, stdlib.prompt" in captured.out
+        assert "Macro Trace:" in captured.out
+        assert "tool-once" in captured.out
+        assert "Analysis Decisions:" in captured.out
+        assert "info main > switch:merge: optional-no-match-path @ line 1, cols 21-26 - Analyzer kept an explicit path where no branch matched." in captured.out
+        assert "Scope Summaries:" in captured.out
+        assert "main: in=[] -> out=['int'], effects=tool, diagnostics=1, unknowns=0, shape_preserved=False" in captured.out
+        assert "main > word:decide @ line 1, cols 15-20 [defined: line 1, cols 1-14]: in=['str'] -> out=['int'], effects=(none), diagnostics=0, unknowns=0, shape_preserved=True" in captured.out
+        assert "main > switch:merge @ line 1, cols 21-26: reason=optional-no-match-path, precision=optional-path, branches=[['int'], []] -> merged=[]" in captured.out
+        assert "Shape Flow:" in captured.out
+        assert "main:" in captured.out
+        assert "01. 'hello' -> ['str']" in captured.out
+        assert "main > word:decide:" in captured.out
+        assert "01. decide -> ['int'] @ line 1, cols 15-20" in captured.out
+        assert "User Word Contracts:" in captured.out
+        assert "Final shape : ['int']" in captured.out
+        assert "decide: pops=0, pushes=0, effect=final, host=core, output_shape=[], defined=line 1, cols 1-14" in captured.out
+        assert "PocketCoder Host Dependencies:" in captured.out
+        assert "tool-request" in captured.out
+        assert "Expanded StackVM:" in captured.out
+
+    def test_stackvm_check_prints_missing_stdlib_warning(self, capsys, tmp_path):
+        class _MissingStdlibStub(_StackVmCommandEngineStub):
+            def inspect_stackvm_target(self, kind, target, *, entry=None):
+                details = super().inspect_stackvm_target(kind, target, entry=entry)
+                details["warning_count"] = 2
+                details["warnings"] = list(details["warnings"]) + [
+                    {
+                        "code": "stdlib-module-missing",
+                        "message": "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost.",
+                    }
+                ]
+                details["stdlib_modules_requested"] = []
+                details["stdlib_modules_resolved"] = []
+                details["stdlib_unresolved_refs"] = ["stdlib.ghost"]
+                return details
+
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _MissingStdlibStub(tmp_path)
+
+        handle_command(
+            "/stackvm check script router.vm --entry decide",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Stdlib miss : stdlib.ghost" in captured.out
+        assert "stdlib-module-missing: Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost." in captured.out
 
     def test_stackvm_alter_script_uses_source_file(self, capsys, tmp_path):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -1232,6 +1676,25 @@ class TestCommandHandlerParsing:
         captured = capsys.readouterr()
         assert engine.update_script_calls == [("router.vm", "[ \"updated\" answer ]\n")]
         assert "Updated StackVM script" in captured.out
+        assert "Warnings: 1" in captured.out
+        assert "stdlib-module-missing: Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost." in captured.out
+
+    def test_stackvm_alter_flow_prints_update_warnings(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+        source_file = tmp_path / "router.md"
+        source_file.write_text("---\nname: review\n---\n", encoding="utf-8")
+
+        handle_command(
+            f"/stackvm alter flow review {source_file}",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "Updated StackVM flow 'review'" in captured.out
+        assert "Warnings: 1" in captured.out
+        assert "stdlib-module-missing: Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: stdlib.ghost." in captured.out
 
     def test_stackvm_debug_prints_trace(self, capsys, tmp_path):
         cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
@@ -1254,8 +1717,82 @@ class TestCommandHandlerParsing:
                 "auto_confirm_tools": True,
             }
         ]
+        assert "Runtime Decisions:" in captured.out
+        assert "if-branch" in captured.out
+        assert "Runtime Scope Summaries:" in captured.out
+        assert "main > word:main" in captured.out
+        assert "static_out=['str'] static_effects=['tool'] static_shape_preserved=True" in captured.out
         assert "Trace:" in captured.out
-        assert "push-literal" in captured.out
+        assert "main > word:main:" in captured.out
+        assert "push-literal: hello" in captured.out
+        assert "static_shape=['str']" in captured.out
+        assert "delta={'depth_change': 1, 'popped': [], 'pushed': ['hello']}" in captured.out
+        assert "@ line 1, cols 3-9" in captured.out
+        assert "[authored: line 1, cols 11-16]" in captured.out
+        assert "Diagnostics: 1" in captured.out
+        assert "Effects : tool" in captured.out
+        assert "Final shape: ['str']" in captured.out
+        assert "Runtime : standalone-script (source=standalone-vm)" in captured.out
+        assert "Session : sess-123" in captured.out
+        assert "Session title: Debug Session" in captured.out
+        assert "Transcript: 3 entries, 42 char(s)" in captured.out
+        assert "Runtime Provenance:" in captured.out
+        assert "path=standalone-script, source=standalone-vm, standalone_session_active=True" in captured.out
+        assert "Static/Runtime Correlation:" in captured.out
+        assert "scopes: matched=1/1 runtime, static=3" in captured.out
+        assert "decisions: matched=0/1 runtime, static=1" in captured.out
+        assert "static_only_scopes=['main', 'main > switch:merge']" in captured.out
+        assert "Standalone Session:" in captured.out
+        assert "persistent_keys=2" in captured.out
+
+    def test_stackvm_list_stdlib_prints_manifest_and_modules(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/stackvm list stdlib",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "StackVM stdlib:" in captured.out
+        assert "Package      : stackvm-stdlib" in captured.out
+        assert "stdlib.io" in captured.out
+        assert "exports=2, dependencies=0" in captured.out
+
+    def test_stackvm_stdlib_show_prints_module_details(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/stackvm stdlib show stdlib.prompt",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "StackVM stdlib module: stdlib.prompt" in captured.out
+        assert "vm/stdlib/prompt.vm" in captured.out
+        assert "buttons-approve-reject" in captured.out
+        assert "Dependencies: []" in captured.out
+
+    def test_stackvm_stdlib_check_prints_validation_report(self, capsys, tmp_path):
+        cli_context = {"files": set(), "folders": set(), "urls": set(), "snippets": {}}
+        engine = _StackVmCommandEngineStub(tmp_path)
+
+        handle_command(
+            "/stackvm stdlib check",
+            engine=engine,
+            cli_context=cli_context,
+        )
+
+        captured = capsys.readouterr()
+        assert "StackVM stdlib check: stackvm-stdlib 0.1.0" in captured.out
+        assert "Warnings     : 1" in captured.out
+        assert "Errors       : 0" in captured.out
+        assert "stdlib.prompt: ok" in captured.out
+        assert "warning:" in captured.out
 
     def test_flow_shortcut_alias_is_removed(self, capsys):
         cli_context = {

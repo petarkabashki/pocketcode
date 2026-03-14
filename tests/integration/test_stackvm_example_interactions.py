@@ -3,6 +3,7 @@ import time
 from pocketcode.core.stackvm_expander import expand_stackvm_source
 from tests.integration.stackvm_test_utils import (
     EXAMPLES_ROOT,
+    load_example_asset_vm_source,
     make_example_engine,
     request_context,
     wait_for_new_interaction_request,
@@ -130,7 +131,7 @@ def test_real_engine_start_request_can_continue_after_stackvm_prompt_user_declin
 
     assert result == "Declined Alpha, Beta, untitled from fixture"
     router_source = (EXAMPLES_ROOT / "stackvm_normalize_confirm_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == ["prompt-store-text"]
 
 
 def test_real_engine_start_request_can_continue_after_stackvm_button_interaction(tmp_path):
@@ -177,8 +178,25 @@ def test_real_engine_start_request_can_continue_after_stackvm_button_interaction
 
     result = handle.wait(timeout=1.0)
     assert result == "Delegating Alpha, Beta, untitled from fixture"
-    router_source = (EXAMPLES_ROOT / "stackvm_buttons_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["prompt-route", "tool-once"]
+    router_source = load_example_asset_vm_source("stackvm_buttons_example", "normalize.md")
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-continue-spec",
+        "use-workflow-spec",
+        "workflow-spec",
+        "continue-workflow-contract",
+        "router-continue-workflow",
+        "normalized-continue-workflow",
+        "normalized-choice-router",
+        "normalize-loaded-payload",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-policy",
+        "choice-request",
+        "prompt-store-policy",
+        "stdlib.io.read-yaml-file-once",
+    ]
 
 
 def test_real_engine_start_request_can_return_from_prompted_stackvm_delegate(tmp_path):
@@ -221,8 +239,43 @@ def test_real_engine_start_request_can_return_from_prompted_stackvm_delegate(tmp
 
     assert result == "Caller received delegate decision: delegate approved Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_prompt_return_example.normalize"
-    router_source = (EXAMPLES_ROOT / "stackvm_prompt_return_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
+    router_source = load_example_asset_vm_source("stackvm_prompt_return_example", "normalize.md")
+    delegate_source = load_example_asset_vm_source("stackvm_prompt_return_example", "confirm_delegate.md")
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-answer-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "answer-workflow-contract",
+        "caller-answer-workflow",
+        "normalized-answer-workflow",
+        "normalized-return-flow",
+        "normalize-loaded-payload",
+        "return-contract-flow",
+        "return-answer-flow",
+        "returned-answer-policy",
+        "finalize-from",
+        "returned-answer",
+        "return-flow",
+        "return-handoff",
+        "stdlib.io.read-yaml-file-once",
+    ]
+    assert expand_stackvm_source(delegate_source).expansion_trace == [
+        "define-choice-answer-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "answer-workflow-contract",
+        "delegate-answer-workflow",
+        "summary-answer-workflow",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-contract",
+        "choice-decision",
+        "choice-request",
+        "prompt-decision",
+        "prompt-return-policy",
+    ]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types
@@ -271,7 +324,7 @@ def test_real_engine_start_request_can_pass_through_stackvm_delegate_return(tmp_
     assert result == "delegate approved Alpha, Beta, untitled from fixture"
     assert engine.last_run_summary["current_agent"] == "stackvm_delegate_return_example.normalize"
     router_source = (EXAMPLES_ROOT / "stackvm_delegate_return_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["delegate-return", "tool-once"]
+    assert expand_stackvm_source(router_source).expansion_trace == ["return-delegate"]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types
@@ -322,8 +375,43 @@ def test_real_engine_start_request_can_return_from_checklist_stackvm_delegate(tm
     events.extend(handle.drain_events())
 
     assert result == "Caller received delegate tools: delegate picked git, search for Alpha, Beta, untitled from fixture"
-    router_source = (EXAMPLES_ROOT / "stackvm_checklist_return_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once", "finalize-from"]
+    router_source = load_example_asset_vm_source("stackvm_checklist_return_example", "normalize.md")
+    delegate_source = load_example_asset_vm_source("stackvm_checklist_return_example", "checklist_delegate.md")
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-answer-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "answer-workflow-contract",
+        "caller-answer-workflow",
+        "normalized-answer-workflow",
+        "normalized-return-flow",
+        "normalize-loaded-payload",
+        "return-contract-flow",
+        "return-answer-flow",
+        "returned-answer-policy",
+        "finalize-from",
+        "returned-answer",
+        "return-flow",
+        "return-handoff",
+        "stdlib.io.read-yaml-file-once",
+    ]
+    assert expand_stackvm_source(delegate_source).expansion_trace == [
+        "define-choice-answer-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "answer-workflow-contract",
+        "delegate-answer-workflow",
+        "summary-answer-workflow",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-contract",
+        "choice-decision",
+        "choice-request",
+        "prompt-decision",
+        "prompt-return-policy",
+    ]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert "handoff_return" in event_types
@@ -369,8 +457,25 @@ def test_real_engine_start_request_can_continue_after_stackvm_radio_interaction(
 
     result = handle.wait(timeout=1.0)
     assert result == "Selected mode delegate for Alpha, Beta, untitled from fixture"
-    router_source = (EXAMPLES_ROOT / "stackvm_radio_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    router_source = load_example_asset_vm_source("stackvm_radio_example", "normalize.md")
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-continue-spec",
+        "use-workflow-spec",
+        "workflow-spec",
+        "continue-workflow-contract",
+        "router-continue-workflow",
+        "normalized-continue-workflow",
+        "normalized-choice-router",
+        "normalize-loaded-payload",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-policy",
+        "choice-request",
+        "prompt-store-policy",
+        "stdlib.io.read-yaml-file-once",
+    ]
 
 
 def test_real_engine_start_request_can_route_after_stackvm_checklist_interaction_delegate(tmp_path):
@@ -417,8 +522,25 @@ def test_real_engine_start_request_can_route_after_stackvm_checklist_interaction
 
     assert result == "delegate route handled: Alpha, Beta, untitled from fixture with actions delegate, review"
     assert engine.last_run_summary["current_agent"] == "stackvm_checklist_handoff_example.delegate_route"
-    router_source = (EXAMPLES_ROOT / "stackvm_checklist_handoff_example" / "vm" / "router.vm").read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["tool-once"]
+    router_source = load_example_asset_vm_source("stackvm_checklist_handoff_example", "normalize.md")
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "define-choice-continue-spec",
+        "use-workflow-spec",
+        "workflow-spec",
+        "continue-workflow-contract",
+        "router-continue-workflow",
+        "normalized-continue-workflow",
+        "normalized-choice-router",
+        "normalize-loaded-payload",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-policy",
+        "choice-request",
+        "prompt-store-policy",
+        "stdlib.io.read-yaml-file-once",
+    ]
     event_types = [event["type"] for event in events]
     assert "handoff" in event_types
     assert event_types.index("interaction_received") < event_types.index("handoff")
@@ -522,10 +644,46 @@ def test_real_engine_start_request_can_run_stackvm_multistage_pipeline(tmp_path)
 
     assert result == "pipeline complete: Alpha, Beta, untitled from fixture | actions=delegate, review | delegate=delegate plan review-first"
     assert engine.last_run_summary["current_agent"] == "stackvm_multistage_pipeline_example.normalize"
-    router_source = (
-        EXAMPLES_ROOT / "stackvm_multistage_pipeline_example" / "vm" / "router.vm"
-    ).read_text(encoding="utf-8")
-    assert expand_stackvm_source(router_source).expansion_trace == ["finalize-from", "tool-once", "finalize-from"]
+    router_source = load_example_asset_vm_source("stackvm_multistage_pipeline_example", "normalize.md")
+    delegate_source = load_example_asset_vm_source("stackvm_multistage_pipeline_example", "confirm_delegate.md")
+    assert expand_stackvm_source(router_source).expansion_trace == [
+        "tool-once",
+        "stdlib.io.read-file-once",
+        "return-handoff",
+        "finalize-from",
+        "define-choice-continue-answer-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "continue-workflow-contract",
+        "router-continue-workflow",
+        "normalized-continue-workflow",
+        "normalized-choice-router",
+        "normalize-loaded-payload",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-policy",
+        "choice-request",
+        "prompt-store-policy",
+        "stdlib.io.read-yaml-file-once",
+        "finalize-from",
+    ]
+    assert expand_stackvm_source(delegate_source).expansion_trace == [
+        "return-handoff",
+        "finalize-from",
+        "define-choice-continue-answer-family",
+        "use-workflow-family",
+        "workflow-spec",
+        "answer-workflow-contract",
+        "delegate-answer-workflow",
+        "summary-answer-workflow",
+        "summary-choice-flow",
+        "choice-flow",
+        "choice-contract",
+        "choice-decision",
+        "choice-request",
+        "prompt-decision",
+        "prompt-return-policy",
+    ]
     event_types = [event["type"] for event in events]
     assert event_types.count("interaction_requested") == 2
     assert event_types.count("interaction_received") == 2

@@ -1,1 +1,10 @@
-[ last-tool-result "content" dict-get yaml> ] "config-data" define
+"common" module
+"stdlib.config.tool-content-schema-apply" import
+
+[
+  "{type: object, required: [routing], properties: {routing: {type: object, required: [enabled, targets], properties: {enabled: {type: boolean}, selected: {type: object, default: {index: 0}, properties: {index: {type: integer, default: 0}}}, targets: {type: array, items: {type: object, required: [agent], properties: {agent: {type: string}, message: {type: string, default: nested delegate}}}}, audit: {type: object, default: {status: pending}, properties: {status: {type: string, default: pending}}}}}}}" yaml>
+] "config-schema" define
+[ config-schema tool-content-schema-apply ] "normalized-config" define
+
+"config-schema" export
+"normalized-config" export

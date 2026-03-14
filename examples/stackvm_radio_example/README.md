@@ -5,16 +5,18 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 Layout:
 
 - `flows/*.md`: registers the StackVM normalization flow
-- `flows/normalize.md`: StackVM-backed normalization, radio interaction, and answer flow with `vm_module_prefixes` assigning the `common` helper prefix
-- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
-- `vm/router.vm`: normalization script using `tool-once`, `dict-get?`, `parallel-map`, `shared!?`, `dict-set`, `prompt-interaction`, and qualified `common.*` helper calls
+- `flows/normalize.md`: StackVM-backed normalization, radio interaction, and answer flow loading the shared workspace stdlib io and normalization modules plus a local facade
+- `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
+- `vm/router.vm`: normalization script using a direct continuation contract declared in `vm/common.vm` with `define-choice-continue-spec` and bound with `use-workflow-spec` plus qualified `common.*` helper calls
 
 The example demonstrates:
 
-- tool-first orchestration with the built-in `tool-once` macro
+- tool-first orchestration with the shared `stdlib.io.read-yaml-file-once` macro
+- shared file-read macros loaded from workspace-root `stdlib.io`
+- shared normalization helpers loaded from workspace-root `stdlib.normalize`
 - normalization of all tool-derived item titles into shared state
 - pure data fan-out with `parallel-map` before the interaction step
-- structured `radio` interaction through direct `prompt-interaction`
+- structured `radio` interaction through `define-choice-continue-spec` in `vm/common.vm` and `use-workflow-spec` in `continue` plus `exact` mode
 - continued VM execution from the selected mode value
 
-This example intentionally keeps `prompt-interaction` instead of `prompt-route` because it formats the selected value directly after the interaction rather than immediately routing through exact-match cases.
+This example now uses `define-choice-continue-spec` rather than separate file-load, normalization, prompt-building, and routing macros, so the router binds one declared radio option table and exact-match answer policy from `vm/common.vm`.

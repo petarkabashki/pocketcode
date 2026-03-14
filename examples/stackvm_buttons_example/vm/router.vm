@@ -1,30 +1,6 @@
 [
-  "core.read_file"
-  [ "{path: buttons_payload.yaml}" yaml> ]
-  [
-    last-tool-result failure?
-    [ "Could not load the payload." answer ]
-    [
-      common.payload-data "payload" store-set
-
-      "payload" store-get common.normalize-item-titles
-
-      "payload" store-get common.store-normalized-source
-
-      common.store-normalized-summary
-
-      [
-        "{kind: buttons, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: deny, label: Deny, value: deny}]}" yaml>
-        dup "prompt" "Choose next step for " "normalized.summary" shared@ concat dict-set
-      ]
-      [
-        "approve" [ "approve" dup "normalized.choice" shared!? drop drop "Approved " "normalized.summary" shared@ concat answer ]
-        "delegate" [ "delegate" dup "normalized.choice" shared!? drop drop "Delegating " "normalized.summary" shared@ concat answer ]
-        "default" [ "deny" dup "normalized.choice" shared!? drop drop "Denied " "normalized.summary" shared@ concat answer ]
-      ]
-      prompt-route
-    ]
-    if
-  ]
-  tool-once
+  "buttons-workflow"
+  "router"
+  "continue"
+  use-workflow-spec
 ] "decide" define

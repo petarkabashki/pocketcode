@@ -5,10 +5,9 @@ tools:
   - core.read_file
 vm_entry: decide
 vm_modules:
+  - stdlib.normalize
   - vm/common
   - vm/router
-vm_module_prefixes:
-  vm/common: common
 ---
 
 Load a YAML payload via `core.read_file`, aggregate numeric item scores, and hand off according to threshold bands derived from the total.

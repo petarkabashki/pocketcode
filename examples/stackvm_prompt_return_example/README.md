@@ -5,16 +5,18 @@ This example shows a StackVM caller/delegate pair where the caller normalizes al
 Layout:
 
 - `flows/*.md`: registers the caller and delegate StackVM flows
-- `flows/normalize.md`: StackVM caller flow that normalizes data and hands off with a return policy, with `vm_module_prefixes` assigning the `common` helper prefix
-- `flows/confirm_delegate.md`: StackVM delegate flow that prompts for a structured choice
-- `vm/common.vm`: shared helper module for parsing and normalizing the tool-derived payload, loaded as `common.*`
-- `vm/router.vm`: caller script that normalizes data with `parallel-map`, uses `tool-once` for the request loop, uses `finalize-from` for caller-side answer composition, and calls qualified `common.*` helpers
-- `vm/delegate.vm`: delegate script that uses `prompt-interaction` and returns a final answer to the caller
+- `flows/normalize.md`: StackVM caller flow that loads the shared workspace stdlib io and normalization modules and hands off with a return policy
+- `flows/confirm_delegate.md`: StackVM delegate flow that prompts for a structured choice from one declarative decision table
+- `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
+- `vm/router.vm`: caller script that binds a paired answer workflow declared in `vm/common.vm` through `define-choice-answer-family`, covering the full caller-side load, normalization, handoff, and finalization protocol, and calls qualified `common.*` helpers
+- `vm/delegate.vm`: delegate script that binds the same `define-choice-answer-family` contract with `use-workflow-family` and returns a final answer to the caller
 
 The example demonstrates:
 
-- tool-first normalization of all payload item titles in a VM caller through `tool-once`
+- tool-first normalization of all payload item titles in a VM caller through `stdlib.io.read-yaml-file-once`
+- shared file-read macros loaded from workspace-root `stdlib.io`
+- shared normalization helpers loaded from workspace-root `stdlib.normalize`
 - pure data fan-out with `parallel-map` before delegate handoff
-- `pending_handoff_policy` with `return_to_caller: true`
-- structured delegate prompting with `prompt-interaction`
-- caller-side finalization from `last_delegated_result` through `finalize-from` after a StackVM delegate returns
+- a paired answer workflow declared in `vm/common.vm` through `define-choice-answer-family` and bound with `use-workflow-family` for the full caller-side load, normalization, handoff, missing-answer handling, and finalization protocol
+- structured delegate prompting through the same `define-choice-answer-family` contract
+- caller-side finalization from `last_delegated_result` through a top-level return contract after a StackVM delegate returns

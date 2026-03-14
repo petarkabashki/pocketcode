@@ -1,0 +1,16 @@
+"stdlib.io" module
+
+[ request_expr later_turn ]
+[ "core.read_file" [ request_expr unquote ] [ later_turn unquote ] tool-once ]
+syntax-quote "read-file-once" defmacro
+
+[ path_expr later_turn ]
+[
+  [ "{path: " [ path_expr unquote ] concat "}" concat yaml> ]
+  [ later_turn unquote ]
+  stdlib.io.read-file-once
+]
+syntax-quote "read-yaml-file-once" defmacro
+
+"read-file-once" export
+"read-yaml-file-once" export

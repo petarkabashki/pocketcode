@@ -1,45 +1,6 @@
 [
-  "core.read_file"
-  [
-    "{path: checklist_handoff_payload.yaml}" yaml>
-  ]
-  [
-    last-tool-result failure?
-    [ "Could not load the payload." answer ]
-    [
-      common.payload-data "payload" store-set
-
-      "payload" store-get common.normalize-item-titles
-
-      "payload" store-get common.store-normalized-source
-
-      common.store-normalized-summary
-
-      "{kind: checklist, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: review, label: Review, value: review}], min_selected: 1}" yaml>
-      dup "prompt" "Choose actions for " "normalized.summary" shared@ concat dict-set
-      prompt-interaction
-      dup "normalized.selected_actions" shared!? drop
-      common.format-selected-actions
-      over "delegate" contains?
-      [
-        swap drop drop
-        "stackvm_checklist_handoff_example.delegate_route" handoff
-      ]
-      [
-        over "approve" contains?
-        [
-          swap drop drop
-          "stackvm_checklist_handoff_example.approve_route" handoff
-        ]
-        [
-          swap drop drop
-          "stackvm_checklist_handoff_example.review_route" handoff
-        ]
-        if
-      ]
-      if
-    ]
-    if
-  ]
-  tool-once
+  "checklist-handoff-workflow"
+  "router"
+  "continue"
+  use-workflow-spec
 ] "decide" define

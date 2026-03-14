@@ -1,0 +1,43 @@
+"stdlib.prompt" module
+
+[
+  "{kind: buttons, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: deny, label: Deny, value: deny}]}" yaml>
+] "buttons-approve-delegate-deny" define
+[
+  "{kind: buttons, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: reject, label: Reject, value: reject}]}" yaml>
+] "buttons-approve-reject" define
+[
+  "{kind: radio, prompt: placeholder, options: [{id: delegate, label: Delegate, value: delegate}, {id: approve, label: Approve, value: approve}, {id: deny, label: Deny, value: deny}]}" yaml>
+] "radio-delegate-approve-deny" define
+[
+  "{kind: radio, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: escalate, label: Escalate, value: escalate}, {id: review, label: Review, value: review}]}" yaml>
+] "radio-approve-escalate-review" define
+[
+  "{kind: radio, prompt: placeholder, options: [{id: concise, label: Concise, value: concise}, {id: detailed, label: Detailed, value: detailed}, {id: blocked, label: Blocked, value: blocked}]}" yaml>
+] "radio-concise-detailed-blocked" define
+[
+  "{kind: radio, prompt: placeholder, options: [{id: concise, label: Concise, value: concise}, {id: blocked, label: Blocked, value: blocked}]}" yaml>
+] "radio-concise-blocked" define
+[
+  "{kind: radio, prompt: placeholder, options: [{id: review-first, label: Review First, value: review-first}, {id: delegate-now, label: Delegate Now, value: delegate-now}]}" yaml>
+] "radio-review-first-delegate-now" define
+[
+  "{kind: checklist, prompt: placeholder, options: [{id: approve, label: Approve, value: approve}, {id: delegate, label: Delegate, value: delegate}, {id: review, label: Review, value: review}], min_selected: 1}" yaml>
+] "checklist-approve-delegate-review" define
+[
+  "{kind: checklist, prompt: placeholder, options: [{id: delegate, label: Delegate, value: delegate}, {id: review, label: Review, value: review}, {id: approve, label: Approve, value: approve}], min_selected: 1}" yaml>
+] "checklist-delegate-review-approve" define
+[
+  "{kind: checklist, prompt: placeholder, options: [{id: git, label: Git, value: git}, {id: search, label: Search, value: search}, {id: context, label: Context, value: context}], min_selected: 1}" yaml>
+] "checklist-git-search-context" define
+
+"buttons-approve-delegate-deny" export
+"buttons-approve-reject" export
+"radio-delegate-approve-deny" export
+"radio-approve-escalate-review" export
+"radio-concise-detailed-blocked" export
+"radio-concise-blocked" export
+"radio-review-first-delegate-now" export
+"checklist-approve-delegate-review" export
+"checklist-delegate-review-approve" export
+"checklist-git-search-context" export

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import dataclasses
+import asyncio
 import logging
 import copy
 import importlib
 import json
 import sys
 import shlex
+import threading
 import types
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,7 @@ from pocketcode.core.markdown_profiles import (
     parse_markdown_front_matter,
 )
 from pocketcode.core.agent_runtime import AgentRuntime
+from pocketcode.core.agent_stack_vm import AgentStackVM
 from pocketcode.core.llm_router import LlmRouter
 from pocketcode.core.namespace_registry import RegistryError
 from pocketcode.core.workspace_catalog import WorkspaceCatalog
@@ -53,10 +56,13 @@ from pocketcode.core.resource_roots import primary_resource_root, resource_root_
 from pocketcode.core.runtime_storage import load_entry_history, normalize_entry_history, save_entry_history
 from pocketcode.core.runtime_storage import checkpoint_storage_dir
 from pocketcode.core.session_manager import SessionManager
-from pocketcode.core.stackvm_expander import expand_stackvm_source
+from pocketcode.core.stackvm_driver import CompiledStackVmProgram, compile_stackvm_program, run_compiled_stackvm_program
 from pocketcode.core.stackvm_loader import load_stackvm_program_source
-from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast, tokenize_stackvm_source
-from pocketcode.core.stackvm_validator import collect_stackvm_authoring_warnings, validate_stackvm_ast
+from pocketcode.core.stackvm_stdlib import (
+    load_stackvm_stdlib_manifest,
+    list_stackvm_stdlib_modules,
+    validate_stackvm_stdlib_manifest,
+)
 from pocketcode.core.tool_runtime import ToolRuntime
 from pocketcode.core.workspace_llm_profile_manager import WorkspaceLlmProfileManager
 from pocketcode.core.markdown_assets import (
@@ -163,6 +169,10 @@ class PocketCodeEngine:
             "runtime_event_count": 0,
             "step_count": 0,
             "steps": [],
+        }
+        self.workspace_stackvm_stdlib_summary: Dict[str, Any] = {
+            "warning_count": 0,
+            "warnings": [],
         }
 
         self._validate_current_selections()
@@ -888,6 +898,7 @@ class PocketCodeEngine:
             "path": updated["path"],
             "entry": normalized_entry,
             "agent": created_agent,
+            "warnings": list(updated.get("warnings", [])),
         }
 
     def create_stackvm_script(
@@ -947,6 +958,15 @@ class PocketCodeEngine:
             scripts.append(path.relative_to(script_root).as_posix())
         return scripts
 
+    def get_stackvm_stdlib_manifest(self) -> Dict[str, Any]:
+        return dict(load_stackvm_stdlib_manifest(self._workspace_root))
+
+    def list_stackvm_stdlib_modules(self) -> List[Dict[str, Any]]:
+        return [dict(item) for item in list_stackvm_stdlib_modules(self._workspace_root)]
+
+    def validate_stackvm_stdlib_manifest(self) -> Dict[str, Any]:
+        return dict(validate_stackvm_stdlib_manifest(self._workspace_root))
+
     def get_stackvm_script(self, name_or_path: str) -> Dict[str, Any]:
         script_path = self._resolve_stackvm_script_path(name_or_path)
         return {
@@ -986,6 +1006,11 @@ class PocketCodeEngine:
         if normalized_kind == "flow":
             flow_name, definition = self._resolve_stackvm_flow_definition(target_name)
             compiled = self._load_and_compile_stackvm_flow(definition=definition, entry=normalized_entry)
+            stdlib_usage = self._summarize_stackvm_stdlib_usage(
+                requested_refs=list(definition.vm_modules) + ([definition.vm_module] if definition.vm_module else []),
+                source_files=list(compiled.get("source_files", [])),
+            )
+            compiled = self._merge_stackvm_stdlib_usage_warnings(compiled=compiled, stdlib_usage=stdlib_usage)
             return {
                 "target_kind": "flow",
                 "name": flow_name,
@@ -997,6 +1022,7 @@ class PocketCodeEngine:
                 "llm_profile": definition.llm_profile,
                 "tools": list(definition.tools),
                 "prompt_sources": list(definition.prompt_sources),
+                **stdlib_usage,
                 **compiled,
             }
 
@@ -1019,6 +1045,11 @@ class PocketCodeEngine:
                 source_files=source_files,
                 entry=script_entry,
             )
+            stdlib_usage = self._summarize_stackvm_stdlib_usage(
+                requested_refs=[],
+                source_files=list(compiled.get("source_files", [])),
+            )
+            compiled = self._merge_stackvm_stdlib_usage_warnings(compiled=compiled, stdlib_usage=stdlib_usage)
             return {
                 "target_kind": "script",
                 "name": self._stackvm_script_display_name(script_path),
@@ -1030,6 +1061,7 @@ class PocketCodeEngine:
                 "llm_profile": None,
                 "tools": [],
                 "prompt_sources": [],
+                **stdlib_usage,
                 **compiled,
             }
 
@@ -1039,6 +1071,11 @@ class PocketCodeEngine:
                 raise ValueError(f"Unknown agent profile '{target_name}'.")
             flow_name, definition = self._resolve_stackvm_flow_definition(profile.flow)
             compiled = self._load_and_compile_stackvm_flow(definition=definition, entry=normalized_entry)
+            stdlib_usage = self._summarize_stackvm_stdlib_usage(
+                requested_refs=list(definition.vm_modules) + ([definition.vm_module] if definition.vm_module else []),
+                source_files=list(compiled.get("source_files", [])),
+            )
+            compiled = self._merge_stackvm_stdlib_usage_warnings(compiled=compiled, stdlib_usage=stdlib_usage)
             return {
                 "target_kind": "agent",
                 "name": profile.name,
@@ -1052,6 +1089,7 @@ class PocketCodeEngine:
                 "prompt_sources": list(profile.extra_prompts),
                 "profile_source": getattr(profile, "source", None),
                 "profile_path": getattr(profile, "source_path", None),
+                **stdlib_usage,
                 **compiled,
             }
 
@@ -1112,6 +1150,18 @@ class PocketCodeEngine:
                 base_dir=script_path.parent,
                 search_roots=[script_path.parent, self._stackvm_script_root(), self._workspace_root],
             )
+            compiled = self._compile_stackvm_program(
+                source=source,
+                source_files=source_files,
+                entry=script_entry,
+            )
+            if self._can_run_stackvm_script_standalone(compiled):
+                return self._run_stackvm_script_standalone(
+                    script_path=script_path,
+                    compiled=compiled,
+                    request=request,
+                    debug=debug,
+                )
             definition = FlowDefinition(
                 name=script_path.stem,
                 description=f"StackVM script '{script_path.name}'",
@@ -1232,11 +1282,19 @@ class PocketCodeEngine:
         )
         path.write_text(markdown_text.strip() + "\n", encoding="utf-8")
         self.reload()
+        warnings: List[Dict[str, Any]] = []
+        if normalized_kind == "flow":
+            try:
+                inspection = self.inspect_stackvm_target("flow", validated_name)
+                warnings = [dict(item) for item in inspection.get("warnings", []) if isinstance(item, dict)]
+            except Exception:
+                warnings = []
         return {
             "kind": normalized_kind,
             "name": validated_name,
             "path": path,
             "companion_path": asset.get("companion_path"),
+            "warnings": warnings,
         }
 
     def delete_markdown_asset(self, asset_kind: str, name: str) -> Dict[str, Any]:
@@ -1341,8 +1399,44 @@ class PocketCodeEngine:
         self.enabled_skills = [name for name in self.enabled_skills if self._skill_manager.get(name) is not None]
         self._refresh_runtime_components()
         self._agent_tools_cache = {}
+        self.workspace_stackvm_stdlib_summary = self._build_workspace_stackvm_stdlib_summary()
         self._validate_current_selections()
         self._ensure_active_session()
+
+    def _build_workspace_stackvm_stdlib_summary(self) -> Dict[str, Any]:
+        warnings: list[dict[str, Any]] = []
+        for flow_name in self.list_flows():
+            try:
+                _, definition = self._resolve_stackvm_flow_definition(flow_name)
+            except Exception:
+                continue
+            requested_refs = list(getattr(definition, "vm_modules", []) or [])
+            vm_module = getattr(definition, "vm_module", None)
+            if vm_module:
+                requested_refs.append(str(vm_module))
+            if not requested_refs:
+                continue
+            usage = self._summarize_stackvm_stdlib_usage(requested_refs=requested_refs, source_files=[])
+            unresolved_refs = [str(item).strip() for item in usage.get("stdlib_unresolved_refs", []) if str(item).strip()]
+            if not unresolved_refs:
+                continue
+            warnings.append(
+                {
+                    "target_kind": "flow",
+                    "target_name": flow_name,
+                    "code": "stdlib-module-missing",
+                    "message": (
+                        "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: "
+                        + ", ".join(unresolved_refs)
+                        + "."
+                    ),
+                    "refs": unresolved_refs,
+                }
+            )
+        return {
+            "warning_count": len(warnings),
+            "warnings": warnings,
+        }
 
     def _validate_current_selections(self) -> None:
         if self.current_agent and self.current_agent not in self._catalog.agents:
@@ -2845,6 +2939,7 @@ class PocketCodeEngine:
             search_roots.append(namespace_root)
         if resource_root:
             search_roots.append(Path(str(resource_root)).resolve())
+        search_roots.append(self._workspace_root)
         if not search_roots:
             search_roots.append(self._workspace_root)
         return list(dict.fromkeys(search_roots))
@@ -2873,6 +2968,92 @@ class PocketCodeEngine:
             entry=entry or definition.vm_entry,
         )
 
+    def _summarize_stackvm_stdlib_usage(
+        self,
+        *,
+        requested_refs: List[str] | None,
+        source_files: List[str] | None,
+    ) -> Dict[str, Any]:
+        manifest_modules = list_stackvm_stdlib_modules(self._workspace_root)
+        modules_by_name: Dict[str, Dict[str, Any]] = {}
+        module_name_by_ref: Dict[str, str] = {}
+        module_name_by_file: Dict[str, str] = {}
+        for item in manifest_modules:
+            if not isinstance(item, dict):
+                continue
+            module_name = str(item.get("name") or "").strip()
+            module_ref = str(item.get("ref") or "").strip()
+            module_file = str(item.get("file") or "").strip()
+            if not module_name:
+                continue
+            modules_by_name[module_name] = item
+            if module_ref:
+                module_name_by_ref[module_ref] = module_name
+            if module_file:
+                module_name_by_file[module_file] = module_name
+
+        requested_modules: list[str] = []
+        alias_refs: list[str] = []
+        file_refs: list[str] = []
+        unresolved_refs: list[str] = []
+        for raw_ref in requested_refs or []:
+            cleaned = str(raw_ref or "").strip()
+            if not cleaned:
+                continue
+            if cleaned in modules_by_name:
+                requested_modules.append(cleaned)
+                alias_refs.append(cleaned)
+            elif cleaned in module_name_by_ref:
+                requested_modules.append(module_name_by_ref[cleaned])
+                file_refs.append(cleaned)
+            elif cleaned.startswith("stdlib."):
+                unresolved_refs.append(cleaned)
+
+        resolved_modules: list[str] = []
+        workspace_root = self._workspace_root.resolve()
+        for raw_path in source_files or []:
+            path = Path(str(raw_path)).resolve()
+            try:
+                relative_path = path.relative_to(workspace_root).as_posix()
+            except ValueError:
+                continue
+            module_name = module_name_by_file.get(relative_path)
+            if module_name:
+                resolved_modules.append(module_name)
+
+        return {
+            "stdlib_modules_requested": sorted(dict.fromkeys(requested_modules)),
+            "stdlib_modules_resolved": sorted(dict.fromkeys(resolved_modules)),
+            "stdlib_alias_refs": sorted(dict.fromkeys(alias_refs)),
+            "stdlib_file_refs": sorted(dict.fromkeys(file_refs)),
+            "stdlib_unresolved_refs": sorted(dict.fromkeys(unresolved_refs)),
+        }
+
+    def _merge_stackvm_stdlib_usage_warnings(
+        self,
+        *,
+        compiled: Dict[str, Any],
+        stdlib_usage: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        merged = dict(compiled)
+        warnings = [dict(item) for item in compiled.get("warnings", []) if isinstance(item, dict)]
+        unresolved_refs = [str(item).strip() for item in stdlib_usage.get("stdlib_unresolved_refs", []) if str(item).strip()]
+        if unresolved_refs:
+            warnings.append(
+                {
+                    "code": "stdlib-module-missing",
+                    "severity": "warning",
+                    "message": (
+                        "Requested stdlib module refs are not declared in vm/stdlib/stdlib.yaml: "
+                        + ", ".join(unresolved_refs)
+                        + "."
+                    ),
+                }
+            )
+        merged["warnings"] = warnings
+        merged["warning_count"] = len(warnings)
+        return merged
+
     def _compile_stackvm_program(
         self,
         *,
@@ -2880,66 +3061,7 @@ class PocketCodeEngine:
         source_files: List[str],
         entry: str | None,
     ) -> Dict[str, Any]:
-        compiled_source = str(source or "").strip()
-        if not compiled_source and not entry:
-            raise ValueError("StackVM target has no executable source or entry word.")
-
-        warnings: list[dict[str, Any]] = []
-        expanded_ast: list[Any] = []
-        expansion_metadata = {
-            "expansion_count": 0,
-            "macro_names": [],
-            "builtin_macro_names": [],
-            "gensym_count": 0,
-            "expansion_trace": [],
-            "expansion_frames": [],
-        }
-        token_count = 0
-
-        if compiled_source:
-            source_ast = parse_stackvm_source(compiled_source)
-            token_count = len(tokenize_stackvm_source(compiled_source))
-            warnings = collect_stackvm_authoring_warnings(source_ast, source=compiled_source)
-            expanded = expand_stackvm_source(compiled_source)
-            validate_stackvm_ast(expanded.ast)
-            expanded_ast = expanded.ast
-            used_macro_names = list(dict.fromkeys(expanded.expansion_trace))
-            builtin_macro_names = [
-                name
-                for name in used_macro_names
-                if name in expanded.macros and expanded.macros[name].builtin
-            ]
-            expansion_metadata = {
-                "expansion_count": expanded.expansion_count,
-                "macro_names": used_macro_names,
-                "builtin_macro_names": builtin_macro_names,
-                "gensym_count": expanded.gensym_count,
-                "expansion_trace": list(expanded.expansion_trace),
-                "expansion_frames": [
-                    {
-                        "macro_name": frame.macro_name,
-                        "builtin": frame.builtin,
-                        "depth": frame.depth,
-                        "call_site": frame.call_site,
-                        "definition_site": frame.definition_site,
-                        "generated_by": frame.generated_by,
-                        "syntax_args": list(frame.syntax_args),
-                        "expanded_form": frame.expanded_form,
-                    }
-                    for frame in expanded.expansion_frames
-                ],
-            }
-
-        return {
-            "source": compiled_source,
-            "source_files": list(source_files),
-            "expanded_source": serialize_stackvm_ast(expanded_ast) if expanded_ast else "",
-            "expanded_ast": expanded_ast,
-            "warnings": warnings,
-            "warning_count": len(warnings),
-            "expansion_metadata": expansion_metadata,
-            "token_count": token_count,
-        }
+        return compile_stackvm_program(source=source, source_files=source_files, entry=entry).to_dict()
 
     def _run_stackvm_flow_definition(
         self,
@@ -2972,6 +3094,12 @@ class PocketCodeEngine:
         )
         shared_store["active_agent"] = flow_name
         shared_store["active_flow"] = flow_name
+        if flow_name == "__stackvm_cli__.script":
+            shared_store["stackvm_runtime_path"] = "script-synthetic-flow"
+            shared_store["stackvm_runtime_source"] = "agent-runtime"
+        else:
+            shared_store["stackvm_runtime_path"] = "flow-agent-runtime"
+            shared_store["stackvm_runtime_source"] = "agent-runtime"
         shared_store["active_agent_profile"] = active_profile
         shared_store["stackvm_trace_enabled"] = bool(debug)
         shared_store["auto_confirm_tools"] = bool(auto_confirm_tools)
@@ -3000,11 +3128,94 @@ class PocketCodeEngine:
             "last_vm_sources": list(shared_store.get("last_vm_sources", [])),
             "last_vm_expansion_metadata": dict(shared_store.get("last_vm_expansion_metadata", {})),
             "last_vm_validation_warnings": list(shared_store.get("last_vm_validation_warnings", [])),
+            "last_vm_analysis": dict(shared_store.get("last_vm_analysis", {}))
+            if isinstance(shared_store.get("last_vm_analysis"), dict)
+            else {},
+            "last_vm_diagnostics": list(shared_store.get("last_vm_diagnostics", [])),
             "pending_tool": shared_store.get("pending_tool"),
             "last_tool_result": shared_store.get("last_tool_result"),
             "tool_history": list(shared_store.get("tool_history", [])),
             "pending_handoff_agent": shared_store.get("pending_handoff_agent"),
             "results": dict(shared_store.get("results", {})) if isinstance(shared_store.get("results"), dict) else {},
+        }
+
+    def _execute_stackvm_ast(self, *, vm: AgentStackVM, ast: list[Any], entry: str | None) -> None:
+        async def _runner() -> None:
+            if ast:
+                await vm.execute_ast(ast)
+            if entry:
+                await vm.execute_word(entry)
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_runner())
+            return
+
+        thread_error: dict[str, BaseException] = {}
+
+        def _thread_runner() -> None:
+            try:
+                asyncio.run(_runner())
+            except BaseException as exc:  # pragma: no cover
+                thread_error["exc"] = exc
+
+        worker = threading.Thread(target=_thread_runner, name="stackvm-standalone-runner")
+        worker.start()
+        worker.join()
+        if "exc" in thread_error:
+            raise thread_error["exc"]
+
+    def _can_run_stackvm_script_standalone(self, compiled: Dict[str, Any]) -> bool:
+        return bool(compiled.get("analysis", {}).get("standalone_script_compatible", False))
+
+    def _run_stackvm_script_standalone(
+        self,
+        *,
+        script_path: Path,
+        compiled: Dict[str, Any],
+        request: str,
+        debug: bool,
+    ) -> Dict[str, Any]:
+        run_result = run_compiled_stackvm_program(
+            compiled=CompiledStackVmProgram(**compiled),
+            request=request,
+            workspace_root=self._workspace_root,
+            agent_name=f"__stackvm_script__.{script_path.stem}",
+            debug=debug,
+            auto_confirm_tools=bool(self.auto_confirm_tools),
+            llm_router=self._llm_router,
+            tool_runtime=self._tool_runtime,
+            llm_profile=self._selected_llm_profile(),
+            system_prompt="",
+        )
+        self.last_run_summary = dict(run_result.run_summary)
+        return {
+            "target_kind": "script",
+            "name": self._stackvm_script_display_name(script_path),
+            "path": script_path,
+            "flow": None,
+            "agent": None,
+            "request": run_result.request,
+            "output": run_result.output,
+            "final_answer": run_result.final_answer,
+            "question_to_ask": run_result.question_to_ask,
+            "error_message": run_result.error_message,
+            "run_summary": dict(run_result.run_summary),
+            "trace": list(run_result.trace),
+            "trace_count": run_result.trace_count,
+            "last_vm_source": run_result.last_vm_source,
+            "last_vm_expanded_source": run_result.last_vm_expanded_source,
+            "last_vm_sources": list(run_result.last_vm_sources),
+            "last_vm_expansion_metadata": dict(run_result.last_vm_expansion_metadata),
+            "last_vm_validation_warnings": list(run_result.last_vm_validation_warnings),
+            "last_vm_analysis": dict(run_result.last_vm_analysis),
+            "last_vm_diagnostics": list(run_result.last_vm_diagnostics),
+            "pending_tool": run_result.pending_tool,
+            "last_tool_result": run_result.last_tool_result,
+            "tool_history": list(run_result.tool_history),
+            "pending_handoff_agent": run_result.pending_handoff_agent,
+            "results": dict(run_result.results),
         }
 
     def _run_stackvm_temp_script(
@@ -3615,6 +3826,13 @@ class PocketCodeEngine:
         vm_validation_warnings = shared_store.get("last_vm_validation_warnings", {})
         if not isinstance(vm_validation_warnings, list):
             vm_validation_warnings = []
+        vm_diagnostics = shared_store.get("last_vm_diagnostics", {})
+        if not isinstance(vm_diagnostics, list):
+            vm_diagnostics = []
+        vm_analysis = shared_store.get("last_vm_analysis", {})
+        if not isinstance(vm_analysis, dict):
+            vm_analysis = {}
+        standalone_session = self._build_standalone_session_summary(shared_store)
         return {
             "agent_path": self._build_agent_path(shared_store),
             "current_agent": shared_store.get("active_agent") or self.current_agent,
@@ -3631,6 +3849,20 @@ class PocketCodeEngine:
             "llm_cost_usd": float(shared_store.get("llm_cost_usd_total", 0.0)),
             "vm_validation_warnings": list(vm_validation_warnings),
             "vm_validation_warning_count": len(vm_validation_warnings),
+            "vm_diagnostics": list(vm_diagnostics),
+            "vm_diagnostic_count": len(vm_diagnostics),
+            "vm_effect_kinds": list(vm_analysis.get("effect_kinds", [])) if isinstance(vm_analysis.get("effect_kinds"), list) else [],
+            "vm_max_stack_depth": int(vm_analysis.get("max_stack_depth", 0) or 0),
+            "vm_final_min_stack_depth": int(vm_analysis.get("final_min_stack_depth", 0) or 0),
+            "vm_final_stack_shape": list(vm_analysis.get("final_stack_shape", []))
+            if isinstance(vm_analysis.get("final_stack_shape"), list)
+            else [],
+            "vm_trace_scope_summaries": self._debug_snapshot_value(shared_store.get("vm_trace_scope_summaries", []))
+            if isinstance(shared_store.get("vm_trace_scope_summaries"), list)
+            else [],
+            "vm_trace_decisions": self._debug_snapshot_value(shared_store.get("vm_trace_decisions", []))
+            if isinstance(shared_store.get("vm_trace_decisions"), list)
+            else [],
             "last_runtime_effect": self._debug_snapshot_value(shared_store.get("last_runtime_effect")),
             "last_vm_effect": self._debug_snapshot_value(shared_store.get("last_vm_effect")),
             "last_vm_transition": shared_store.get("last_vm_transition"),
@@ -3642,8 +3874,103 @@ class PocketCodeEngine:
             if isinstance(shared_store.get("vm_effect_history"), list)
             else 0,
             "vm_effect_history": self._debug_snapshot_value(shared_store.get("vm_effect_history", [])),
+            "stackvm_runtime": self._debug_snapshot_value(self._build_stackvm_runtime_summary(shared_store)),
+            "stackvm_static_runtime_correlation": self._debug_snapshot_value(
+                self._build_static_runtime_correlation(shared_store)
+            ),
+            "standalone_session": self._debug_snapshot_value(standalone_session),
             "context_stats": self._build_context_stats(cli_context),
             **build_runtime_observability_summary(shared_store),
+        }
+
+    def _build_stackvm_runtime_summary(self, shared_store: Dict[str, Any]) -> Dict[str, Any]:
+        runtime_path = str(shared_store.get("stackvm_runtime_path") or "").strip()
+        runtime_source = str(shared_store.get("stackvm_runtime_source") or "").strip()
+        standalone_session_active = bool(str(shared_store.get("standalone_session_id") or "").strip())
+        return {
+            "path": runtime_path or "unknown",
+            "source": runtime_source or "unknown",
+            "standalone_session_active": standalone_session_active,
+        }
+
+    def _build_standalone_session_summary(self, shared_store: Dict[str, Any]) -> Dict[str, Any] | None:
+        session_id = str(shared_store.get("standalone_session_id") or "").strip()
+        if not session_id:
+            return None
+        transcript = shared_store.get("standalone_transcript", [])
+        if not isinstance(transcript, list):
+            transcript = []
+        transcript_text = str(shared_store.get("standalone_transcript_text") or "")
+        persistent_state_keys = shared_store.get("standalone_session_persistent_keys", [])
+        if not isinstance(persistent_state_keys, list):
+            persistent_state_keys = []
+        return {
+            "active": True,
+            "session_id": session_id,
+            "title": str(shared_store.get("standalone_session_title") or ""),
+            "transcript_entries": len(transcript),
+            "transcript_chars": len(transcript_text),
+            "persistent_key_count": len(persistent_state_keys),
+        }
+
+    def _build_static_runtime_correlation(self, shared_store: Dict[str, Any]) -> Dict[str, Any]:
+        analysis = shared_store.get("last_vm_analysis", {})
+        if not isinstance(analysis, dict):
+            analysis = {}
+        static_scope_summaries = analysis.get("scope_summaries", [])
+        if not isinstance(static_scope_summaries, list):
+            static_scope_summaries = []
+        static_decisions = analysis.get("analysis_decisions", [])
+        if not isinstance(static_decisions, list):
+            static_decisions = []
+        runtime_scope_summaries = shared_store.get("vm_trace_scope_summaries", [])
+        if not isinstance(runtime_scope_summaries, list):
+            runtime_scope_summaries = []
+        runtime_decisions = shared_store.get("vm_trace_decisions", [])
+        if not isinstance(runtime_decisions, list):
+            runtime_decisions = []
+
+        static_scopes = {
+            str(item.get("scope"))
+            for item in static_scope_summaries
+            if isinstance(item, dict) and str(item.get("scope") or "").strip()
+        }
+        runtime_scopes = {
+            str(item.get("scope"))
+            for item in runtime_scope_summaries
+            if isinstance(item, dict) and str(item.get("scope") or "").strip()
+        }
+        static_decision_scopes = {
+            str(item.get("scope"))
+            for item in static_decisions
+            if isinstance(item, dict) and str(item.get("scope") or "").strip()
+        }
+        runtime_decision_scopes = {
+            str(item.get("scope"))
+            for item in runtime_decisions
+            if isinstance(item, dict) and str(item.get("scope") or "").strip()
+        }
+
+        matched_scopes = sorted(static_scopes & runtime_scopes)
+        runtime_only_scopes = sorted(runtime_scopes - static_scopes)
+        static_only_scopes = sorted(static_scopes - runtime_scopes)
+        matched_decision_scopes = sorted(static_decision_scopes & runtime_decision_scopes)
+        runtime_only_decision_scopes = sorted(runtime_decision_scopes - static_decision_scopes)
+        static_only_decision_scopes = sorted(static_decision_scopes - runtime_decision_scopes)
+
+        return {
+            "static_scope_count": len(static_scopes),
+            "runtime_scope_count": len(runtime_scopes),
+            "matched_scope_count": len(matched_scopes),
+            "matched_scopes": matched_scopes,
+            "runtime_only_scopes": runtime_only_scopes,
+            "static_only_scopes": static_only_scopes,
+            "static_decision_scope_count": len(static_decision_scopes),
+            "runtime_decision_scope_count": len(runtime_decision_scopes),
+            "matched_decision_scope_count": len(matched_decision_scopes),
+            "matched_decision_scopes": matched_decision_scopes,
+            "runtime_only_decision_scopes": runtime_only_decision_scopes,
+            "static_only_decision_scopes": static_only_decision_scopes,
         }
 
     def _build_live_debug_snapshot(
@@ -3735,6 +4062,7 @@ class PocketCodeEngine:
             "available_skills": self.list_skills(),
             "available_llm_profiles": self.list_llm_profiles(),
             "last_run_summary": dict(self.last_run_summary),
+            "workspace_stackvm_stdlib_summary": dict(self.workspace_stackvm_stdlib_summary),
             "session_profile_overrides": self._copy_session_profile_overrides(),
             "session_global_skills_override": list(getattr(self, "session_global_skills_override", None) or []),
         }
