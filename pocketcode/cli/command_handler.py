@@ -58,6 +58,10 @@ BASE_COMMAND_SUGGESTIONS = [
     "/stackvm run",
     "/stackvm debug",
     "/stackvm alter",
+    "/stackvm example",
+    "/stackvm example list",
+    "/stackvm example show",
+    "/stackvm example clone",
     "/agent list",
     "/agent show",
     "/agent switch",
@@ -938,7 +942,7 @@ Pocketcode Commands:
     /confirm <cmd> [opts]          Manage tool confirmation policies. Run '/confirm help'.
     /session <cmd> [opts]          Manage saved sessions. Run '/session help'.
   /agent <cmd> [opts]            Inspect or switch agents. Run '/agent help'.
-  /stackvm <cmd> [opts]          Manage StackVM flows, scripts, and agents. Run '/stackvm help'.
+  /stackvm <cmd> [opts]          Manage StackVM flows, scripts, examples, and agents. Run '/stackvm help'.
   /exit, /quit                   Exit Pocketcode.
 
 Command aliases:

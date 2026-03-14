@@ -56,3 +56,11 @@ modules:
       - delegate-answer
       - delegate-answer-yaml?
     dependencies: []
+  - name: stdlib.workflows
+    ref: vm/stdlib/workflows
+    file: vm/stdlib/workflows.vm
+    summary: Shared parameterized workflow contract blueprints.
+    exports:
+      - define-approve-reject-answer-family
+      - define-approve-review-route-family
+    dependencies: []

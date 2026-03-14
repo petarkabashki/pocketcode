@@ -3808,6 +3808,7 @@ class PocketCodeEngine:
         if callable(interaction_handler):
             shared_store["interaction_handler"] = interaction_handler
         if run_handle is not None:
+            shared_store["run_handle"] = run_handle
             shared_store["run_cancel_requested"] = lambda: run_handle.is_cancel_requested
             shared_store["run_cancel_reason"] = lambda: run_handle.cancel_reason
         return shared_store

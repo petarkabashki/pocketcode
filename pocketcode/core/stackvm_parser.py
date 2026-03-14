@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 STACKVM_COMMENT_LINE_RE = re.compile(r"(?m)^\s*!.*$")
-STACKVM_TOKEN_RE = re.compile(r'"(?:[^"\\]|\\.)*"|\[|\]|[^\s\[\]]+')
+STACKVM_TOKEN_RE = re.compile(r'"(?:[^"\\]|\\.)*"|\[|\]|\(|\)|[^\s\[\]\(\)]+')
 
 
 @dataclass(frozen=True)
@@ -66,19 +66,27 @@ def parse_stackvm_source_with_spans(code: str) -> tuple[list[Any], list[StackVmA
     open_tokens: list[StackVmSourceToken] = []
 
     for token in tokens:
-        if token.raw == "[":
+        if token.raw in {"[", "("}:
             nested: list[Any] = []
             parse_stack[-1].append(nested)
             parse_stack.append(nested)
             open_tokens.append(token)
             span_stack.append([])
             continue
-        if token.raw == "]":
+        if token.raw in {"]", ")"}:
             if len(parse_stack) <= 1:
-                raise SyntaxError("Unexpected closing bracket ']'")
+                raise SyntaxError(f"Unexpected closing bracket '{token.raw}'")
             opening = open_tokens.pop()
+
+            if (opening.raw == "[" and token.raw != "]") or (opening.raw == "(" and token.raw != ")"):
+                raise SyntaxError(f"Mismatched closing bracket '{token.raw}' for opening '{opening.raw}'")
+
             nested_children = span_stack.pop()
-            parse_stack.pop()
+            popped_nested = parse_stack.pop()
+
+            if opening.raw == "(":
+                parse_stack[-1][-1] = ("sig", popped_nested)
+
             span_stack[-1].append(
                 StackVmAstSpan(
                     span=StackVmSourceSpan(
@@ -104,7 +112,8 @@ def parse_stackvm_source_with_spans(code: str) -> tuple[list[Any], list[StackVmA
         )
 
     if len(parse_stack) > 1:
-        raise SyntaxError("Missing closing bracket ']'")
+        opening = open_tokens[-1]
+        raise SyntaxError(f"Missing closing bracket for '{opening.raw}'")
     return ast, span_tree
 
 
@@ -172,6 +181,8 @@ def _serialize_stackvm_node(node: Any) -> str:
         raise TypeError(f"Unsupported StackVM AST node {node!r}")
 
     token_type, token_value = node
+    if token_type == "sig":
+        return f"( {' '.join(_serialize_stackvm_node(item) for item in token_value)} )"
     if token_type == "str":
         return json.dumps(str(token_value))
     if token_type == "bool":

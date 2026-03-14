@@ -1198,6 +1198,40 @@ Use `define-choice-finalize-family` plus `use-workflow-family` when a caller sho
 define-choice-finalize-family
 ```
 
+## Share Contract Blueprints Across Flows
+
+When multiple example families share identical routing options, match modes, and branch rules but differ in their prompts or delegate targets, wrap the choice builder in a parameterized `defmacro` blueprint.
+
+```text
+[ name payload_file delegate_target prompt_prefix ]
+[
+  [ name unquote ]
+  [ payload_file unquote ]
+  [ delegate_target unquote ]
+  [ [ drop "Delegate missing." answer ] ]
+  [ [ "Caller received: " swap concat ] ]
+  "buttons"
+  [ prompt_prefix unquote ]
+  "normalized.choice"
+  [
+    "approve" "Approve" "approve"
+    "reject" "Reject" "reject"
+  ]
+  [ ]
+  "exact"
+  [ ]
+  [
+    "approve" [ "approved" ]
+    "default" [ "rejected" ]
+  ]
+  define-choice-answer-family
+] syntax-quote "define-approve-reject-blueprint" defmacro
+
+"my-answer-flow" "payload.yaml" "router.delegate" "Choose action for " define-approve-reject-blueprint
+```
+
+This keeps `vm/common.vm` focused purely on flow-specific parameters while extracting the structural boilerplate into reusable templates. For cross-namespace reuse, place these blueprints in a shared module like `vm/stdlib/workflows.vm` and import them.
+
 The specialized choice-workflow builders are now the preferred caller/delegate surface for the checked-in prompt-return, checklist-return, multistage, and structured-return examples. Use `define-choice-answer-family`, `define-choice-continue-answer-family`, `define-choice-route-family`, and `define-choice-finalize-family` before falling back to generic workflow families. Keep named workflow specs for single-policy direct or delegate-only cases, inline `workflow-spec`, the lower-level workflow-contract macros, plus `caller-answer-workflow`, `caller-route-workflow`, and `caller-finalize-workflow` as role-specialized forms, or fall back to `normalized-return-flow` and `return-contract-flow` when you still need one generic caller-side return macro.
 
 ## Collect A Checklist, Prepare Derived Text, And Route By Membership

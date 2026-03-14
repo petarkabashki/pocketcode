@@ -481,3 +481,363 @@ def test_analyze_stackvm_ast_keeps_conservative_warning_for_shape_changing_while
         diagnostic["code"] == "dynamic-stack-shape" and diagnostic.get("word") == "while"
         for diagnostic in analysis["diagnostics"]
     )
+
+
+def test_analyze_stackvm_ast_respects_explicit_output_shape():
+    source = '[ 10 > ] ( int -- bool ) "is-big" define 5 is-big'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert analysis["word_metadata_summary"]["is-big"]["output_shape"] == ["bool"]
+
+def test_analyze_stackvm_ast_catches_signature_mismatch():
+    source = '[ 1 + ] ( int -- str ) "bad-sig" define'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 1
+    assert analysis["diagnostics"][0]["code"] == "signature-mismatch"
+
+def test_analyze_stackvm_ast_catches_signature_input_deficit():
+    # Body consumes 2 items (+) but signature only declares 1 input.
+    source = '[ + ] ( int -- int ) "bad-inputs" define'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(d["code"] == "signature-mismatch" and "inputs" in d["message"] for d in analysis["diagnostics"])
+
+def test_analyze_stackvm_ast_catches_signature_output_mismatch():
+    # Body leaves 1 item but signature declares 2 outputs.
+    source = '[ 1 ] ( -- int int ) "bad-outputs" define'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(d["code"] == "signature-mismatch" and "outputs" in d["message"] for d in analysis["diagnostics"])
+
+def test_collect_stackvm_authoring_warnings_flags_signature_mismatch():
+    source = '[ 1 + ] ( int -- str ) "bad-sig" define'
+    warnings = collect_stackvm_authoring_warnings(parse_stackvm_source(source))
+    assert any(w["code"] == "signature-mismatch" for w in warnings)
+
+def test_analyze_stackvm_ast_catches_unknown_dict_key():
+    source = '"{count: 7}" yaml> "{type: object, properties: {count: {type: integer}}}" yaml> schema-apply "success" dict-get? drop "value" dict-get? "scroe" dict-get?'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(diag["code"] == "unknown-dict-key" for diag in analysis["diagnostics"])
+
+def test_collect_stackvm_authoring_warnings_flags_nested_if_smell():
+    # 3 levels of nested if (0 -> 1 -> 2)
+    source = 'True [ True [ True [ "smell" ] [ "ok" ] if ] [ ] if ] [ ] if'
+    warnings = collect_stackvm_authoring_warnings(parse_stackvm_source(source))
+    assert any(w["code"] == "nested-if-smell" for w in warnings)
+
+def test_collect_stackvm_authoring_warnings_flags_manual_dict_get_chain():
+    source = 'dup "key1" dict-get? drop dup "key2" dict-get? drop'
+    warnings = collect_stackvm_authoring_warnings(parse_stackvm_source(source))
+    assert any(w["code"] == "manual-dict-get-chain" for w in warnings)
+
+
+def test_analyze_stackvm_ast_recursive_signature_validation():
+    # Recursive fact example using signature for recursive case analysis.
+    # Inside 'fact', the recursive call 'fact' uses the signature (1 pop, 1 push).
+    source = '[ dup 0 > [ 1 - fact * ] [ drop 1 ] if ] ( int -- int ) "fact" define'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert analysis["word_metadata_summary"]["fact"]["pops"] == 1
+    assert analysis["word_metadata_summary"]["fact"]["pushes"] == 1
+
+
+def test_analyze_stackvm_ast_nested_word_signatures():
+    # Defining and using a typed word inside another typed word.
+    source = '[ [ 1 + ] ( int -- int ) "inc" define inc inc ] ( int -- int ) "add-two" define'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert analysis["word_metadata_summary"]["inc"]["pops"] == 1
+    assert analysis["word_metadata_summary"]["add-two"]["pops"] == 1
+
+
+def test_analyze_stackvm_ast_catches_signature_mismatch_in_nested_word():
+    # Outer is fine, but inner has a mismatch (returns 2 items but declares 1).
+    source = '[ [ 1 2 ] ( -- int ) "broken-inner" define broken-inner ] ( -- int ) "outer" define'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(d["code"] == "signature-mismatch" and "broken-inner" in d["message"] for d in analysis["diagnostics"])
+
+
+def test_analyze_stackvm_ast_exhaustive_switch_via_enum():
+    # Define a schema with an enum, apply it, and verify switch handles it exhaustively.
+    source = (
+        '"{status: open}" yaml> '
+        '"{type: object, properties: {status: {type: string, enum: [open, closed]}}}" yaml> '
+        'schema-apply "value.status" get-in? '
+        '[ "open" [ 1 ] "closed" [ 2 ] ] switch'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    # If exhaustive, min depth should be 1 (both branches push 1)
+    assert analysis["final_min_stack_depth"] == 1
+    
+    merge_summary = next(s for s in analysis["scope_summaries"] if s.get("scope") == "main > switch:merge")
+    assert merge_summary["reason"] == "exhaustive-switch-merge"
+    assert merge_summary["precision"] == "merged"
+
+
+def test_analyze_stackvm_ast_non_exhaustive_switch_via_enum():
+    # Only 'open' is handled, but domain includes 'closed'.
+    source = (
+        '"{status: open}" yaml> '
+        '"{type: object, properties: {status: {type: string, enum: [open, closed]}}}" yaml> '
+        'schema-apply "value.status" get-in? '
+        '[ "open" [ 1 ] ] switch'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    # Non-exhaustive means min depth is 0 (the no-match path pushes nothing)
+    assert analysis["final_min_stack_depth"] == 0
+    
+    merge_summary = next(s for s in analysis["scope_summaries"] if s.get("scope") == "main > switch:merge")
+    assert merge_summary["reason"] == "optional-no-match-path"
+
+
+def test_analyze_stackvm_ast_exhaustive_match_via_enum():
+    source = (
+        '"{status: open}" yaml> '
+        '"{type: object, properties: {status: {type: string, enum: [open, closed]}}}" yaml> '
+        'schema-apply "value.status" get-in? '
+        '[ "open" [ 1 ] "closed" [ 2 ] ] match'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["final_min_stack_depth"] == 1
+    
+    merge_summary = next(s for s in analysis["scope_summaries"] if s.get("scope") == "main > match:merge")
+    assert merge_summary["reason"] == "exhaustive-match-merge"
+
+
+def test_analyze_stackvm_ast_catches_unknown_dict_key_via_path():
+    source = '"{count: 7}" yaml> "{type: object, properties: {count: {type: integer}}}" yaml> schema-apply "value.scroe" get-in?'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(diag["code"] == "unknown-dict-key" and "scroe" in diag["message"] for diag in analysis["diagnostics"])
+
+
+def test_analyze_stackvm_ast_reports_enum_metadata_in_stack_shape():
+    source = (
+        '"{status: open}" yaml> '
+        '"{type: object, properties: {status: {type: string, enum: [open, closed]}}}" yaml> '
+        'schema-apply "value.status" get-in?'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    # Variants are sorted alphabetically for stability: closed|open
+    assert analysis["final_stack_shape"] == ["str{closed|open}"]
+
+
+def test_analyze_stackvm_ast_reports_dict_keys_in_stack_shape():
+    source = (
+        '"{count: 7}" yaml> '
+        '"{type: object, properties: {count: {type: integer}}}" yaml> '
+        'schema-apply'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    # Keys are sorted alphabetically: errors, success, value
+    assert analysis["final_stack_shape"] == ["dict{errors:list,success:bool,value:dict}"]
+
+
+def test_analyze_stackvm_ast_validates_project_fields_paths():
+    # Verifies that project-fields macro usage flags typos in the source paths.
+    source = (
+        '"{count: 7}" yaml> "{type: object, properties: {count: {type: integer}}}" yaml> schema-apply '
+        '[ "value.scroe" "shared.count" 0 ] [ ] project-fields'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(diag["code"] == "unknown-dict-key" and "scroe" in diag["message"] for diag in analysis["diagnostics"])
+
+
+def test_analyze_stackvm_ast_tracks_handoff_rules_effects():
+    source = (
+        '[ [ "total" shared@ 10 >= ] "high" "router.high" [ True ] "low" "router.low" ] '
+        '"normalized.band" '
+        'handoff-rules'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "handoff" in analysis["effect_kinds"]
+    assert "state" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_handoff_switch_effects():
+    source = (
+        '[ "route" shared@ ] '
+        '[ "approve" "router.approve" "default" "router.review" ] '
+        'handoff-switch'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "handoff" in analysis["effect_kinds"]
+    # Exhaustive switch should leave min depth 0 if branches don't push anything
+    # value_expr pushes 1, switch pops 1.
+    assert analysis["final_min_stack_depth"] == 0
+
+
+def test_analyze_stackvm_ast_validates_validated_match_keys():
+    # Correct key 'count' should pass
+    source_ok = (
+        '"{count: 7}" yaml> "{type: object, properties: {count: {type: integer}}}" yaml> schema-apply '
+        '[ ] [ [ "{count: $c}" yaml> ] [ ] ] [ ] validated-match'
+    )
+    analysis_ok = analyze_stackvm_ast(parse_stackvm_source(source_ok), source=source_ok)
+    assert not any(diag["code"] == "unknown-dict-key" for diag in analysis_ok["diagnostics"])
+
+    # Incorrect key 'scroe' should trigger diagnostic
+    source_bad = (
+        '"{count: 7}" yaml> "{type: object, properties: {count: {type: integer}}}" yaml> schema-apply '
+        '[ ] [ [ "{scroe: $c}" yaml> ] [ ] ] [ ] validated-match'
+    )
+    analysis_bad = analyze_stackvm_ast(parse_stackvm_source(source_bad), source=source_bad)
+    assert any(diag["code"] == "unknown-dict-key" and "scroe" in diag["message"] for diag in analysis_bad["diagnostics"])
+
+
+def test_analyze_stackvm_ast_validates_schema_route_keys():
+    # Incorrect key 'ststus' should trigger diagnostic
+    source_bad = (
+        '"{status: open}" yaml> "{type: object, properties: {status: {type: string}}}" yaml> schema-apply '
+        '"errors" None [ [ "{ststus: open}" yaml> ] [ ] ] [ ] schema-route'
+    )
+    analysis_bad = analyze_stackvm_ast(parse_stackvm_source(source_bad), source=source_bad)
+    assert any(diag["code"] == "unknown-dict-key" and "ststus" in diag["message"] for diag in analysis_bad["diagnostics"])
+
+
+def test_analyze_stackvm_ast_tracks_prompt_route_effects():
+    source = (
+        '[ "{kind: buttons, prompt: Choose, options: [{id: ok, label: OK, value: ok}]}" yaml> ] '
+        '[ "ok" [ "approved" answer ] "default" [ "rejected" answer ] ] '
+        'prompt-route'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "prompt" in analysis["effect_kinds"]
+    assert "final" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_prompt_store_effects():
+    source = (
+        '[ "Proceed?" ] '
+        '"normalized.reply" '
+        '[ "Reply: " swap concat answer ] '
+        'prompt-store'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "prompt" in analysis["effect_kinds"]
+    assert "state" in analysis["effect_kinds"]
+    assert "final" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_stdlib_io_read_yaml_effects():
+    source = (
+        '"config.yaml" '
+        '[ last-tool-result failure? [ "bad" answer ] [ "ok" answer ] if ] '
+        'stdlib.io.read-yaml-file-once'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "tool" in analysis["effect_kinds"]
+    assert "final" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_workflow_builder_and_usage_effects():
+    # define-choice-answer-family takes 13 args
+    source = (
+        '"f" "p.yaml" "target" [ "missing" answer ] [ "val" ] '
+        '"buttons" "Ask " "choice" [ "ok" "OK" "ok" ] [ ] "exact" [ ] [ "ok" [ "done" ] ] '
+        'define-choice-answer-family '
+        '"f" "caller" "answer" use-workflow-family'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "prompt" in analysis["effect_kinds"]
+    assert "handoff" in analysis["effect_kinds"]
+    assert "final" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_record_fields_output():
+    source = (
+        '[ "{}" yaml> ] [ "key" "value" ] record-fields'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    # record-fields leaves a dict on stack
+    assert analysis["final_stack_shape"] == ["dict"]
+
+
+def test_analyze_stackvm_ast_validates_nested_match_keys():
+    # Schema with nested properties
+    source = (
+        '"{meta: {status: open}}" yaml> '
+        '"{type: object, properties: {meta: {type: object, properties: {status: {type: string}}}}}" yaml> '
+        'schema-apply [ ] '
+        '[ [ "{meta: {ststus: $s}}" yaml> ] [ ] ] [ ] validated-match'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(diag["code"] == "unknown-dict-key" and "ststus" in diag["message"] for diag in analysis["diagnostics"])
+
+
+def test_analyze_stackvm_ast_catches_unknown_nested_dict_key_via_path():
+    source = (
+        '"{meta: {status: open}}" yaml> '
+        '"{type: object, properties: {meta: {type: object, properties: {status: {type: string}}}}}" yaml> '
+        'schema-apply "value.meta.ststus" get-in?'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(diag["code"] == "unknown-dict-key" and "ststus" in diag["message"] for diag in analysis["diagnostics"])
+
+
+def test_analyze_stackvm_ast_tracks_return_answer_flow_effects():
+    source = (
+        '"p.yaml" [ "payload" store-set ] "target" [ "missing" answer ] [ "done" ] '
+        'return-answer-flow'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "tool" in analysis["effect_kinds"]
+    assert "handoff" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_validates_workflow_spec_keys():
+    source = '"my-spec" [ "unknown_key" 1 ] define-workflow-spec'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(diag["code"] == "unknown-workflow-key" and "unknown_key" in diag["message"] for diag in analysis["diagnostics"])
+
+
+def test_analyze_stackvm_ast_validates_workflow_family_sections():
+    source = '"my-family" [ "bad.section" [ ] ] define-workflow-family'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert any(diag["code"] == "unknown-workflow-key" and "bad.section" in diag["message"] for diag in analysis["diagnostics"])
+    assert "final" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_return_field_route_flow_effects():
+    source = (
+        '"p.yaml" [ "p" store-set ] "target" [ "m" answer ] '
+        '[ "r" "nr" None ] [ "nr" shared@ ] [ "ok" "r.ok" ] '
+        'return-field-route-flow'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "tool" in analysis["effect_kinds"]
+    assert "handoff" in analysis["effect_kinds"]
+    assert "state" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_return_flow_effects():
+    source = '"p.yaml" [ "load" ] "target" [ "resume" ] return-flow'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "tool" in analysis["effect_kinds"]
+    assert "handoff" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_ask_from_effects():
+    source = '[ "Proceed?" ] ask-from'
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "prompt" in analysis["effect_kinds"]
+
+
+def test_analyze_stackvm_ast_tracks_prompt_store_text_effects():
+    source = (
+        '[ "Review summary?" ] "reply" [ "User said: " swap concat answer ] '
+        'prompt-store-text'
+    )
+    analysis = analyze_stackvm_ast(parse_stackvm_source(source), source=source)
+    assert analysis["diagnostic_count"] == 0
+    assert "prompt" in analysis["effect_kinds"]
+    assert "state" in analysis["effect_kinds"]
+    assert "final" in analysis["effect_kinds"]

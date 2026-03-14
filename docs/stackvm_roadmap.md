@@ -60,9 +60,9 @@ The main gaps for stand-alone DSL use are:
 
 ## Phase 1: Typed Validation And Effect Analysis
 
-Priority: highest
+Status: ✅ Completed (Priority was: highest)
 
-This phase improves safety without changing the basic language model.
+This phase improves safety without changing the basic language model. All objectives achieved. Stack signatures, effect categories, static validation, and CLI inspection are fully integrated.
 
 ### Objectives
 
@@ -125,9 +125,9 @@ Likely additions:
 
 ## Phase 2: Declarative Data And Pattern Forms
 
-Priority: high
+Status: ✅ Completed (Priority was: high)
 
-This phase raises the DSL level so common DSL tasks do not require repetitive `dict-get?`, `get-in?`, `none?`, and `if` chains.
+This phase raises the DSL level so common DSL tasks do not require repetitive `dict-get?`, `get-in?`, `none?`, and `if` chains. All objectives achieved.
 
 ### Objectives
 
@@ -210,9 +210,9 @@ Implementation preference:
 
 ## Phase 3: Portable Host Effect ABI
 
-Priority: high
+Status: ✅ Completed (Priority was: high)
 
-Today the StackVM runtime is powerful largely because of PocketCoder-specific host words such as `tool-request`, `prompt-interaction`, `handoff`, `answer`, and `llm-call`.
+Today the StackVM runtime is powerful largely because of PocketCoder-specific host words such as `tool-request`, `prompt-interaction`, `handoff`, `answer`, and `llm-call`. All objectives achieved. The standalone adapter is extracted.
 
 That is useful for the current product, but it limits StackVM as a stand-alone language.
 
@@ -264,9 +264,9 @@ Possible refactor steps:
 
 ## Phase 4: Explainability And Developer Tooling
 
-Priority: medium
+Status: 🟡 Mostly Completed (Priority was: medium)
 
-This phase is about making the language operable at scale.
+This phase is about making the language operable at scale. (Missing: `/stackvm format` formatter and stylistic linter).
 
 ### Objectives
 
@@ -308,9 +308,9 @@ Files most likely to change:
 
 ## Phase 5: Standard Library And Packaging
 
-Priority: medium
+Status: 🟡 Partially Completed (Priority was: medium)
 
-If StackVM is going to be authored as a language rather than only an embedded feature, it needs a stable library and package model.
+If StackVM is going to be authored as a language rather than only an embedded feature, it needs a stable library and package model. (Missing: lockfiles and remote package fetching).
 
 ### Objectives
 
@@ -342,71 +342,87 @@ Open design questions:
 - canonical imports no longer depend on ad hoc file conventions alone
 - the standard library becomes the default place for common cookbook patterns
 
+## Phase 6: Explicit Type Signatures & Advanced Shape Inference
+
+Priority: medium
+
+The analyzer currently relies on replaying helper bodies against abstract stacks to infer shapes.
+
+### Objectives
+- Introduce an optional explicit signature syntax for `define` and `defmacro` (e.g., `( dict -- str ) "my-helper" define`).
+- Enhance structural inference for dicts, so the analyzer statically knows which keys exist after a `schema-apply` and can warn if a downstream `dict-get` requests a missing key.
+
+## Phase 7: Exhaustiveness Checking for `match` and `switch`
+
+Status: ✅ Completed (Priority was: medium)
+
+All objectives achieved. Static analysis now emits warnings for non-exhaustive switches/matches over enums.
+
+### Objectives
+- Enhance the static analyzer to perform enum exhaustiveness checking.
+- Suppress warnings for missing wildcards (`_`) or default cases if the analyzer statically knows a variable (e.g., an `enum: [approve, reject]`) is exhaustively handled by the existing branches.
+
+## Phase 8: Interactive REPL Evaluation in `/debug`
+
+Status: ✅ Completed (Priority was: low)
+
+All objectives achieved. The debugger now includes a `repl` command for live inspection.
+
+### Objectives
+- Enhance the interactive step debugger so users can evaluate arbitrary StackVM snippets against the live, paused `shared_store`.
+- Allow users to safely test what the stack *would* look like before resuming.
+
 ## Recommended Delivery Order
 
-The practical implementation order for this repository is:
+The practical implementation order for this repository moving forward (Day 2 initiatives) is:
 
-1. Phase 1: typed validation and effect analysis
-2. targeted CLI inspection improvements from Phase 4
-3. Phase 2: declarative data and pattern forms
-4. Phase 3: portable host effect ABI
-5. remaining Phase 4 tooling
-6. Phase 5: standard library and packaging
+1. Remaining Phase 4: StackVM Formatter and Linter
+2. Remaining Phase 5: Lockfiles & Remote Dependencies
+3. Phase 6: Explicit Type Signatures
+4. Phase 7: Exhaustiveness Checking
+5. Phase 8: Interactive Debugger REPL
 
 Rationale:
 
-- Phase 1 reduces runtime surprises immediately and strengthens every later feature
-- earlier CLI improvements make later language work easier to debug and review
-- Phase 2 increases language leverage once validation is strong enough
-- Phase 3 is easier once the runtime surface is better described and validated
-- packaging should come after the language surface is more stable
+- The formatter and linter will significantly improve developer experience on existing flows.
+- External packages unlock ecosystem growth.
+- Signatures and exhaustiveness checking add further compile-time safety to that growing ecosystem.
+- The REPL is a powerful quality-of-life feature once the language semantics are fully locked in.
 
-## Suggested PR Breakdown
+## Suggested PR Breakdown (Day 2)
 
-### PR 1: Metadata And Static Validation Foundation
+### PR 6: StackVM Formatter & Linter
 
 Scope:
-
-- introduce built-in word metadata
-- add validator support for stack/effect diagnostics
-- surface diagnostics in `/stackvm inspect`
-- document the current and new validation behavior
+- Add `/stackvm format <target>` to normalize whitespace, indentation, and bracket placement.
+- Expand `/stackvm check` to act as a stylistic linter for code smells.
 
 Implementation spec:
+- `stackvm_pr6_format_spec.md`
 
-- `stackvm_pr1_spec.md`
-
-### PR 2: Explainability Upgrade
-
-Scope:
-
-- improve macro expansion frame reporting
-- add a static `/stackvm check` command
-- improve debug output with stack diffs and effect summaries
-
-### PR 3: Declarative Data Core
+### PR 7: Lockfiles and External Dependencies
 
 Scope:
+- Introduce `pocketcode.lock.yaml` mechanism.
+- Enable `vm_modules` to reference remote Git repositories or a package registry.
 
-- add immutable collection primitives
-- add one or two high-value declarative macros
-- migrate at least one checked-in example family to the cleaner forms
-
-### PR 4: Pattern Matching
+### PR 8: Explicit Type Signatures
 
 Scope:
+- Parse signature blocks in `define` and `defmacro`.
+- Incorporate explicit signatures into `stackvm_validator.py` analysis.
 
-- add `match` or an equivalent pattern facility
-- add validator support and CLI explanation output for match failures
-- document matching semantics in the cookbook and macro docs
-
-### PR 5: Host ABI Extraction
+### PR 9: Exhaustiveness Checking
 
 Scope:
+- Enhance `stackvm_validator.py` to trace exhaustive variants.
+- Handle safe degradation of wildcard requirements for fully-covered enums.
 
-- introduce a host adapter interface
-- make the current engine the default adapter
-- simplify standalone script execution
+### PR 10: Interactive REPL in `/debug`
+
+Scope:
+- Hook into the paused state of `RunHandle` during `/debug`.
+- Evaluate short VM snippets on a cloned stack to preview mutations.
 
 ## Migration Strategy
 
@@ -431,10 +447,10 @@ StackVM will be materially more powerful as a stand-alone declarative DSL langua
 
 ## Immediate Next Step
 
-The recommended next implementation step is PR 1:
+The recommended next implementation step is PR 6:
 
-- define built-in word metadata
-- add a first validator pass for stack and effect analysis
-- expose the results through `/stackvm inspect`
+- Add `pocketcode/core/stackvm_formatter.py` to auto-format AST into normalized source.
+- Add the `/stackvm format` CLI command.
+- Add stylistic code-smell warnings to the validator.
 
-That work has the best cost-to-impact ratio and creates the foundation for the rest of the roadmap.
+This completes Phase 4 and immediately elevates the readability of existing and future StackVM code.

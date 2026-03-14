@@ -5,6 +5,8 @@ import logging
 import os
 import sys
 import time
+import asyncio
+import copy
 from typing import Any, Dict
 
 from dotenv import load_dotenv
@@ -27,6 +29,7 @@ from pocketcode.core.workspace_migration import (
     migrate_workspace,
 )
 from pocketcode.core.engine import PocketCodeEngine
+from pocketcode.core.agent_stack_vm import AgentStackVM
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +250,35 @@ def _run_debugger_prompt(*, handle: Any) -> None:
             predicate, label = predicate_config
             handle.continue_until_debugger(predicate, label=label)
             return
+        if normalized == "repl":
+            snippet = " ".join(parts[1:]).strip()
+            if not snippet:
+                print("[debug] Usage: repl <stackvm code>")
+                continue
+            active_vm = handle.get_active_vm()
+            if active_vm is None:
+                print("[debug] No active VM found to evaluate against.")
+                continue
+            # Clone stack for safety
+            try:
+                cloned_stack = copy.deepcopy(active_vm.stack)
+            except Exception:
+                # Fallback to shallow copy if deepcopy fails
+                cloned_stack = list(active_vm.stack)
+            
+            temp_vm = AgentStackVM(shared_store=active_vm.store)
+            temp_vm.stack = cloned_stack
+            # Copy words from active_vm, but don't overwrite temp_vm's own builtins
+            for name, func in active_vm.words.items():
+                if name not in temp_vm.words:
+                    temp_vm.words[name] = func
+            
+            try:
+                asyncio.run(temp_vm.eval(snippet))
+                print(f"[debug] REPL Stack: {temp_vm.stack}")
+            except Exception as exc:
+                print(f"[debug] REPL Error: {exc}")
+            continue
         if normalized in {"q", "quit", "cancel"}:
             if handle.cancel("Run cancelled from debugger."):
                 print("[debug] Cancellation requested.")

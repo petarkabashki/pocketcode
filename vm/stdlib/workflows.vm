@@ -1,0 +1,62 @@
+"stdlib.workflows" module
+
+! Standard Approve/Reject Answer Family Blueprint
+! Pre-fills options, exact match mode, and plain-answer result rules.
+[ name payload_file delegate_target missing_case caller_value_expr prompt_prefix ]
+[
+  [ name unquote ]
+  [ payload_file unquote ]
+  [ delegate_target unquote ]
+  [ missing_case unquote ]
+  [ caller_value_expr unquote ]
+  "buttons"
+  [ prompt_prefix unquote ]
+  "normalized.delegate_choice"
+  [
+    "approve" "Approve" "approve"
+    "reject" "Reject" "reject"
+  ]
+  [ ]
+  "exact"
+  [ ]
+  [
+    "approve" [ "approved" ]
+    "default" [ "rejected" ]
+  ]
+  define-choice-answer-family
+] syntax-quote "define-approve-reject-answer-family" defmacro
+
+! Standard Approve/Review Routing Family Blueprint
+! Pre-fills options, caller-side route mappings, and delegate-side returned field values.
+[ name payload_file delegate_target missing_case caller_field_specs caller_value_expr prompt_prefix delegate_base_expr ]
+[
+  [ name unquote ]
+  [ payload_file unquote ]
+  [ delegate_target unquote ]
+  [ missing_case unquote ]
+  [ caller_field_specs unquote ]
+  [ caller_value_expr unquote ]
+  [
+    "approve" "router.approve"
+    "default" "router.review"
+  ]
+  "radio"
+  [ prompt_prefix unquote ]
+  "normalized.delegate_choice"
+  [
+    "approve" "Approve" "approve"
+    "review" "Review" "review"
+  ]
+  [ ]
+  "exact"
+  [ ]
+  [ delegate_base_expr unquote ]
+  [
+    "approve" [ "route" "approve" ]
+    "default" [ "route" "review" ]
+  ]
+  define-choice-route-family
+] syntax-quote "define-approve-review-route-family" defmacro
+
+"define-approve-reject-answer-family" export
+"define-approve-review-route-family" export

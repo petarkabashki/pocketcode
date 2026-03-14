@@ -344,6 +344,64 @@ Checked-in consumers:
 - `examples/stackvm_nested_structured_return_example/`
 - `examples/stackvm_nested_structured_return_routing_example/`
 
+### `stdlib.workflows`
+
+Defined in `vm/stdlib/workflows.vm`.
+
+Exports:
+
+- `define-approve-reject-answer-family`
+- `define-approve-review-route-family`
+
+Current behavior:
+
+- These are parameterized macro blueprints that expand into `define-choice-answer-family` and `define-choice-route-family` with pre-filled option tables, match modes, and branch rules.
+- They allow multiple caller/delegate pairs to share identical contract shapes (like a routine approval loop) without duplicating the full choice builder configuration in every `vm/common.vm`.
+
+Example:
+
+```text
+"common" module
+"stdlib.workflows.define-approve-reject-answer-family" import
+
+"prompt-return-workflow"
+"payload.yaml"
+"router.delegate"
+[ drop "Delegate returned without an answer." answer ]
+[ "Caller received: " swap concat ]
+"Choose action for "
+define-approve-reject-answer-family
+```
+
+### `stdlib.workflows`
+
+Defined in `vm/stdlib/workflows.vm`.
+
+Exports:
+
+- `define-approve-reject-answer-family`
+- `define-approve-review-route-family`
+
+Current behavior:
+
+- These are parameterized macro blueprints that expand into `define-choice-answer-family` and `define-choice-route-family` with pre-filled option tables, match modes, and branch rules.
+- They allow multiple caller/delegate pairs to share identical contract shapes (like a routine approval loop) without duplicating the full choice builder configuration in every `vm/common.vm`.
+
+Example:
+
+```text
+"common" module
+"stdlib.workflows.define-approve-reject-answer-family" import
+
+"prompt-return-workflow"
+"payload.yaml"
+"router.delegate"
+[ drop "Delegate returned without an answer." answer ]
+[ "Caller received: " swap concat ]
+"Choose action for "
+define-approve-reject-answer-family
+```
+
 ## Current Scope
 
 The stdlib is still early-stage.

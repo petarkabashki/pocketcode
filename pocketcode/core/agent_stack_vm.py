@@ -110,9 +110,19 @@ class AgentStackVM:
     async def execute_word(self, word_name: str) -> None:
         if word_name not in self.words:
             raise ValueError(f"Unknown word: '{word_name}'")
-        stack_before = list(self.stack)
-        await self._call_word(self.words[word_name])
-        self._record_trace("word", word=word_name, stack_before=stack_before)
+            
+        run_handle = self.store.get("run_handle")
+        if run_handle is not None and hasattr(run_handle, "set_active_vm"):
+            run_handle.set_active_vm(self)
+            
+        try:
+            stack_before = list(self.stack)
+            await self._call_word(self.words[word_name])
+            self._record_trace("word", word=word_name, stack_before=stack_before)
+        finally:
+            if run_handle is not None and hasattr(run_handle, "set_active_vm"):
+                if run_handle.get_active_vm() is self:
+                    run_handle.set_active_vm(None)
 
     async def execute_ast(
         self,
@@ -121,49 +131,58 @@ class AgentStackVM:
         trace_spans: list[StackVmAstSpan] | None = None,
         authored_spans: list[StackVmAstSpan] | None = None,
     ) -> None:
-        for index, item in enumerate(ast):
-            trace_span = trace_spans[index] if trace_spans and index < len(trace_spans) else None
-            authored_span = authored_spans[index] if authored_spans and index < len(authored_spans) else None
-            if isinstance(item, list):
-                stack_before = list(self.stack)
-                if trace_span is not None and trace_span.children:
-                    self._quotation_trace_spans[id(item)] = list(trace_span.children)
-                if authored_span is not None and authored_span.children:
-                    self._quotation_authored_spans[id(item)] = list(authored_span.children)
-                self.stack.append(item)
-                self._record_trace(
-                    "push-quotation",
-                    value=item,
-                    trace_span=trace_span,
-                    authored_span=authored_span,
-                    stack_before=stack_before,
-                )
-                continue
-            token_type, token_value = item
-            if token_type in {"str", "int", "float", "bool", "none"}:
-                stack_before = list(self.stack)
-                self.stack.append(token_value)
-                self._record_trace(
-                    "push-literal",
-                    token_type=token_type,
-                    value=token_value,
-                    trace_span=trace_span,
-                    authored_span=authored_span,
-                    stack_before=stack_before,
-                )
-                continue
-            if token_type == "sym":
-                if token_value not in self.words:
-                    raise ValueError(f"Unknown word: '{token_value}'")
-                stack_before = list(self.stack)
-                await self._call_word(self.words[token_value])
-                self._record_trace(
-                    "word",
-                    word=token_value,
-                    trace_span=trace_span,
-                    authored_span=authored_span,
-                    stack_before=stack_before,
-                )
+        run_handle = self.store.get("run_handle")
+        if run_handle is not None and hasattr(run_handle, "set_active_vm"):
+            run_handle.set_active_vm(self)
+            
+        try:
+            for index, item in enumerate(ast):
+                trace_span = trace_spans[index] if trace_spans and index < len(trace_spans) else None
+                authored_span = authored_spans[index] if authored_spans and index < len(authored_spans) else None
+                if isinstance(item, list):
+                    stack_before = list(self.stack)
+                    if trace_span is not None and trace_span.children:
+                        self._quotation_trace_spans[id(item)] = list(trace_span.children)
+                    if authored_span is not None and authored_span.children:
+                        self._quotation_authored_spans[id(item)] = list(authored_span.children)
+                    self.stack.append(item)
+                    self._record_trace(
+                        "push-quotation",
+                        value=item,
+                        trace_span=trace_span,
+                        authored_span=authored_span,
+                        stack_before=stack_before,
+                    )
+                    continue
+                token_type, token_value = item
+                if token_type in {"str", "int", "float", "bool", "none"}:
+                    stack_before = list(self.stack)
+                    self.stack.append(token_value)
+                    self._record_trace(
+                        "push-literal",
+                        token_type=token_type,
+                        value=token_value,
+                        trace_span=trace_span,
+                        authored_span=authored_span,
+                        stack_before=stack_before,
+                    )
+                    continue
+                if token_type == "sym":
+                    if token_value not in self.words:
+                        raise ValueError(f"Unknown word: '{token_value}'")
+                    stack_before = list(self.stack)
+                    await self._call_word(self.words[token_value])
+                    self._record_trace(
+                        "word",
+                        word=token_value,
+                        trace_span=trace_span,
+                        authored_span=authored_span,
+                        stack_before=stack_before,
+                    )
+        finally:
+            if run_handle is not None and hasattr(run_handle, "set_active_vm"):
+                if run_handle.get_active_vm() is self:
+                    run_handle.set_active_vm(None)
 
     def _record_trace(
         self,
@@ -465,9 +484,9 @@ class AgentStackVM:
         self.stack.append(str(separator).join(str(value) for value in values))
 
     def _add(self) -> None:
-        right = self.stack.pop()
-        left = self.stack.pop()
-        self.stack.append(left + right)
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(a + b)
 
     def _subtract(self) -> None:
         right = self.stack.pop()

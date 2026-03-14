@@ -46,6 +46,7 @@ class RunHandle:
         self._debug_until_label: str | None = None
         self._debug_breakpoints: list[dict[str, Any]] = []
         self._debug_breakpoint_counter = 0
+        self._active_vm: Any | None = None
 
     def start(self, target: Any) -> None:
         self._thread = threading.Thread(target=target, daemon=True)
@@ -221,6 +222,14 @@ class RunHandle:
             return {}
         snapshot = provider()
         return dict(snapshot) if isinstance(snapshot, dict) else {"value": snapshot}
+
+    def set_active_vm(self, vm: Any) -> None:
+        with self._debug_condition:
+            self._active_vm = vm
+
+    def get_active_vm(self) -> Any | None:
+        with self._debug_condition:
+            return self._active_vm
 
     def step_debugger(self, count: int = 1) -> bool:
         budget = max(int(count or 1), 1)

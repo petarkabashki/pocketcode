@@ -187,6 +187,22 @@ def _resolve_standalone_host_config(
     )
 
 
+def _strip_signatures(ast: list[Any], spans: list[StackVmAstSpan]) -> tuple[list[Any], list[StackVmAstSpan]]:
+    new_ast = []
+    new_spans = []
+    for node, span in zip(ast, spans):
+        if isinstance(node, tuple) and node[0] == "sig":
+            continue
+        if isinstance(node, list):
+            nested_ast, nested_spans = _strip_signatures(node, list(span.children))
+            new_ast.append(nested_ast)
+            new_spans.append(StackVmAstSpan(span=span.span, children=tuple(nested_spans)))
+        else:
+            new_ast.append(node)
+            new_spans.append(span)
+    return new_ast, new_spans
+
+
 def compile_stackvm_program(
     *,
     source: str,
@@ -239,6 +255,14 @@ def compile_stackvm_program(
             source=serialize_stackvm_ast(analysis_ast),
             authored_spans=list(expanded.ast_spans),
         )
+        
+        stripped_ast, stripped_spans = _strip_signatures(expanded.ast, list(expanded.ast_spans))
+        expanded_ast = stripped_ast
+        authored_spans = stripped_spans
+        expanded_source = serialize_stackvm_ast(expanded_ast) if expanded_ast else ""
+        if expanded_source:
+            _, expanded_source_spans = parse_stackvm_source_with_spans(expanded_source)
+            
         used_macro_names = list(dict.fromkeys(expanded.expansion_trace))
         builtin_macro_names = [
             name

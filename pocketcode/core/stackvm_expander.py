@@ -31,6 +31,7 @@ class MacroDefinition:
         [dict[str, StackVmAstNode], dict[str, StackVmAstSpan], dict[str, int]],
         tuple[list[StackVmAstNode], list[StackVmAstSpan | None]],
     ] | None = None
+    explicit_signature: list[Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -259,6 +260,13 @@ def _consume_macro_definition(
 
     name_node = output.pop()
     output_spans.pop()
+
+    signature: list[Any] | None = None
+    if output and isinstance(output[-1], tuple) and output[-1][0] == "sig":
+        sig_node = output.pop()
+        output_spans.pop()
+        signature = sig_node[1]
+
     template_node = output.pop()
     output_spans.pop()
     template_mode = "plain"
@@ -296,6 +304,7 @@ def _consume_macro_definition(
         template=_clone_nodes(template_node),
         template_mode=template_mode,
         definition_span=definition_span,
+        explicit_signature=signature,
     )
 
 

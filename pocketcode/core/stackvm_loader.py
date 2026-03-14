@@ -8,6 +8,7 @@ from typing import Any, Sequence
 from pocketcode.core.markdown_assets import load_markdown_asset_document
 from pocketcode.core.stackvm_parser import parse_stackvm_source, serialize_stackvm_ast, strip_stackvm_comments
 from pocketcode.core.stackvm_stdlib_manifest import resolve_stackvm_stdlib_module_alias
+from pocketcode.core.stackvm_lockfile import is_remote_ref, resolve_remote_ref
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,9 @@ def _resolve_stackvm_ref(*, ref: str, base_dir: Path, search_roots: Sequence[Pat
     stdlib_alias_path = resolve_stackvm_stdlib_module_alias(cleaned, search_roots=roots)
     if stdlib_alias_path is not None:
         return stdlib_alias_path
+        
+    if is_remote_ref(cleaned):
+        return resolve_remote_ref(cleaned, base_dir)
     raw_path = Path(cleaned)
     candidates: list[Path] = []
     if raw_path.is_absolute():
@@ -164,6 +168,11 @@ def _build_module_definition(
 ) -> StackVmModuleDefinition:
     ast = parse_stackvm_source(source) if source.strip() else []
     module_name = _find_declared_module_name(ast)
+    if compatibility_prefix:
+        logger.warning(
+            f"StackVM loader is using deprecated compatibility_prefix '{compatibility_prefix}' for '{ref}'. "
+            "Please add an explicit 'module {name}' declaration to the source."
+        )
     if module_name and compatibility_prefix and module_name != compatibility_prefix:
         raise ValueError(
             f"StackVM module '{ref}' declares module name '{module_name}' but flow compatibility prefix is "

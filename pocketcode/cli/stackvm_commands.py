@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import re
+import shutil
+import textwrap
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+import pocketcode
+from pocketcode.core.stackvm_formatter import format_stackvm_source
 
 
 def handle_stackvm_command(args: list[str], engine: Any) -> Optional[str]:
@@ -54,6 +60,9 @@ def handle_stackvm_command(args: list[str], engine: Any) -> Optional[str]:
     if subcommand in {"inspect", "show"}:
         return _handle_stackvm_inspect(sub_args, engine)
 
+    if subcommand == "format":
+        return _handle_stackvm_format(sub_args, engine)
+
     if subcommand == "check":
         return _handle_stackvm_check(sub_args, engine)
 
@@ -68,9 +77,47 @@ def handle_stackvm_command(args: list[str], engine: Any) -> Optional[str]:
 
     if subcommand == "debug":
         return _handle_stackvm_run(sub_args, engine, debug=True)
+        
+    if subcommand == "example":
+        return _handle_stackvm_example(sub_args, engine)
 
     print(f"Unknown /stackvm subcommand: {subcommand}")
     print_stackvm_help()
+    return None
+
+
+def _handle_stackvm_format(args: list[str], engine: Any) -> Optional[str]:
+    if not args:
+        print("Usage: /stackvm format <path_to_file>")
+        return None
+
+    target_path = _resolve_input_file(args[0])
+    if not target_path.is_file():
+        print(f"Error: File not found: {target_path}")
+        return None
+
+    content = target_path.read_text(encoding="utf-8")
+    
+    if target_path.suffix.lower() == ".md":
+        # Replace content inside vm or stackvm blocks
+        def replacer(match: re.Match) -> str:
+            fence = match.group(1)
+            source = match.group(2)
+            formatted = format_stackvm_source(source)
+            return f"```{fence}\n{formatted}\n```"
+
+        # Matches ```vm ... ``` or ```stackvm ... ```
+        pattern = re.compile(r"```(vm|stackvm)\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
+        new_content = pattern.sub(replacer, content)
+    else:
+        new_content = format_stackvm_source(content)
+
+    if new_content != content:
+        target_path.write_text(new_content, encoding="utf-8")
+        print(f"Formatted {target_path}")
+    else:
+        print(f"{target_path} is already formatted.")
+    
     return None
 
 
@@ -789,6 +836,221 @@ def _handle_stackvm_run(args: list[str], engine: Any, *, debug: bool) -> Optiona
     return None
 
 
+def _get_examples_dir() -> Path:
+    return Path(pocketcode.__file__).resolve().parent.parent / "examples"
+
+
+def _parse_example_description(example_dir: Path) -> str:
+    readme_path = example_dir / "README.md"
+    if not readme_path.is_file():
+        return ""
+
+    try:
+        content = readme_path.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        description_lines = []
+
+        # Check for YAML front-matter description
+        if lines and lines[0].strip() == "---":
+            for line in lines[1:]:
+                if line.strip() == "---":
+                    break
+                if line.startswith("description:"):
+                    return line[len("description:"):].strip().strip("\"'")
+
+        # Fallback: find the first paragraph after headers
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines, headers, and list items
+            if not line or line.startswith("#") or line.startswith("---") or line.startswith("-") or line.startswith("Layout:"):
+                # If we have started collecting a paragraph, stop on next empty/header line
+                if description_lines:
+                    break
+                continue
+            description_lines.append(line)
+
+        return " ".join(description_lines)
+    except Exception:
+        return ""
+
+
+def _handle_stackvm_example(args: list[str], engine: Any) -> Optional[str]:
+    if not args:
+        print("Usage: /stackvm example <list|show|clone|run> [args...]")
+        return None
+
+    action = args[0].lower()
+    sub_args = args[1:]
+
+    if action == "list":
+        return _handle_stackvm_example_list(sub_args, engine)
+
+    if action == "clone":
+        return _handle_stackvm_example_clone(sub_args, engine)
+
+    if action == "show":
+        return _handle_stackvm_example_show(sub_args, engine)
+
+    if action == "run":
+        return _handle_stackvm_example_run(sub_args, engine)
+
+    print(f"Unknown example action: {action}")
+    return None
+
+
+def _handle_stackvm_example_list(args: list[str], engine: Any) -> Optional[str]:
+    examples_dir = _get_examples_dir()
+    if not examples_dir.is_dir():
+        print(f"Error: examples directory not found at {examples_dir}")
+        return None
+
+    examples = []
+    for item in examples_dir.iterdir():
+        if item.is_dir() and item.name.startswith("stackvm_"):
+            description = _parse_example_description(item)
+            examples.append((item.name, description))
+
+    if not examples:
+        print("No StackVM examples found.")
+        return None
+
+    print("StackVM Examples:")
+    for name, desc in sorted(examples):
+        print(f"  {name}")
+        if desc:
+            wrapped = textwrap.fill(desc, width=80, initial_indent="    ", subsequent_indent="    ")
+            print(f"{wrapped}")
+
+    return None
+
+
+def _handle_stackvm_example_clone(args: list[str], engine: Any) -> Optional[str]:
+    if not args:
+        print("Usage: /stackvm example clone <example_name> [target_namespace]")
+        return None
+
+    example_name = args[0]
+    target_namespace = args[1] if len(args) > 1 else example_name
+
+    source_dir = _get_examples_dir() / example_name
+
+    if not source_dir.is_dir():
+        print(f"Error: Example '{example_name}' not found.")
+        return None
+
+    import os
+    workspace_root = Path(getattr(engine, "_workspace_root", os.getcwd()))
+    target_dir = workspace_root / target_namespace
+
+    if target_dir.exists():
+        print(f"Error: Target directory '{target_dir}' already exists.")
+        return None
+
+    try:
+        shutil.copytree(source_dir, target_dir)
+        print(f"Successfully cloned '{example_name}' to '{target_dir}'.")
+        print("")
+        print("To enable this example, ensure it is added to your pocketcode.yml:")
+        print("runtime:")
+        print("  workspace_paths:")
+        print(f"    - {target_namespace}")
+
+        if hasattr(engine, "reload"):
+            engine.reload()
+            print("")
+            print("Workspace catalogs reloaded.")
+
+    except Exception as exc:
+        print(f"Failed to clone example: {exc}")
+
+    return None
+
+
+def _handle_stackvm_example_show(args: list[str], engine: Any) -> Optional[str]:
+    if not args:
+        print("Usage: /stackvm example show <example_name>")
+        return None
+
+    example_name = args[0]
+    source_dir = _get_examples_dir() / example_name
+
+    if not source_dir.is_dir():
+        print(f"Error: Example '{example_name}' not found.")
+        return None
+
+    print(f"Example: {example_name}")
+    print("=" * (9 + len(example_name)))
+
+    readme_path = source_dir / "README.md"
+    if readme_path.is_file():
+        content = readme_path.read_text(encoding="utf-8")
+        print("\n--- README.md ---")
+        print(content)
+        print("-----------------\n")
+
+    print("Files:")
+    for path in sorted(source_dir.rglob("*")):
+        if path.is_file():
+            rel_path = path.relative_to(source_dir)
+            print(f"  - {rel_path}")
+
+    return None
+
+
+def _handle_stackvm_example_run(args: list[str], engine: Any) -> Optional[str]:
+    if not args:
+        print("Usage: /stackvm example run <example_name> [--debug] [args...]")
+        return None
+
+    example_name = args[0]
+    example_dir = _get_examples_dir() / example_name
+
+    if not example_dir.is_dir():
+        print(f"Error: Example '{example_name}' not found.")
+        return None
+
+    config = getattr(engine, "_config", None) or getattr(engine, "config", None)
+    if not config or not hasattr(config, "runtime"):
+        print("Error: Could not access engine configuration to mount example.")
+        return None
+
+    original_paths = list(config.runtime.workspace_paths)
+
+    candidates = ["router.md", "decide.md", "main.md", f"{example_name}.md"]
+    entry_file = None
+    for candidate in candidates:
+        if (example_dir / candidate).is_file():
+            entry_file = example_dir / candidate
+            break
+
+    if not entry_file:
+        for path in sorted(example_dir.glob("*.md")):
+            name = path.name.lower()
+            if name == "readme.md" or name.endswith(".prompt.md") or name.endswith(".tool.md") or name.endswith(".agent.md"):
+                continue
+            entry_file = path
+            break
+
+    if not entry_file:
+        print(f"Error: Could not automatically discover a primary executable .md flow in '{example_name}'.")
+        return None
+
+    target_flow = f"{example_name}.{entry_file.stem}"
+
+    try:
+        config.runtime.workspace_paths.append(str(example_dir))
+        if hasattr(engine, "reload"):
+            engine.reload()
+
+        run_args = ["flow", target_flow] + args[1:]
+        debug_mode = "--debug" in args
+        return _handle_stackvm_run(run_args, engine, debug=debug_mode)
+
+    finally:
+        config.runtime.workspace_paths = original_paths
+        if hasattr(engine, "reload"):
+            engine.reload()
+
 def print_stackvm_help() -> None:
     text = """
 /stackvm Commands:
@@ -800,6 +1062,8 @@ def print_stackvm_help() -> None:
   /stackvm stdlib [list|show <module_name>|check]        Inspect or validate the shared StackVM stdlib manifest and modules.
   /stackvm inspect <flow|script|agent> <target> [--entry <word>]
                                                          Show compiled StackVM metadata, warnings, and expanded source.
+  /stackvm format <path_to_file>
+                                                         Normalize source layout and spacing for a .vm or .md file.
   /stackvm check <flow|script|agent> <target> [--entry <word>]
                                                          Run static StackVM compilation and analysis without execution.
   /stackvm explain <flow|script|agent> <target> [--entry <word>]
@@ -810,6 +1074,8 @@ def print_stackvm_help() -> None:
                                                          Execute and print the StackVM trace.
   /stackvm alter <flow|script|agent> <target> <source_file>
                                                          Replace a StackVM flow, script, or agent from a local file.
+  /stackvm example <list|show|clone|run> [args...]
+                                                         Discover, clone, and run StackVM orchestration examples.
   /stackvm help                                          Show this help message.
 """
     print(text)

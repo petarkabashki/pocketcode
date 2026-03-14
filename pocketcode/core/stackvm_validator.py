@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from pocketcode.core.stackvm_analysis import analyze_stackvm_ast
-from pocketcode.core.stackvm_parser import StackVmSourceToken, tokenize_stackvm_source
+from pocketcode.core.stackvm_parser import StackVmSourceToken, tokenize_stackvm_source, parse_stackvm_token
 
 STACKVM_COMPILE_ONLY_FORMS = {
     "defmacro",
@@ -24,23 +24,129 @@ def validate_stackvm_ast(ast: list[Any]) -> None:
 
 def collect_stackvm_authoring_warnings(ast: list[Any], *, source: str | None = None) -> list[dict[str, Any]]:
     if source:
+        # Source-based checks still use token-level scanning for now
         return _collect_source_authoring_warnings(source)
 
+    # Legacy manual traversal warnings
     warnings: list[dict[str, Any]] = []
     _collect_authoring_warnings(ast, warnings)
+    
+    # New full-analysis based diagnostics
+    analysis = analyze_stackvm_ast(ast)
+    analysis_diagnostics = analysis.get("diagnostics", [])
+    
+    # Merge, avoiding duplicates if any overlap exists
+    existing_codes = {w["code"] for w in warnings}
+    for diag in analysis_diagnostics:
+        if diag["code"] not in existing_codes:
+            warnings.append(diag)
+            
     return warnings
 
 
-def _collect_authoring_warnings(nodes: list[Any], warnings: list[dict[str, Any]]) -> None:
-    for start_index in range(max(len(nodes) - 3, 0)):
+def _collect_authoring_warnings(nodes: list[Any], warnings: list[dict[str, Any]], depth: int = 0) -> None:
+    found_codes = set()
+    for start_index in range(len(nodes)):
+        if _is_symbol(nodes[start_index], "define") or _is_symbol(nodes[start_index], "defmacro"):
+            _check_definition_signature(nodes, start_index, warnings)
+
         if _matches_manual_tool_loop(nodes, start_index):
-            warnings.append(_make_warning("manual-tool-loop"))
+            if "manual-tool-loop" not in found_codes:
+                warnings.append(_make_warning("manual-tool-loop"))
+                found_codes.add("manual-tool-loop")
         if _matches_manual_prompt_route(nodes, start_index):
-            warnings.append(_make_warning("manual-prompt-route"))
+            if "manual-prompt-route" not in found_codes:
+                warnings.append(_make_warning("manual-prompt-route"))
+                found_codes.add("manual-prompt-route")
+        if _matches_manual_dict_chain(nodes, start_index):
+            # Trigger the smell warning if the manual pattern is found repeatedly in this specific block
+            if sum(1 for i in range(len(nodes)) if _matches_manual_dict_chain(nodes, i)) >= 2:
+                if "manual-dict-get-chain" not in found_codes:
+                    warnings.append(_make_warning("manual-dict-get-chain"))
+                    found_codes.add("manual-dict-get-chain")
+        
+        if _is_complex_expression(nodes):
+            if "complex-expression-smell" not in found_codes:
+                warnings.append(_make_warning("complex-expression-smell"))
+                found_codes.add("complex-expression-smell")
+
+    # Check for missing module declaration if imports/exports are present
+    if any(_is_symbol(node, "import") or _is_symbol(node, "export") for node in nodes):
+        if not any(_is_symbol(node, "module") for node in nodes):
+            if "missing-module-declaration" not in found_codes:
+                warnings.append(_make_warning("missing-module-declaration"))
+                found_codes.add("missing-module-declaration")
+
+    # Style checks for nested-if-smell
+    if depth >= 2 and any(_is_symbol(node, "if") for node in nodes):
+        warnings.append(_make_warning("nested-if-smell"))
 
     for node in nodes:
         if isinstance(node, list):
-            _collect_authoring_warnings(node, warnings)
+            new_depth = depth + 1 if any(_is_symbol(n, "if") for n in nodes) else depth
+            _collect_authoring_warnings(node, warnings, new_depth)
+
+
+def _check_definition_signature(nodes: list[Any], index: int, warnings: list[dict[str, Any]]) -> None:
+    """Validates that a define/defmacro body matches its preceding ( in -- out ) signature."""
+    # Pattern: [body] (sig) "name" define
+    if index < 3:
+        return
+
+    name_node = nodes[index - 1]
+    sig_node = nodes[index - 2]
+    body_node = nodes[index - 3]
+
+    if not (isinstance(sig_node, tuple) and sig_node[0] == "sig" and isinstance(body_node, list)):
+        return
+
+    in_types, out_types = _parse_signature(sig_node[1])
+    
+    # Perform static analysis on the body quotation
+    analysis = analyze_stackvm_ast(body_node)
+    
+    # The analyzer reports how many items the block expects to pop (min_stack_depth)
+    # and what it leaves behind (final_stack_shape)
+    actual_pops = analysis.get("final_min_stack_depth", 0)
+    actual_pushes = len(analysis.get("final_stack_shape", []))
+
+    if actual_pops != len(in_types) or actual_pushes != len(out_types):
+        warnings.append(_make_warning("signature-mismatch"))
+
+
+def _parse_signature(sig_tokens: list[Any]) -> tuple[list[str], list[str]]:
+    """
+    Parses signature tokens into (inputs, outputs).
+    Example: ( int int -- str ) -> (['int', 'int'], ['str'])
+    """
+    in_types: list[str] = []
+    out_types: list[str] = []
+    target = in_types
+    
+    for token in sig_tokens:
+        # Handle symbol-wrapped types or raw strings
+        val = str(token[1]) if isinstance(token, tuple) else str(token)
+        if val == "--":
+            target = out_types
+            continue
+        # Filter out parentheses if they leaked into the token list
+        if val not in ("(", ")"):
+            target.append(val)
+            
+    return in_types, out_types
+
+
+def _matches_manual_dict_chain(nodes: list[Any], start_index: int) -> bool:
+    """Detects repetitive manual dict-get patterns that should use project-fields."""
+    if start_index + 2 >= len(nodes):
+        return False
+    
+    # Pattern: dup "key" dict-get?
+    return (
+        _is_symbol(nodes[start_index], "dup") and
+        isinstance(nodes[start_index + 1], tuple) and nodes[start_index + 1][0] == "str" and
+        (_is_symbol(nodes[start_index + 2], "dict-get") or _is_symbol(nodes[start_index + 2], "dict-get?"))
+    )
 
 
 def _validate_stackvm_node(node: Any) -> None:
@@ -53,6 +159,12 @@ def _validate_stackvm_node(node: Any) -> None:
         raise TypeError(f"Unsupported StackVM AST node {node!r}")
 
     token_type, token_value = node
+    if token_type == "sig":
+        if isinstance(token_value, list):
+            for item in token_value:
+                _validate_stackvm_node(item)
+        return
+
     if token_type == "sym" and str(token_value) in STACKVM_COMPILE_ONLY_FORMS:
         raise ValueError(f"StackVM compile-time form '{token_value}' cannot appear in executable AST.")
 
@@ -104,6 +216,18 @@ def _contains_symbol(node: Any, symbol_name: str) -> bool:
 
 def _is_symbol(node: Any, symbol_name: str) -> bool:
     return isinstance(node, tuple) and len(node) == 2 and node[0] == "sym" and str(node[1]) == symbol_name
+
+
+def _is_complex_expression(nodes: list[Any]) -> bool:
+    """Detects blocks with too many tokens and few structures."""
+    if len(nodes) < 15:
+        return False
+    
+    # Count structural nodes vs flat words
+    structure_count = sum(1 for node in nodes if isinstance(node, list) or (isinstance(node, tuple) and node[0] == "sig"))
+    if structure_count < 2:
+        return True
+    return False
 
 
 def _collect_source_authoring_warnings(source: str) -> list[dict[str, Any]]:
@@ -160,6 +284,30 @@ def _warning_message(code: str) -> str:
         return (
             "StackVM source uses the manual 'prompt-interaction' plus 'switch' routing pattern. "
             "Prefer the built-in 'prompt-route' macro for exact-match interaction routing."
+        )
+    if code == "nested-if-smell":
+        return (
+            "StackVM source uses deeply nested 'if' structures (> 2 levels). "
+            "Consider using 'cond', 'switch', or 'match' for better readability."
+        )
+    if code == "manual-dict-get-chain":
+        return (
+            "StackVM source uses repetitive manual 'dict-get' calls. "
+            "Consider using the 'project-fields' or 'project-shared' macros to normalize state."
+        )
+    if code == "signature-mismatch":
+        return (
+            "StackVM helper body stack effect does not match its explicit ( in -- out ) signature."
+        )
+    if code == "complex-expression-smell":
+        return (
+            "StackVM block contains a long sequence of tokens (> 15) without enough structure. "
+            "Consider breaking it into smaller helpers or using comments."
+        )
+    if code == "missing-module-declaration":
+        return (
+            "StackVM source uses 'import' or 'export' but does not declare a 'module'. "
+            "Add 'module {name}' at the top of the file."
         )
     raise ValueError(f"Unknown StackVM warning code {code!r}")
 
