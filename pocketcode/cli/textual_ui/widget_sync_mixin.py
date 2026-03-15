@@ -6,7 +6,7 @@ from typing import Iterable
 
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import ContentSwitcher
-from textual.widgets import Button, Input, OptionList, RichLog, Select, SelectionList, Static
+from textual.widgets import Button, Input, OptionList, Select, SelectionList, Static
 from textual.widgets.option_list import Option
 
 from .renderables import (
@@ -194,8 +194,8 @@ class TextualAppWidgetSyncMixin:
         cache_key = (self._cli_state.theme_name, selected_index, hovered_index, expanded_refs, blocks)
         if not force and self._output_render_cache == cache_key:
             return
-        output_widget = self.query_one("#output", RichLog)
-        output_widget.clear()
+        output_widget = self.query_one("#output", VerticalScroll)
+        output_widget.query("*").remove()
         palette = THEME_PALETTES.get(self._cli_state.theme_name) or next(iter(THEME_PALETTES.values()))
         renderables = render_output_blocks(
             blocks,
@@ -206,8 +206,11 @@ class TextualAppWidgetSyncMixin:
             expanded_block_refs=expanded_refs,
         )
         self._set_surface_render_spans("output", renderables, width=output_widget.content_region.width or output_widget.size.width)
-        for renderable in renderables:
-            output_widget.write(renderable, scroll_end=False)
+        for index, renderable in enumerate(renderables):
+            s = Static(renderable)
+            s.block_surface_id = "output"
+            s.block_index = index
+            output_widget.mount(s)
         output_widget.scroll_end(animate=False)
         self._output_render_cache = cache_key
 
@@ -218,8 +221,8 @@ class TextualAppWidgetSyncMixin:
         cache_key = (self._cli_state.theme_name, selected_index, hovered_index, expanded_refs, tuple(blocks))
         if not force and self._run_preview_render_cache == cache_key:
             return
-        preview_widget = self.query_one("#run-preview", RichLog)
-        preview_widget.clear()
+        preview_widget = self.query_one("#run-preview", VerticalScroll)
+        preview_widget.query("*").remove()
         palette = THEME_PALETTES.get(self._cli_state.theme_name) or next(iter(THEME_PALETTES.values()))
         renderables = render_output_blocks(
             blocks,
@@ -234,8 +237,11 @@ class TextualAppWidgetSyncMixin:
             renderables,
             width=preview_widget.content_region.width or preview_widget.size.width,
         )
-        for renderable in renderables:
-            preview_widget.write(renderable, scroll_end=False)
+        for index, renderable in enumerate(renderables):
+            s = Static(renderable)
+            s.block_surface_id = "run-preview"
+            s.block_index = index
+            preview_widget.mount(s)
         preview_widget.scroll_end(animate=False)
         self._run_preview_render_cache = cache_key
 
@@ -253,8 +259,8 @@ class TextualAppWidgetSyncMixin:
         cache_key = (self._cli_state.theme_name, selected_index, hovered_index, expanded_refs, tuple(blocks))
         if not force and getattr(self, cache_attr) == cache_key:
             return
-        widget = self.query_one(f"#{widget_id}", RichLog)
-        widget.clear()
+        widget = self.query_one(f"#{widget_id}", VerticalScroll)
+        widget.query("*").remove()
         palette = THEME_PALETTES.get(self._cli_state.theme_name) or next(iter(THEME_PALETTES.values()))
         renderables = render_output_blocks(
             blocks,
@@ -269,8 +275,11 @@ class TextualAppWidgetSyncMixin:
             renderables,
             width=widget.content_region.width or widget.size.width,
         )
-        for renderable in renderables:
-            widget.write(renderable, scroll_end=False)
+        for index, renderable in enumerate(renderables):
+            s = Static(renderable)
+            s.block_surface_id = widget_id
+            s.block_index = index
+            widget.mount(s)
         widget.scroll_end(animate=False)
         setattr(self, cache_attr, cache_key)
 

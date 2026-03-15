@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 
 from textual import events
+from textual.containers import VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Button, Input, OptionList, RichLog, SelectionList
+from textual.widgets import Button, Input, OptionList, SelectionList, Static
 
 from pocketcode.cli.user_interaction import interaction_placeholder
 from pocketcode.core.user_interaction import normalize_interaction_request
@@ -40,37 +41,68 @@ class TextualAppInteractionMixin:
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         control = getattr(event, "control", None)
-        if not isinstance(control, RichLog):
-            return
-        surface_id = control.id or ""
+        surface_id = None
+        block_index = None
+
+        if hasattr(control, "block_surface_id"):
+            surface_id = getattr(control, "block_surface_id")
+            block_index = getattr(control, "block_index")
+        elif isinstance(control, VerticalScroll) and control.id in EXPANDABLE_SURFACE_IDS:
+            surface_id = control.id
+
         if surface_id not in EXPANDABLE_SURFACE_IDS:
             return
-        control.focus()
+
+        target_surface = self.query_one(f"#{surface_id}", VerticalScroll)
+        if not target_surface.has_focus:
+            target_surface.focus()
         self._set_cli_focused_surface(surface_id)
-        content_offset = event.get_content_offset(control)
-        self._select_surface_block_from_pointer(
-            surface_id,
-            pointer_y=int(getattr(content_offset, "y", getattr(event, "y", 0))),
-            widget_height=max(1, control.content_region.height or control.size.height),
-            scroll_y=float(getattr(control, "scroll_y", 0.0)),
-        )
+
+        if block_index is not None:
+            compactable_indices = self._surface_compactable_block_indices(surface_id)
+            if block_index in compactable_indices:
+                self._set_selected_surface_block_if_needed(surface_id, block_index)
+        elif isinstance(control, VerticalScroll):
+            content_offset = event.get_content_offset(control)
+            self._select_surface_block_from_pointer(
+                surface_id,
+                pointer_y=int(getattr(content_offset, "y", getattr(event, "y", 0))),
+                widget_height=max(1, control.content_region.height or control.size.height),
+                scroll_y=float(getattr(control, "scroll_y", 0.0)),
+            )
 
     def on_mouse_move(self, event: events.MouseMove) -> None:
-        control = getattr(event, "control", None)
-        if not isinstance(control, RichLog):
-            self._set_hovered_block_if_needed(None)
+        if getattr(event, "button", 0) != 0:
             return
-        surface_id = control.id or ""
+
+        control = getattr(event, "control", None)
+        surface_id = None
+        block_index = None
+
+        if hasattr(control, "block_surface_id"):
+            surface_id = getattr(control, "block_surface_id")
+            block_index = getattr(control, "block_index")
+        elif isinstance(control, VerticalScroll) and control.id in EXPANDABLE_SURFACE_IDS:
+            surface_id = control.id
+
         if surface_id not in EXPANDABLE_SURFACE_IDS:
             self._set_hovered_block_if_needed(None)
             return
-        content_offset = event.get_content_offset(control)
-        line_number = int(max(0.0, float(getattr(control, "scroll_y", 0.0))) + max(0, int(getattr(content_offset, "y", 0))))
-        block_index = self._surface_block_index_from_line(surface_id, line_number)
+
+        if block_index is None and isinstance(control, VerticalScroll):
+            content_offset = event.get_content_offset(control)
+            line_number = int(max(0.0, float(getattr(control, "scroll_y", 0.0))) + max(0, int(getattr(content_offset, "y", 0))))
+            block_index = self._surface_block_index_from_line(surface_id, line_number)
+
         if block_index is None:
             self._set_hovered_block_if_needed(None)
             return
-        self._set_hovered_block_if_needed(f"{surface_id}:{block_index}")
+
+        compactable_indices = self._surface_compactable_block_indices(surface_id)
+        if block_index in compactable_indices:
+            self._set_hovered_block_if_needed(f"{surface_id}:{block_index}")
+        else:
+            self._set_hovered_block_if_needed(None)
 
     def on_leave(self, event: events.Leave) -> None:
         control = getattr(event, "control", None)
@@ -499,7 +531,7 @@ class TextualAppInteractionMixin:
 
     def action_clear_output(self) -> None:
         self._clear_console_state()
-        self.query_one("#output", RichLog).clear()
+        self.query_one("#output", VerticalScroll).query("*").remove()
         self._output_render_cache = None
         self._write_info("Cleared output.")
 
@@ -579,6 +611,19 @@ class TextualAppInteractionMixin:
             return "inspector-summary"
         return None
 
+    def _handle_surface_scroll_event(self, event: events.MouseEvent) -> None:
+        control = getattr(event, "control", None)
+        surface_id = None
+        if hasattr(control, "block_surface_id"):
+            surface_id = getattr(control, "block_surface_id")
+        elif isinstance(control, VerticalScroll) and control.id in EXPANDABLE_SURFACE_IDS:
+            surface_id = control.id
+
+        if surface_id not in EXPANDABLE_SURFACE_IDS:
+            return
+        self._set_cli_focused_surface(surface_id)
+        self.set_timer(0, lambda surface_id=surface_id: self._select_surface_block_from_scroll(surface_id))
+
     def _surface_blocks(self, surface_id: str) -> tuple:
         if surface_id == "output":
             return self._runtime_state.output_blocks
@@ -634,7 +679,7 @@ class TextualAppInteractionMixin:
             next_index = (current_index + direction) % len(surface_ids)
         else:
             next_index = 0 if direction > 0 else -1
-        self.query_one(f"#{surface_ids[next_index]}", RichLog).focus()
+        self.query_one(f"#{surface_ids[next_index]}", VerticalScroll).focus()
 
     def _cycle_surface_block_selection(self, *, direction: int) -> None:
         surface_id = self._resolve_expansion_surface_id()
@@ -655,15 +700,11 @@ class TextualAppInteractionMixin:
         self._set_cli_selected_surface_block(surface_id, compactable_indices[next_position])
         self._commit_ui_update()
 
-    def _handle_surface_scroll_event(self, event: events.MouseEvent) -> None:
-        control = getattr(event, "control", None)
-        if not isinstance(control, RichLog):
-            return
-        surface_id = control.id or ""
-        if surface_id not in EXPANDABLE_SURFACE_IDS:
-            return
-        self._set_cli_focused_surface(surface_id)
-        self.set_timer(0, lambda surface_id=surface_id: self._select_surface_block_from_scroll(surface_id))
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        self._handle_surface_scroll_event(event)
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        self._handle_surface_scroll_event(event)
 
     def _compactable_block_index_for_fraction(self, surface_id: str, fraction: float) -> int | None:
         compactable_indices = self._surface_compactable_block_indices(surface_id)
@@ -731,7 +772,7 @@ class TextualAppInteractionMixin:
         compactable_indices = self._surface_compactable_block_indices(surface_id)
         if not compactable_indices:
             return
-        widget = self.query_one(f"#{surface_id}", RichLog)
+        widget = self.query_one(f"#{surface_id}", VerticalScroll)
         viewport_height = max(1, widget.content_region.height or widget.size.height)
         virtual_height = max(viewport_height, int(getattr(widget.virtual_size, "height", viewport_height)))
         center_line = int(float(getattr(widget, "scroll_y", 0.0)) + (viewport_height / 2.0))

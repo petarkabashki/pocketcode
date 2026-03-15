@@ -38,5 +38,8 @@
   "/stackvm",
   "/stackvm list flows",
   "/stackvm run flow review",
-  "/stackvm run script examples/stackvm_example/vm/tool_loop.md"
+  "/stackvm run script examples/stackvm_example/vm/tool_loop.md",
+  "/stackvm example list",
+  "/stackvm example run stackvm_resilient_example",
+  "make a joke"
 ]

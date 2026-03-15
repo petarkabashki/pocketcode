@@ -1,0 +1,131 @@
+{
+  "session_id": "0314cc0bc96f448b8c6358d6f82ef04f",
+  "title": "Session 2026-03-15 01:37 UTC",
+  "created_at": "2026-03-15T01:37:19.106581+00:00",
+  "updated_at": "2026-03-15T01:37:31.057838+00:00",
+  "workspace_root": "/media/mu6mula/Data1/AI-Stuff/PocketCoder",
+  "active_agent": "core.react",
+  "active_profile": "my-react",
+  "enabled_skills": [
+    "pocketcode-namespace-authoring",
+    "pocketcode-profiles-prompts",
+    "pocketcode-tools-runtime",
+    "pocketcode-workspace-assets",
+    "pocketcode-workspace-builder"
+  ],
+  "global_llm_profile": "gemini-3-flash-preview",
+  "session_global_skills_override": [],
+  "session_profile_overrides": {},
+  "session_confirmation_overrides": {
+    "default_policy": null,
+    "tool_policies": {},
+    "agent_policies": {}
+  },
+  "debugger_breakpoints": [],
+  "transcript": [
+    {
+      "entry_id": "5f206549dca8472996e9ec8ac14961ce",
+      "timestamp": "2026-03-15T01:37:31.057689+00:00",
+      "role": "user",
+      "content": "make a joke",
+      "run_id": "3a424b92fb6046c0a2337c9965abff9f",
+      "metadata": {
+        "agent": "core.react"
+      }
+    },
+    {
+      "entry_id": "e013e18a1248411294482a92422bbfb2",
+      "timestamp": "2026-03-15T01:37:31.057835+00:00",
+      "role": "assistant",
+      "content": "Why do programmers prefer dark mode? Because light attracts bugs!",
+      "run_id": "3a424b92fb6046c0a2337c9965abff9f",
+      "metadata": {
+        "summary": {
+          "agent_path": [
+            "core.react"
+          ],
+          "current_agent": "core.react",
+          "active_skills": [
+            "pocketcode-namespace-authoring",
+            "pocketcode-profiles-prompts",
+            "pocketcode-tools-runtime",
+            "pocketcode-workspace-assets",
+            "pocketcode-workspace-builder"
+          ],
+          "current_llm_profile": null,
+          "current_llm_model": null,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_cost_usd": 0.0,
+          "vm_validation_warnings": [],
+          "vm_validation_warning_count": 0,
+          "vm_diagnostics": [],
+          "vm_diagnostic_count": 0,
+          "vm_effect_kinds": [],
+          "vm_max_stack_depth": 0,
+          "vm_final_min_stack_depth": 0,
+          "vm_final_stack_shape": [],
+          "vm_trace_scope_summaries": [],
+          "vm_trace_decisions": [],
+          "last_runtime_effect": null,
+          "last_vm_effect": null,
+          "last_vm_transition": null,
+          "runtime_effect_count": 0,
+          "runtime_effect_history": [],
+          "vm_effect_count": 0,
+          "vm_effect_history": [],
+          "stackvm_runtime": {
+            "path": "unknown",
+            "source": "unknown",
+            "standalone_session_active": false
+          },
+          "stackvm_static_runtime_correlation": {
+            "static_scope_count": 0,
+            "runtime_scope_count": 0,
+            "matched_scope_count": 0,
+            "matched_scopes": [],
+            "runtime_only_scopes": [],
+            "static_only_scopes": [],
+            "static_decision_scope_count": 0,
+            "runtime_decision_scope_count": 0,
+            "matched_decision_scope_count": 0,
+            "matched_decision_scopes": [],
+            "runtime_only_decision_scopes": [],
+            "static_only_decision_scopes": []
+          },
+          "standalone_session": null,
+          "context_stats": {
+            "files": 0,
+            "folders": 0,
+            "urls": 0,
+            "snippets": 0,
+            "snippet_chars": 0
+          },
+          "runtime_event_count": 3,
+          "step_count": 1,
+          "steps": [
+            {
+              "index": 1,
+              "kind": "agent_turn",
+              "label": "Agent turn: core.react",
+              "status": "completed",
+              "parent_step_index": null,
+              "duration_ms": 1881.857,
+              "summary": "Transition: final_answer",
+              "details": {
+                "agent": "core.react",
+                "execution_mode": "llm",
+                "outcome": {
+                  "transition": "final_answer"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

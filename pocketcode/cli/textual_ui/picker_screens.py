@@ -117,7 +117,6 @@ class AssetPickerScreen(ModalScreen[str | None]):
                 Option(
                     f"{'* ' if option.value == self._current_value else '  '}{option.label}"
                     + (f" [{option.description}]" if option.description else ""),
-                    id=option.value,
                 )
                 for option in matching_options
             ]
@@ -157,9 +156,11 @@ class AssetPickerScreen(ModalScreen[str | None]):
             self.action_submit()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option_list.id != "asset-picker-options" or event.option_id is None:
+        if event.option_list.id != "asset-picker-options":
             return
-        self.dismiss(str(event.option_id))
+        option_index = getattr(event, "option_index", None)
+        if option_index is not None and option_index < len(self._visible_values):
+            self.dismiss(str(self._visible_values[option_index]))
 
 
 class ToolSelectionScreen(ModalScreen[dict[str, Any] | None]):

@@ -219,20 +219,6 @@ def render_output_block(
     title = block.title or block.kind.capitalize()
     if block.kind == "code":
         return _make_code_renderable(block, palette, expanded=expanded, selected=selected, hovered=hovered)
-    if block.kind == "assistant":
-        return Panel(
-            _make_text(block.text, palette.text_primary),
-            title=title,
-            title_align="left",
-            border_style=palette.accent,
-        )
-    if block.kind == "user":
-        return Panel(
-            _make_text(block.text, palette.text_primary),
-            title=title,
-            title_align="left",
-            border_style=palette.info,
-        )
     if block.kind == "tool_call":
         result = _preview_result(block)
         return Panel(
@@ -261,9 +247,18 @@ def render_output_block(
         "warning": palette.warning,
         "runtime": palette.info,
         "info": palette.text_muted,
+        "user": palette.success,
+        "assistant": palette.accent,
     }.get(block.kind, palette.text_primary)
     text = Text(style=palette.text_primary)
-    text.append(f"{title.lower()}> ", style=f"bold {tone}")
+    
+    if block.kind == "user":
+        text.append("You>> ", style=f"bold {tone}")
+    elif block.kind == "assistant":
+        text.append("Assistant>> ", style=f"bold {tone}")
+    else:
+        text.append(f"{title.lower()}> ", style=f"bold {tone}")
+        
     text.append(block.text, style=palette.text_primary)
     return text
 

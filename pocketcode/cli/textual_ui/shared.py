@@ -87,7 +87,7 @@ def _theme_css(palette: TextualThemePalette) -> str:
         border: round {palette.input_border};
     }}
 
-    Screen.theme-{palette.name} RichLog:focus {{
+    Screen.theme-{palette.name} VerticalScroll:focus {{
         border: round {palette.input_border};
     }}
     """

@@ -9,7 +9,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import SuggestFromList
-from textual.widgets import Button, ContentSwitcher, Footer, Input, OptionList, RichLog, Select, SelectionList, Static
+from textual.widgets import Button, ContentSwitcher, Footer, Input, OptionList, Select, SelectionList, Static
 
 from pocketcode.cli.command_handler import list_command_suggestions
 from pocketcode.core.engine import PocketCodeEngine
@@ -433,7 +433,7 @@ class TextualAppBase(App[None]):
                 yield Static(id="view-title")
                 with ContentSwitcher(initial="view-chat", id="view-switcher"):
                     with Vertical(id="view-chat", classes="view"):
-                        yield RichLog(id="output", auto_scroll=False, wrap=True, markup=False)
+                        yield VerticalScroll(id="output")
                         with Vertical(id="inline-prompt-chat", classes="inline-prompt-controls hidden"):
                             yield Static("Input Required", id="inline-prompt-title-chat", classes="inline-prompt-title")
                             yield Static("", id="inline-prompt-prompt-chat", classes="inline-prompt-prompt")
@@ -483,7 +483,7 @@ class TextualAppBase(App[None]):
                             with Horizontal(id="debugger-inline-actions", classes="button-row"):
                                 yield Button("Add Breakpoint", id="debugger-inline-apply-button", variant="primary")
                                 yield Button("Cancel", id="debugger-inline-cancel-button")
-                        yield RichLog(id="run-preview", auto_scroll=False, wrap=True, markup=False)
+                        yield VerticalScroll(id="run-preview")
                         with Vertical(id="inline-prompt-run", classes="inline-prompt-controls hidden"):
                             yield Static("Input Required", id="inline-prompt-title-run", classes="inline-prompt-title")
                             yield Static("", id="inline-prompt-prompt-run", classes="inline-prompt-prompt")
@@ -500,13 +500,13 @@ class TextualAppBase(App[None]):
                 )
             with VerticalScroll(id="right-panel", classes="view"):
                 yield Static("Details", classes="panel-title")
-                yield RichLog(id="inspector-summary", auto_scroll=False, wrap=True, markup=False, classes="card")
+                yield VerticalScroll(id="inspector-summary", classes="card")
                 yield Static("Session Context", classes="section-title")
-                yield RichLog(id="inspector-context", auto_scroll=False, wrap=True, markup=False)
+                yield VerticalScroll(id="inspector-context")
                 yield Static("Session History", classes="section-title")
-                yield RichLog(id="inspector-sessions", auto_scroll=False, wrap=True, markup=False)
+                yield VerticalScroll(id="inspector-sessions")
                 yield Static("Prompt Sources", classes="section-title")
-                yield RichLog(id="inspector-prompts", auto_scroll=False, wrap=True, markup=False)
+                yield VerticalScroll(id="inspector-prompts")
         yield Static(id="footer-hint")
         yield Footer()
 
