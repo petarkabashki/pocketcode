@@ -4,11 +4,11 @@ This example shows a StackVM flow that reads a YAML payload through `core.read_f
 
 Layout:
 
-- `flows/*.md`: registers the StackVM router flow and the downstream delegates
-- `flows/router.md`: StackVM-backed aggregate-and-route flow that loads the shared workspace stdlib normalization module plus the local VM modules explicitly
-- `flows/low_route.py`: PocketFlow delegate for totals below the review threshold
-- `flows/review_route.py`: PocketFlow delegate for totals in the review band
-- `flows/high_route.py`: PocketFlow delegate for totals in the high band
+- `flows` (*.md): registers the StackVM router flow and the downstream delegates
+- `router.md`: StackVM-backed aggregate-and-route flow that loads the shared workspace stdlib normalization module plus the local VM modules explicitly
+- `low_route.py`: PocketFlow delegate for totals below the review threshold
+- `review_route.py`: PocketFlow delegate for totals in the review band
+- `high_route.py`: PocketFlow delegate for totals in the high band
 - `vm/common.vm`: local facade that re-exports `stdlib.normalize.tool-content-yaml` as `payload-data`
 - `vm/router.vm`: score normalization, aggregation, and threshold routing script using qualified `common.*` helper calls
 

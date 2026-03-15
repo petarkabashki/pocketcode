@@ -4,9 +4,9 @@ This example shows a StackVM caller/delegate pair where the caller normalizes to
 
 Layout:
 
-- `flows/*.md`: registers the caller and delegate StackVM flows
-- `flows/normalize.md`: StackVM caller flow that loads the shared workspace stdlib io and normalization modules, sets a return policy, and passes the delegate answer through
-- `flows/confirm_delegate.md`: StackVM delegate flow that collects a structured choice from one declarative decision table and answers directly
+- `flows` (*.md): registers the caller and delegate StackVM flows
+- `normalize.md`: StackVM caller flow that loads the shared workspace stdlib io and normalization modules, sets a return policy, and passes the delegate answer through
+- `confirm_delegate.md`: StackVM delegate flow that collects a structured choice from one declarative decision table and answers directly
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: caller script that uses `stdlib.io.read-yaml-file-once` for the file-loading turn, `return-delegate` for the pass-through return branch, and qualified `common.*` helper calls
 - `vm/delegate.vm`: delegate script that uses `workflow-spec` and returns a final answer string to the caller

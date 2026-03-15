@@ -1,13 +1,4 @@
 "common" module
-"stdlib.normalize.tool-content-yaml" import
-"stdlib.normalize.normalize-item-titles" "stdlib-normalize-item-titles" import
-"stdlib.normalize.store-normalized-source" "stdlib-store-normalized-source" import
-"stdlib.normalize.store-normalized-summary" "stdlib-store-normalized-summary" import
-
-[ tool-content-yaml ] "payload-data" define
-[ stdlib-normalize-item-titles ] "normalize-item-titles" define
-[ stdlib-store-normalized-source ] "store-normalized-source" define
-[ stdlib-store-normalized-summary ] "store-normalized-summary" define
 
 "buttons-workflow"
 "buttons_payload.yaml"
@@ -28,8 +19,3 @@
   "default" [ "Denied " "normalized.summary" shared@ concat answer ]
 ]
 define-choice-continue-spec
-
-"payload-data" export
-"normalize-item-titles" export
-"store-normalized-source" export
-"store-normalized-summary" export

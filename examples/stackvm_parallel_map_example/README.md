@@ -4,8 +4,8 @@ This example shows a StackVM flow that fans out over a fixed list with `parallel
 
 Layout:
 
-- `flows/*.md`: registers the StackVM flow
-- `flows/map.md`: StackVM-backed pure data transform flow
+- `flows` (*.md): registers the StackVM flow
+- `map.md`: StackVM-backed pure data transform flow
 - `vm/router.vm`: helper-word and `parallel-map` script
 
 The example demonstrates:

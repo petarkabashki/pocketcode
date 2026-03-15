@@ -1578,10 +1578,10 @@ def _expand_builtin_normalize_loaded_payload(
     _gensym_state: dict[str, int],
 ) -> tuple[list[StackVmAstNode], list[StackVmAstSpan | None]]:
     expanded = parse_stackvm_source(
-        'common.payload-data "payload" store-set '
-        '"payload" store-get common.normalize-item-titles '
-        '"payload" store-get common.store-normalized-source '
-        'common.store-normalized-summary'
+        'payload-data "payload" store-set '
+        '"payload" store-get normalize-item-titles '
+        '"payload" store-get store-normalized-source '
+        'store-normalized-summary'
     )
     return expanded, [None] * len(expanded)
 

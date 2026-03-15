@@ -69,6 +69,7 @@ from pocketcode.core.markdown_assets import (
     compile_markdown_agent_definition,
     compile_markdown_flow_definition,
     compile_markdown_tool_definition,
+    load_markdown_asset_document,
     parse_markdown_asset_text_document,
 )
 from pocketcode.cli.debugger_commands import build_debugger_predicate_from_label
@@ -1033,10 +1034,10 @@ class PocketCodeEngine:
                 vm_source=None,
                 vm_entry=script_entry,
                 vm_module=None,
-                vm_modules=[],
+                vm_modules=script_modules,
                 vm_module_prefixes={},
                 vm_file=str(script_path),
-                vm_files=[],
+                vm_files=script_files,
                 base_dir=script_path.parent,
                 search_roots=[script_path.parent, self._stackvm_script_root(), self._workspace_root],
             )
@@ -1138,15 +1139,32 @@ class PocketCodeEngine:
 
         if normalized_kind == "script":
             script_path = self._resolve_stackvm_script_path(target_name)
-            script_entry = normalized_entry or "main"
+            script_entry = normalized_entry
+            script_modules: list[str] = []
+            script_files: list[str] = []
+
+            if script_path.suffix.lower() == ".md":
+                try:
+                    document = load_markdown_asset_document(script_path)
+                    fm = document.front_matter or {}
+                    if not script_entry:
+                        script_entry = str(fm.get("vm_entry") or fm.get("entry") or "").strip()
+                    if fm.get("vm_modules"):
+                        script_modules.extend(coerce_str_list(fm.get("vm_modules")))
+                    if fm.get("vm_files"):
+                        script_files.extend(coerce_str_list(fm.get("vm_files")))
+                except Exception:
+                    logger.warning("Failed to parse front matter for script %s", script_path)
+
+            script_entry = script_entry or "main"
             source, source_files = load_stackvm_program_source(
                 vm_source=None,
                 vm_entry=script_entry,
                 vm_module=None,
-                vm_modules=[],
+                vm_modules=script_modules,
                 vm_module_prefixes={},
                 vm_file=str(script_path),
-                vm_files=[],
+                vm_files=script_files,
                 base_dir=script_path.parent,
                 search_roots=[script_path.parent, self._stackvm_script_root(), self._workspace_root],
             )
@@ -1168,7 +1186,9 @@ class PocketCodeEngine:
                 execution_mode="vm",
                 tools=sorted(self._catalog.tools.keys()),
                 vm_entry=script_entry,
-                vm_file=str(script_path),
+                vm_source=source,
+                vm_modules=[],
+                vm_files=[],
                 metadata={
                     "namespace": "__stackvm_cli__",
                     "namespace_root": str(script_path.parent),

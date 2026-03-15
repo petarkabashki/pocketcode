@@ -4,11 +4,11 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 
 Layout:
 
-- `flows/*.md`: registers the StackVM caller flow and the downstream delegates
-- `flows/normalize.md`: StackVM-backed normalization, checklist interaction, and routing flow loading the shared workspace stdlib io and normalization modules plus a local helper facade
-- `flows/delegate_route.py`: PocketFlow delegate for selections containing `delegate`
-- `flows/approve_route.py`: PocketFlow delegate for selections containing `approve` when `delegate` is absent
-- `flows/review_route.py`: PocketFlow delegate for remaining selections
+- `flows` (*.md): registers the StackVM caller flow and the downstream delegates
+- `normalize.md`: StackVM-backed normalization, checklist interaction, and routing flow loading the shared workspace stdlib io and normalization modules plus a local helper facade
+- `delegate_route.py`: PocketFlow delegate for selections containing `delegate`
+- `approve_route.py`: PocketFlow delegate for selections containing `approve` when `delegate` is absent
+- `review_route.py`: PocketFlow delegate for remaining selections
 - `vm/common.vm`: local helper module re-exporting the shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: normalization and checklist-driven handoff routing script using a continuation contract declared in `vm/common.vm` with `define-choice-continue-spec` and bound with `use-workflow-spec` plus qualified `common.*` helper calls
 

@@ -6,9 +6,9 @@ If the first-stage checklist does not include `delegate`, the caller finalizes d
 
 Layout:
 
-- `flows/*.md`: registers the caller and delegate StackVM flows
-- `flows/normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, collects checklist actions, and finalizes after the delegate returns
-- `flows/confirm_delegate.md`: delegate flow that collects a second structured decision from one declarative decision table
+- `flows` (*.md): registers the caller and delegate StackVM flows
+- `normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, collects checklist actions, and finalizes after the delegate returns
+- `confirm_delegate.md`: delegate flow that collects a second structured decision from one declarative decision table
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: caller script that binds the router half of `define-choice-continue-answer-family` for the file-loading, normalization, normalized-summary prompt, and first-stage checklist policy, then hands off or finalizes directly through qualified `common.*` helpers
 - `vm/delegate.vm`: delegate script that binds the delegate half of `define-choice-continue-answer-family`, asks the second question, and returns a final answer to the caller

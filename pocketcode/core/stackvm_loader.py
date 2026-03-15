@@ -155,6 +155,10 @@ def _read_stackvm_file(path: Path) -> str:
         ]
         if vm_sections:
             return "\n\n".join(vm_sections).strip()
+        # T011, T028: If this is an asset with front matter but no VM blocks, 
+        # return empty string to avoid treating body text as VM code.
+        if document.front_matter:
+            return ""
         return document.body.strip()
     return strip_stackvm_comments(path.read_text(encoding="utf-8")).strip()
 

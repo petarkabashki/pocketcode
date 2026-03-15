@@ -1,5 +1,5 @@
 ---
-name: {{name}}
+name: "{{name}}"
 description: Self-contained agent scaffold.
 execution_mode: vm
 vm_entry: main

@@ -1,0 +1,133 @@
+{
+  "session_id": "e93bf4e227bb464ea1ec418d2c1ea93c",
+  "title": "Session 2026-03-14 23:39 UTC",
+  "created_at": "2026-03-14T23:39:10.004325+00:00",
+  "updated_at": "2026-03-14T23:43:13.759984+00:00",
+  "workspace_root": "/media/mu6mula/Data1/AI-Stuff/PocketCoder",
+  "active_agent": "core.react",
+  "active_profile": "my-react",
+  "enabled_skills": [
+    "pocketcode-namespace-authoring",
+    "pocketcode-profiles-prompts",
+    "pocketcode-tools-runtime",
+    "pocketcode-workspace-assets",
+    "pocketcode-workspace-builder"
+  ],
+  "global_llm_profile": "gemini-3-flash-preview",
+  "session_global_skills_override": [],
+  "session_profile_overrides": {},
+  "session_confirmation_overrides": {
+    "default_policy": null,
+    "tool_policies": {
+      "core.list_files": "allow"
+    },
+    "agent_policies": {}
+  },
+  "debugger_breakpoints": [],
+  "transcript": [
+    {
+      "entry_id": "225ebe4e7a3445dcb864e4a4cc1c7d93",
+      "timestamp": "2026-03-14T23:43:13.759464+00:00",
+      "role": "user",
+      "content": "stackvm example list",
+      "run_id": "2eccfc78b5514e4f911b45afa637aeec",
+      "metadata": {
+        "agent": "core.react"
+      }
+    },
+    {
+      "entry_id": "cb7f8bbf362c4c3c9791673f6aacad96",
+      "timestamp": "2026-03-14T23:43:13.759970+00:00",
+      "role": "assistant",
+      "content": "The following stackvm examples are available in the `examples` directory:\n\n- stackvm_buttons_example\n- stackvm_checklist_handoff_example\n- stackvm_checklist_return_example\n- stackvm_config_router_example\n- stackvm_delegate_return_example\n- stackvm_example\n- stackvm_handoff_example\n- stackvm_macro_authoring_example\n- stackvm_multistage_pipeline_example\n- stackvm_nested_router_example\n- stackvm_nested_structured_return_example\n- stackvm_nested_structured_return_routing_example\n- stackvm_normalize_ask_example\n- stackvm_normalize_confirm_example\n- stackvm_normalize_handoff_example\n- stackvm_parallel_map_example\n- stackvm_parallel_tool_map_example\n- stackvm_prompt_return_example\n- stackvm_radio_example\n- stackvm_reduce_example\n- stackvm_reduce_numeric_example\n- stackvm_reduce_tool_example\n- stackvm_resilient_example\n- stackvm_structured_return_finalize_example\n- stackvm_structured_return_routing_example\n- stackvm_threshold_router_example\n- stackvm_tool_normalize_example",
+      "run_id": "2eccfc78b5514e4f911b45afa637aeec",
+      "metadata": {
+        "summary": {
+          "agent_path": [
+            "core.react"
+          ],
+          "current_agent": "core.react",
+          "active_skills": [
+            "pocketcode-namespace-authoring",
+            "pocketcode-profiles-prompts",
+            "pocketcode-tools-runtime",
+            "pocketcode-workspace-assets",
+            "pocketcode-workspace-builder"
+          ],
+          "current_llm_profile": null,
+          "current_llm_model": null,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_cost_usd": 0.0,
+          "vm_validation_warnings": [],
+          "vm_validation_warning_count": 0,
+          "vm_diagnostics": [],
+          "vm_diagnostic_count": 0,
+          "vm_effect_kinds": [],
+          "vm_max_stack_depth": 0,
+          "vm_final_min_stack_depth": 0,
+          "vm_final_stack_shape": [],
+          "vm_trace_scope_summaries": [],
+          "vm_trace_decisions": [],
+          "last_runtime_effect": null,
+          "last_vm_effect": null,
+          "last_vm_transition": null,
+          "runtime_effect_count": 0,
+          "runtime_effect_history": [],
+          "vm_effect_count": 0,
+          "vm_effect_history": [],
+          "stackvm_runtime": {
+            "path": "unknown",
+            "source": "unknown",
+            "standalone_session_active": false
+          },
+          "stackvm_static_runtime_correlation": {
+            "static_scope_count": 0,
+            "runtime_scope_count": 0,
+            "matched_scope_count": 0,
+            "matched_scopes": [],
+            "runtime_only_scopes": [],
+            "static_only_scopes": [],
+            "static_decision_scope_count": 0,
+            "runtime_decision_scope_count": 0,
+            "matched_decision_scope_count": 0,
+            "matched_decision_scopes": [],
+            "runtime_only_decision_scopes": [],
+            "static_only_decision_scopes": []
+          },
+          "standalone_session": null,
+          "context_stats": {
+            "files": 0,
+            "folders": 0,
+            "urls": 0,
+            "snippets": 0,
+            "snippet_chars": 0
+          },
+          "runtime_event_count": 4,
+          "step_count": 1,
+          "steps": [
+            {
+              "index": 1,
+              "kind": "agent_turn",
+              "label": "Agent turn: core.react",
+              "status": "completed",
+              "parent_step_index": null,
+              "duration_ms": 23188.934,
+              "summary": "Transition: final_answer",
+              "details": {
+                "agent": "core.react",
+                "execution_mode": "llm",
+                "outcome": {
+                  "transition": "final_answer"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

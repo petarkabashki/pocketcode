@@ -3,6 +3,9 @@ name: tool_loop
 ---
 
 ```vm
+[ request "request_text" store-set ] "bootstrap" define
+[ last-tool-result "content" dict-get ] "common.tool-content" define
+
 [ 
   bootstrap
   last-tool-result none?

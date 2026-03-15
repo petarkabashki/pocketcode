@@ -4,8 +4,8 @@ This example shows a StackVM flow that maps over a fixed list with `parallel-map
 
 Layout:
 
-- `flows/*.md`: registers the StackVM flow
-- `flows/summarize.md`: StackVM-backed map-and-reduce flow
+- `flows` (*.md): registers the StackVM flow
+- `summarize.md`: StackVM-backed map-and-reduce flow
 - `vm/router.vm`: helper words plus `parallel-map` and `reduce` pipeline
 
 The example demonstrates:

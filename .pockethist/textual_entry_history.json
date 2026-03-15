@@ -28,5 +28,15 @@
   "/agent help",
   "/",
   "/agents",
-  "/"
+  "/",
+  "/stackvm",
+  "/stackvm example list",
+  "/stackvm example run stackvm_buttons_example",
+  "/stackvm list help",
+  "stackvm example list",
+  "session",
+  "/stackvm",
+  "/stackvm list flows",
+  "/stackvm run flow review",
+  "/stackvm run script examples/stackvm_example/vm/tool_loop.md"
 ]

@@ -1,3 +1,5 @@
+"router" module
+
 [
   "confirm_payload.yaml"
   [
@@ -23,3 +25,5 @@
   ]
   stdlib.io.read-yaml-file-once
 ] "decide" define
+
+"decide" export

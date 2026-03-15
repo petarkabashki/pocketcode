@@ -273,10 +273,12 @@ Syntax:
 /stackvm stdlib check
 /stackvm inspect <flow|script|agent> <target> [--entry <word>]
 /stackvm check <flow|script|agent> <target> [--entry <word>]
+/stackvm format <flow|script|agent> <target> [--write]
 /stackvm explain <flow|script|agent> <target> [--entry <word>]
 /stackvm run <flow|script|agent> <target> [--input <text>] [--entry <word>] [--debug]
 /stackvm debug <flow|script|agent> <target> [--input <text>] [--entry <word>]
 /stackvm alter <flow|script|agent> <target> <source_file>
+/stackvm lock <target> [--remote]
 ```
 
 Behavior:
@@ -293,16 +295,18 @@ Behavior:
 - `stdlib check` validates each manifest-declared stdlib module against the actual checked-in module file, including declared module name, resolved file, exported names, and declared stdlib dependencies
 - StackVM source loading now also accepts manifest-backed stdlib aliases in `vm_modules`, such as `stdlib.io`, `stdlib.config`, `stdlib.normalize`, `stdlib.prompt`, and `stdlib.returns`; file-style refs like `vm/stdlib/io` remain supported for compatibility
 - `inspect` compiles the target, prints token count, source contributors, validation warnings, static diagnostics, effect summary, stdlib package usage summary, stack-depth summary, final stack-shape summary, and the expanded executable StackVM source
-- `check` compiles the target and prints the same warning, diagnostics, effect, host-surface, standalone-compatibility, stdlib package usage, stack, and final stack-shape summaries without executing the target
+- `check` compiles the target and prints the same warning, diagnostics, effect, host-surface, standalone-compatibility, stdlib package usage, stack, and final stack-shape summaries without executing the target; it now includes sophisticated "code smell" detectors for complex expressions, nested if-smells, and manual loop patterns, plus exhaustiveness checking for enum matches
+- `format` prints the pretty-printed StackVM source for the target; when `--write` is provided, it attempts to format the original source file (supported for `.vm` files)
+- `lock` generates or updates a `stackvm.lock` file for the workspace, pinning remote git dependencies to specific commits
 - `explain` compiles the target and prints the analysis summary together with macro expansion trace, recorded expansion frames, a high-level analysis-decisions section for merge reasons and precision limits, source-attributed scope summaries for region entry/exit and branch merges, a scoped static stack-shape flow trace grouped into regions such as `main`, helper calls, and branch/combinator children, inferred user-word contracts with host-surface summaries, stdlib package usage, PocketCoder-only host dependencies when present, final stack shape, warnings, diagnostics, and the expanded executable StackVM source; replayed helper-body steps now keep authored helper-definition locations even when there is no direct expanded-source token for that inner step
-- when a target requests `stdlib.*` refs that are not declared in `vm/stdlib/stdlib.yaml`, `inspect`, `check`, and `explain` now add a `stdlib-module-missing` warning and print the unresolved stdlib refs explicitly
+- when a target requests `stdlib.*` refs that are not declared in `vm/stdlib/stdlib.yaml`, `inspect`, `check`, and `explain` now add a `stdlib-module-missing` warning and print the unresolved stdlib refs explicitly; the checker also flags missing `module` declarations when `import` or `export` forms are used
 - `run` executes the requested target once and prints the final output plus any recorded warning count; flow and agent targets still use the normal agent runtime loop, while simple script targets now prefer a lightweight standalone VM adapter; the command now also prints compact runtime provenance from the run summary, including the execution path and runtime source; when the run summary carries standalone-session metadata, the command also prints a compact session line with session id, title, transcript size, and carried shared-state key count
 - `debug` is the same execution path as `run`, but also enables per-step VM tracing and first prints compact runtime provenance showing which execution path ran the target and whether standalone session context was active; it now also prints a compact static/runtime correlation block summarizing how many analyzed scopes and decision scopes matched the runtime trace; after that it prints compact runtime decisions for control-flow outcomes such as selected `if` branches, matched `switch` or `cond` cases, loop continuation or stop points, `match` results, and `fallback` activation; it then prints compact runtime scope summaries for nested regions such as `main`, `word:...`, branch bodies, and combinator children, and those scope lines now include matched static region predictions when the analyzer can correlate them; after that it prints grouped per-step trace sections for those scopes; each trace step now includes `stack_before`, `stack_delta`, and `stack_after` in addition to the legacy final `stack` snapshot, plus expanded-source `location` and authored-source `authored_location` when the executed node can be traced back to source, including replayed helper bodies, and the trace now appends the matched static stack shape when a runtime step can be correlated back to the static shape-flow analysis; when the run summary carries standalone session metadata, `debug` also prints a compact standalone-session section with session id, title, transcript size, and carried shared-state key count; the command also prints the recorded diagnostic count, inferred VM effect kinds, and final stack shape from the last run summary
 - direct `run` and `debug` executions currently force `auto_confirm_tools=True` for that invocation so StackVM CLI runs do not block on tool confirmation prompts
 - `alter flow` and `alter agent` delegate to the workspace Markdown asset updater
 - `alter flow` prints any StackVM authoring warnings returned by the post-update validation pass
 - `alter script` replaces a standalone `.vm` or `.md` script file from a local source file after compiling its VM body and now prints any returned validation warnings
-- direct script execution defaults to the `main` entry word when `--entry` is not provided
+- direct script execution defaults to the `main` entry word when `--entry` is not provided, but it now actively parses Markdown front matter for `vm_entry`, `vm_modules`, and `vm_files` when executing `.md` script files directly
 
 Current direct script execution behavior:
 
@@ -532,6 +536,7 @@ The interactive debugger currently supports:
 - `break <node|agent|tool|event|when> ...`: add a persistent breakpoint using the same predicate surface as `until`
 - `breaks`: list saved breakpoints for the active debug session
 - `clear <breakpoint_id>` or `clear all`: remove one or all saved breakpoints
+- `repl <snippet>`: evaluate an arbitrary StackVM snippet against the live, paused shared store and a clone of the active VM's stack
 - `status`: print the paused event plus a compact live runtime snapshot
 - `steps`: print the currently recorded step timeline
 - `quit`: cancel the run

@@ -4,12 +4,12 @@ This example shows a StackVM flow that reads YAML from the workspace, normalizes
 
 Layout:
 
-- `flows/*.md`: registers the VM router plus the delegate and fallback flows
-- `flows/router.md`: StackVM-backed routing flow loading the shared workspace stdlib io and config modules plus explicit local helper/router modules
+- `flows` (*.md): registers the VM router plus the delegate and fallback flows
+- `router.md`: StackVM-backed routing flow loading the shared workspace stdlib io and config modules plus explicit local helper/router modules
 - `vm/common.vm`: local helper module declaring the config schema and importing the shared `stdlib.config.tool-content-schema-apply` helper
 - `vm/router.vm`: orchestration script using `match`, `list-get?`, and explicit module imports over normalized config data
-- `flows/delegate.py`: PocketFlow delegate used when the config selects the primary route
-- `flows/fallback.py`: PocketFlow delegate used when the config disables routing or the tool request fails
+- `delegate.py`: PocketFlow delegate used when the config selects the primary route
+- `fallback.py`: PocketFlow delegate used when the config disables routing or the tool request fails
 
 The example demonstrates:
 

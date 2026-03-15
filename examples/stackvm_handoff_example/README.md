@@ -4,10 +4,10 @@ This example shows a StackVM-backed flow that hands off to another flow using th
 
 Layout:
 
-- `flows/*.md`: registers the VM flow and the delegate flow
-- `flows/router.md`: StackVM-backed entry flow
+- `flows` (*.md): registers the VM flow and the delegate flow
+- `router.md`: StackVM-backed entry flow
 - `vm/router.vm`: handoff-oriented StackVM words
-- `flows/delegate.py`: simple PocketFlow delegate used by the handoff
+- `delegate.py`: simple PocketFlow delegate used by the handoff
 
 The example demonstrates:
 

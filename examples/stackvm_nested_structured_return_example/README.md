@@ -4,9 +4,9 @@ This example shows a StackVM caller/delegate pair where the caller normalizes al
 
 Layout:
 
-- `flows/*.md`: registers the caller and VM delegate flows
-- `flows/normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, hands off, then resumes through the paired nested structured finalize workflow
-- `flows/confirm_delegate.md`: VM delegate flow that collects a structured choice from one declarative decision table and returns a nested YAML mapping string to the caller
+- `flows` (*.md): registers the caller and VM delegate flows
+- `normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, hands off, then resumes through the paired nested structured finalize workflow
+- `confirm_delegate.md`: VM delegate flow that collects a structured choice from one declarative decision table and returns a nested YAML mapping string to the caller
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: caller script that binds the caller half of `define-choice-finalize-family` for the full caller-side load, normalization, handoff, YAML resume protocol, nested field projection with defaults, and finalization policy, and calls qualified `common.*` helpers
 - `vm/delegate.vm`: delegate script that binds the delegate half of `define-choice-finalize-family`, collects a radio choice, declares nested returned fields as path/value specs, layers them onto a shared base mapping, and emits YAML at the answer boundary

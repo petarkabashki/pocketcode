@@ -51,6 +51,21 @@ Current rules:
 - imported macro names behave the same way as imported helper words because module linking happens before macro expansion
 - when a flow uses `vm_module_prefixes`, user-authored macro names from that module are rewritten to qualified names such as `common.read-file-once` during source assembly
 
+## Helper Word Signatures
+
+Helper words defined with `define` now support optional explicit type signatures. Signatures are written as a quotation containing the input and output stack effects, separated by `--`.
+
+```text
+[ dup 2 * ] ( int -- int ) "double" define
+```
+
+Valid signatures:
+- `( -- )` : no inputs, no outputs
+- `( int -- str )` : pops one `int`, pushes one `str`
+- `( a b -- result )` : pops two values, pushes one (names are for documentation only, kinds like `int`, `str`, `list`, `dict` are used for validation)
+
+The StackVM analyzer uses these signatures to perform static type checking and stack-depth validation. If no signature is provided, the analyzer attempts to infer the behavior conservatively.
+
 ## Modules
 
 StackVM still executes against one linked program, but loaded helper files can now declare explicit modules, exports, and imports:

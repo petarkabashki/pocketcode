@@ -4,12 +4,12 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 
 Layout:
 
-- `flows/*.md`: registers the StackVM normalization router plus enabled and disabled delegates
-- `flows/normalize.md`: StackVM-backed normalization-and-handoff flow loading the shared workspace stdlib io and normalization modules plus a local facade
+- `flows` (*.md): registers the StackVM normalization router plus enabled and disabled delegates
+- `normalize.md`: StackVM-backed normalization-and-handoff flow loading the shared workspace stdlib io and normalization modules plus a local facade
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: normalization script using `stdlib.io.read-yaml-file-once`, `parallel-map`, `switch`, and qualified `common.*` helper calls before handoff
-- `flows/enabled_delegate.py`: PocketFlow delegate for enabled normalized payloads
-- `flows/disabled_delegate.py`: PocketFlow delegate for disabled normalized payloads
+- `enabled_delegate.py`: PocketFlow delegate for enabled normalized payloads
+- `disabled_delegate.py`: PocketFlow delegate for disabled normalized payloads
 
 The example demonstrates:
 

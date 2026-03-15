@@ -4,9 +4,9 @@ This example shows a StackVM caller/delegate pair where the caller normalizes al
 
 Layout:
 
-- `flows/*.md`: registers the caller and checklist delegate StackVM flows
-- `flows/normalize.md`: StackVM caller flow that loads the shared workspace stdlib io and normalization modules and hands off with a return policy
-- `flows/checklist_delegate.md`: StackVM delegate flow that collects multiple selections from one declarative decision table
+- `flows` (*.md): registers the caller and checklist delegate StackVM flows
+- `normalize.md`: StackVM caller flow that loads the shared workspace stdlib io and normalization modules and hands off with a return policy
+- `checklist_delegate.md`: StackVM delegate flow that collects multiple selections from one declarative decision table
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: caller script that binds a paired checklist answer workflow declared in `vm/common.vm` through `define-choice-answer-family`, covering the full caller-side load, normalization, handoff, and answer-composition protocol, and calls qualified `common.*` helpers
 - `vm/delegate.vm`: delegate script that binds the same `define-choice-answer-family` contract with `contains` matching and `kind: checklist`

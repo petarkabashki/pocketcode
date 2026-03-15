@@ -345,6 +345,12 @@ You are an echo bot.
 ```
 ```
 
+### Standalone Markdown Scripts
+
+Standalone `.md` scripts (run via `/stackvm run script path/to/script.md`) can also include front matter to configure their StackVM execution environment.
+
+If front matter is present, the script runner parses `vm_entry`, `vm_modules`, and `vm_files` just like a flow definition, allowing standalone scripts to resolve external sub-modules and custom entry points. The `vm` block contains the script body.
+
 Current load and save behavior:
 
 - workspace agents load from recursive `agents/` collections and grouped `agent.<group>/` collections

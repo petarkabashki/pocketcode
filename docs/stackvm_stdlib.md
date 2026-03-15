@@ -95,7 +95,7 @@ Current validation output reports:
 - per-module validity plus any warnings or errors
 - per-module declared and actual dependency sets through the returned payload
 
-This is still a workspace-local package model. There is no registry or lockfile yet, but the manifest now serves as an enforceable declaration of the checked-in stdlib surface.
+This is a workspace-local package model. The runtime now supports a `stackvm.lock` file to pin remote git dependencies, and the manifest serves as an enforceable declaration of the checked-in stdlib surface.
 
 ## Package Style
 
@@ -406,18 +406,18 @@ define-approve-reject-answer-family
 
 The stdlib is still early-stage.
 
-What is checked in today:
+What is implemented today:
 
 - a shared package location under workspace-root `vm/stdlib/`
 - explicit-module authoring with exports/imports
 - reusable io, config, normalization, prompt-construction, and return-parsing modules
 - checked-in example usage across config-routing, prompt/interaction, delegate-return, structured-return, and multistage pipeline examples
+- a `stackvm.lock` file model for pinning remote git dependencies
 
 What is not implemented yet:
 
-- versioned package metadata
-- dependency manifests beyond `vm_modules`
-- a package manager or lockfile
+- versioned package metadata (semantic versioning enforcement)
+- a central package registry (currently rely on git refs)
 - a large multi-module standard library
 
 For now, treat `vm/stdlib/` as the canonical place for stable reusable StackVM helper modules that are broader than one flow namespace.

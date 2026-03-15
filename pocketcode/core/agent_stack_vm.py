@@ -179,6 +179,8 @@ class AgentStackVM:
                         authored_span=authored_span,
                         stack_before=stack_before,
                     )
+        except Exception as exc:
+            raise
         finally:
             if run_handle is not None and hasattr(run_handle, "set_active_vm"):
                 if run_handle.get_active_vm() is self:

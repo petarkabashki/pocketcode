@@ -4,12 +4,12 @@ This example shows a StackVM flow that reads nested YAML config, normalizes it t
 
 Layout:
 
-- `flows/*.md`: registers the VM router plus the delegate and fallback flows
-- `flows/router.md`: StackVM-backed routing flow that loads the shared workspace stdlib io and config modules plus the local router modules explicitly
+- `flows` (*.md): registers the VM router plus the delegate and fallback flows
+- `router.md`: StackVM-backed routing flow that loads the shared workspace stdlib io and config modules plus the local router modules explicitly
 - `vm/common.vm`: declared helper module that defines the nested schema and applies `stdlib.config.tool-content-schema-apply` under `common.*`
 - `vm/router.vm`: orchestration script using `match`, `list-get?`, `set-in?`, and qualified `common.*` helper calls over normalized nested config data
-- `flows/delegate.py`: PocketFlow delegate used when the nested config selects the primary route
-- `flows/fallback.py`: PocketFlow delegate used when nested routing is disabled or missing
+- `delegate.py`: PocketFlow delegate used when the nested config selects the primary route
+- `fallback.py`: PocketFlow delegate used when nested routing is disabled or missing
 
 The example demonstrates:
 

@@ -4,8 +4,8 @@ This example shows a StackVM flow that reads a YAML payload through `core.read_f
 
 Layout:
 
-- `flows/*.md`: registers the StackVM flow
-- `flows/map.md`: StackVM-backed tool-first mapping flow that loads the shared workspace stdlib normalization module plus the local VM modules explicitly
+- `flows` (*.md): registers the StackVM flow
+- `map.md`: StackVM-backed tool-first mapping flow that loads the shared workspace stdlib normalization module plus the local VM modules explicitly
 - `vm/common.vm`: local facade that re-exports `stdlib.normalize.tool-content-yaml` as `payload-data`
 - `vm/router.vm`: tool-result loading and `parallel-map` script using qualified `common.*` helper calls
 

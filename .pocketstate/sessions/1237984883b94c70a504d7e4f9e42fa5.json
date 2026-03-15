@@ -1,0 +1,26 @@
+{
+  "session_id": "1237984883b94c70a504d7e4f9e42fa5",
+  "title": "Session 2026-03-15 00:38 UTC",
+  "created_at": "2026-03-15T00:38:36.734402+00:00",
+  "updated_at": "2026-03-15T00:38:36.734445+00:00",
+  "workspace_root": "/media/mu6mula/Data1/AI-Stuff/PocketCoder",
+  "active_agent": "core.react",
+  "active_profile": "my-react",
+  "enabled_skills": [
+    "pocketcode-namespace-authoring",
+    "pocketcode-profiles-prompts",
+    "pocketcode-tools-runtime",
+    "pocketcode-workspace-assets",
+    "pocketcode-workspace-builder"
+  ],
+  "global_llm_profile": "gemini-3-flash-preview",
+  "session_global_skills_override": [],
+  "session_profile_overrides": {},
+  "session_confirmation_overrides": {
+    "default_policy": null,
+    "tool_policies": {},
+    "agent_policies": {}
+  },
+  "debugger_breakpoints": [],
+  "transcript": []
+}

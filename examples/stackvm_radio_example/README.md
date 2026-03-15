@@ -4,8 +4,8 @@ This example shows a StackVM flow that reads YAML through a tool, normalizes all
 
 Layout:
 
-- `flows/*.md`: registers the StackVM normalization flow
-- `flows/normalize.md`: StackVM-backed normalization, radio interaction, and answer flow loading the shared workspace stdlib io and normalization modules plus a local facade
+- `flows` (*.md): registers the StackVM normalization flow
+- `normalize.md`: StackVM-backed normalization, radio interaction, and answer flow loading the shared workspace stdlib io and normalization modules plus a local facade
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: normalization script using a direct continuation contract declared in `vm/common.vm` with `define-choice-continue-spec` and bound with `use-workflow-spec` plus qualified `common.*` helper calls
 

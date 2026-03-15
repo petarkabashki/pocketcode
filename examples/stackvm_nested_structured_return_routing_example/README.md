@@ -4,12 +4,12 @@ This example shows a StackVM caller/delegate pair where the caller normalizes al
 
 Layout:
 
-- `flows/*.md`: registers the caller flow, VM delegate, and final route delegates
-- `flows/normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, hands off, then resumes through the paired nested structured route workflow
-- `flows/confirm_delegate.md`: VM delegate flow that collects a structured choice from one declarative decision table and returns a nested YAML mapping string to the caller
-- `flows/approve_route.py`: PocketFlow delegate for approve decisions
-- `flows/escalate_route.py`: PocketFlow delegate for escalate decisions
-- `flows/review_route.py`: PocketFlow delegate for review decisions
+- `flows` (*.md): registers the caller flow, VM delegate, and final route delegates
+- `normalize.md`: caller flow that loads the shared workspace stdlib io and normalization modules, hands off, then resumes through the paired nested structured route workflow
+- `confirm_delegate.md`: VM delegate flow that collects a structured choice from one declarative decision table and returns a nested YAML mapping string to the caller
+- `approve_route.py`: PocketFlow delegate for approve decisions
+- `escalate_route.py`: PocketFlow delegate for escalate decisions
+- `review_route.py`: PocketFlow delegate for review decisions
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: caller script that binds the caller half of `define-choice-route-family` for the full caller-side load, normalization, handoff, YAML resume protocol, nested field projection with defaults, and final routing policy, and calls qualified `common.*` helpers
 - `vm/delegate.vm`: delegate script that binds the delegate half of `define-choice-route-family`, collects a radio choice, declares nested returned fields as path/value specs, layers them onto a shared base mapping, and emits YAML at the answer boundary

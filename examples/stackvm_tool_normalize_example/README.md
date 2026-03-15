@@ -4,8 +4,8 @@ This example shows a StackVM flow that reads a YAML payload through the shared `
 
 Layout:
 
-- `flows/*.md`: registers the VM normalization flow
-- `flows/normalize.md`: StackVM-backed normalization flow loading the shared workspace stdlib io and normalization modules plus a local facade
+- `flows` (*.md): registers the VM normalization flow
+- `normalize.md`: StackVM-backed normalization flow loading the shared workspace stdlib io and normalization modules plus a local facade
 - `vm/common.vm`: local helper facade that re-exports shared `stdlib.normalize` helpers under `common.*`
 - `vm/router.vm`: normalization script using `stdlib.io.read-yaml-file-once`, `parallel-map`, `get-in?`, `bool>`, `shared!?`, and qualified `common.*` helper calls
 

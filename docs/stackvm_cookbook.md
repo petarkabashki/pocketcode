@@ -89,17 +89,24 @@ restored = restore_stackvm_standalone_session(
 
 Use `restore_stackvm_standalone_session_target(...)` when the program should be rebuilt from loader fields at restore time instead of reusing an already-created runtime.
 
-## Choose Between Helper Words And Macros
-
-Prefer the smallest mechanism that matches the job:
-
-- use `define` for reusable runtime helpers, especially repeated YAML literals, parsing steps, and shared-state normalization
-- use a built-in macro for a recurring authoring pattern that already has a stable expansion, such as `tool-once`, `prompt-route`, `delegate-return`, or `finalize-from`
-- use `defmacro` when you need a new postfix authoring surface over ordinary StackVM AST
-
-Prefer explicit StackVM modules with `module`, `export`, and `import` when helpers are meant to be reused across files. Keep `vm_module_prefixes` for compatibility with older helper modules that still rely on automatic qualification. When a helper should be reused across multiple namespaces, place it under workspace-root `vm/stdlib/` instead of copying it into each flow namespace, and load it by its manifest-backed package name such as `stdlib.io` or `stdlib.normalize`.
-
 If the repeated part is mostly data, especially a YAML literal, keep it in a helper word. If the repeated part is mostly control-flow shape, prefer a macro.
+
+## Define Helpers with Explicit Signatures
+
+Use explicit signatures with `define` to enable better static analysis and documentation of your helpers.
+
+```text
+[ dup 0 > [ 1 - fact * ] [ drop 1 ] if ]
+( int -- int )
+"fact"
+define
+```
+
+The signature `( in -- out )` tells the analyzer:
+- How many items the helper expects to pop (`in`).
+- How many items it pushes back (`out`).
+
+If the actual body does not match the signature, `/stackvm check` will emit a `signature-mismatch` warning. This also enables the analyzer to track stack shapes through recursive calls.
 
 ## Guard A Branch With `when`
 
@@ -152,6 +159,21 @@ switch
 
 `switch` checks exact matches first and only runs the optional `"default"` case when no earlier case matched.
 
+### Enum Exhaustiveness in `switch`
+
+When the subject of a `switch` is an enum (e.g., from a schema-validated field), the analyzer checks if all possible values are covered.
+
+```text
+"config.status" shared@
+[
+  "active" [ ... ]
+  "pending" [ ... ]
+]
+switch
+```
+
+If `config.status` is known to have values `["active", "pending", "legacy"]`, the analyzer will emit a `non-exhaustive-switch` warning highlighting the missing `"legacy"` case. To fix this, either add the missing case or include a `"default"` branch.
+
 ## Match Structured Values
 
 Use `match` when the branch decision depends on structured data and you want a single pattern table instead of repeated `dict-get?`, `get-in?`, and `if` chains.
@@ -184,6 +206,21 @@ Current `match` semantics:
 - if no pattern matches and there is no wildcard case, `match` leaves no additional stack output and simply continues
 
 The current implementation is intentionally pragmatic. It is best suited to YAML-shaped routing and normalization cases where a small set of fields should be validated, tail-captured, and bound for later steps without dropping back to repeated `dict-get?`, `list-get?`, and `get-in?` plumbing.
+
+### Enum Exhaustiveness in `match`
+
+Like `switch`, `match` also supports exhaustiveness checking. If the subject has known enum values, every value must be covered by a literal pattern or a wildcard `_`.
+
+```text
+"config.kind" shared@
+[
+  [ "{kind: A}" yaml> ] [ ... ]
+  [ "{kind: B}" yaml> ] [ ... ]
+]
+match
+```
+
+If `kind` can be `A`, `B`, or `C`, the analyzer will flag this as `non-exhaustive-match`. Adding a `_` pattern at the end satisfies the exhaustiveness requirement.
 
 ## Validate And Coerce Structured Data
 
