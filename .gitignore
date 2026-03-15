@@ -22,3 +22,6 @@ Thumbs.db
 *.egg-info
 .pocketcode/state/sessions
 pocketcode.log
+.pocketstate/
+.pockethist/
+pocketcode.log

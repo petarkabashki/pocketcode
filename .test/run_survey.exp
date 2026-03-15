@@ -1,0 +1,33 @@
+#!/usr/bin/expect -f
+
+set timeout 30
+spawn bash -c "source .venv/bin/activate && pocketcode --auto-confirm-tools"
+
+expect "> "
+send "/flow agents.survey\r"
+
+expect "> "
+send "/start\r"
+
+expect "Survey Agent. Enter Title:"
+send "My Survey\r"
+
+expect "Enter a question (or blank to finish):"
+send "Question 1\r"
+
+expect "Enter a question (or blank to finish):"
+send "Question 2\r"
+
+expect "Enter a question (or blank to finish):"
+send "\r"
+
+expect "Question 1:"
+send "Answer 1\r"
+
+expect "Question 2:"
+send "Answer 2\r"
+
+expect "Survey complete"
+send "/exit\r"
+
+expect eof

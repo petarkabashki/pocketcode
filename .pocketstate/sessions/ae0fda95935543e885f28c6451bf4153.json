@@ -2,7 +2,7 @@
   "session_id": "ae0fda95935543e885f28c6451bf4153",
   "title": "Session 2026-03-15 01:38 UTC",
   "created_at": "2026-03-15T01:38:49.760200+00:00",
-  "updated_at": "2026-03-15T01:38:55.677406+00:00",
+  "updated_at": "2026-03-15T01:42:53.246531+00:00",
   "workspace_root": "/media/mu6mula/Data1/AI-Stuff/PocketCoder",
   "active_agent": "core.react",
   "active_profile": "my-react",
@@ -114,6 +114,214 @@
               "status": "completed",
               "parent_step_index": null,
               "duration_ms": 1657.793,
+              "summary": "Transition: final_answer",
+              "details": {
+                "agent": "core.react",
+                "execution_mode": "llm",
+                "outcome": {
+                  "transition": "final_answer"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "entry_id": "e38924578d1644ac8b43ad552a1cb5ca",
+      "timestamp": "2026-03-15T01:42:30.109215+00:00",
+      "role": "user",
+      "content": "what examples are available ?",
+      "run_id": "9f3df31020204d75aea838856afb361f",
+      "metadata": {
+        "agent": "core.react"
+      }
+    },
+    {
+      "entry_id": "916245dd81fc42988b4935b2b3d9fa04",
+      "timestamp": "2026-03-15T01:42:30.109882+00:00",
+      "role": "assistant",
+      "content": "No answer produced.",
+      "run_id": "9f3df31020204d75aea838856afb361f",
+      "metadata": {
+        "summary": {
+          "agent_path": [
+            "core.react"
+          ],
+          "current_agent": "core.react",
+          "active_skills": [
+            "pocketcode-namespace-authoring",
+            "pocketcode-profiles-prompts",
+            "pocketcode-tools-runtime",
+            "pocketcode-workspace-assets",
+            "pocketcode-workspace-builder"
+          ],
+          "current_llm_profile": null,
+          "current_llm_model": null,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_cost_usd": 0.0,
+          "vm_validation_warnings": [],
+          "vm_validation_warning_count": 0,
+          "vm_diagnostics": [],
+          "vm_diagnostic_count": 0,
+          "vm_effect_kinds": [],
+          "vm_max_stack_depth": 0,
+          "vm_final_min_stack_depth": 0,
+          "vm_final_stack_shape": [],
+          "vm_trace_scope_summaries": [],
+          "vm_trace_decisions": [],
+          "last_runtime_effect": null,
+          "last_vm_effect": null,
+          "last_vm_transition": null,
+          "runtime_effect_count": 0,
+          "runtime_effect_history": [],
+          "vm_effect_count": 0,
+          "vm_effect_history": [],
+          "stackvm_runtime": {
+            "path": "unknown",
+            "source": "unknown",
+            "standalone_session_active": false
+          },
+          "stackvm_static_runtime_correlation": {
+            "static_scope_count": 0,
+            "runtime_scope_count": 0,
+            "matched_scope_count": 0,
+            "matched_scopes": [],
+            "runtime_only_scopes": [],
+            "static_only_scopes": [],
+            "static_decision_scope_count": 0,
+            "runtime_decision_scope_count": 0,
+            "matched_decision_scope_count": 0,
+            "matched_decision_scopes": [],
+            "runtime_only_decision_scopes": [],
+            "static_only_decision_scopes": []
+          },
+          "standalone_session": null,
+          "context_stats": {
+            "files": 0,
+            "folders": 0,
+            "urls": 0,
+            "snippets": 0,
+            "snippet_chars": 0
+          },
+          "runtime_event_count": 3,
+          "step_count": 1,
+          "steps": [
+            {
+              "index": 1,
+              "kind": "agent_turn",
+              "label": "Agent turn: core.react",
+              "status": "completed",
+              "parent_step_index": null,
+              "duration_ms": 15112.182,
+              "summary": "Transition: final_answer",
+              "details": {
+                "agent": "core.react",
+                "execution_mode": "llm",
+                "outcome": {
+                  "transition": "final_answer"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "entry_id": "37909fc11bca4496bbd65c246a02a0c5",
+      "timestamp": "2026-03-15T01:42:53.246066+00:00",
+      "role": "user",
+      "content": "make a joke about cats",
+      "run_id": "135f0c2e8e4a4a7592a2a1011e64711d",
+      "metadata": {
+        "agent": "core.react"
+      }
+    },
+    {
+      "entry_id": "04788379e5764844b2db012472323e2e",
+      "timestamp": "2026-03-15T01:42:53.246524+00:00",
+      "role": "assistant",
+      "content": "Why was the cat sitting on the computer? Because it wanted to keep an eye on the mouse!",
+      "run_id": "135f0c2e8e4a4a7592a2a1011e64711d",
+      "metadata": {
+        "summary": {
+          "agent_path": [
+            "core.react"
+          ],
+          "current_agent": "core.react",
+          "active_skills": [
+            "pocketcode-namespace-authoring",
+            "pocketcode-profiles-prompts",
+            "pocketcode-tools-runtime",
+            "pocketcode-workspace-assets",
+            "pocketcode-workspace-builder"
+          ],
+          "current_llm_profile": null,
+          "current_llm_model": null,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_cost_usd": 0.0,
+          "vm_validation_warnings": [],
+          "vm_validation_warning_count": 0,
+          "vm_diagnostics": [],
+          "vm_diagnostic_count": 0,
+          "vm_effect_kinds": [],
+          "vm_max_stack_depth": 0,
+          "vm_final_min_stack_depth": 0,
+          "vm_final_stack_shape": [],
+          "vm_trace_scope_summaries": [],
+          "vm_trace_decisions": [],
+          "last_runtime_effect": null,
+          "last_vm_effect": null,
+          "last_vm_transition": null,
+          "runtime_effect_count": 0,
+          "runtime_effect_history": [],
+          "vm_effect_count": 0,
+          "vm_effect_history": [],
+          "stackvm_runtime": {
+            "path": "unknown",
+            "source": "unknown",
+            "standalone_session_active": false
+          },
+          "stackvm_static_runtime_correlation": {
+            "static_scope_count": 0,
+            "runtime_scope_count": 0,
+            "matched_scope_count": 0,
+            "matched_scopes": [],
+            "runtime_only_scopes": [],
+            "static_only_scopes": [],
+            "static_decision_scope_count": 0,
+            "runtime_decision_scope_count": 0,
+            "matched_decision_scope_count": 0,
+            "matched_decision_scopes": [],
+            "runtime_only_decision_scopes": [],
+            "static_only_decision_scopes": []
+          },
+          "standalone_session": null,
+          "context_stats": {
+            "files": 0,
+            "folders": 0,
+            "urls": 0,
+            "snippets": 0,
+            "snippet_chars": 0
+          },
+          "runtime_event_count": 3,
+          "step_count": 1,
+          "steps": [
+            {
+              "index": 1,
+              "kind": "agent_turn",
+              "label": "Agent turn: core.react",
+              "status": "completed",
+              "parent_step_index": null,
+              "duration_ms": 1492.319,
               "summary": "Transition: final_answer",
               "details": {
                 "agent": "core.react",
